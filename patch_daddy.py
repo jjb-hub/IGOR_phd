@@ -755,8 +755,8 @@ def plot_single_df_I_or_V_by_col (df_to_plot, y_label = 'V (mV) or I injected (p
 
     '''
     fig, ax = plt.subplots(1,1, figsize = (10, 8))
-    # for i in df_to_plot.columns:
-    for i in [ 14]:
+    for i in df_to_plot.columns:
+    # for i in [ 14]:
         print('I is = ', i)
         x_ = df_to_plot.iloc[:,i].tolist() #create list of values for each col 
         #quick plot all I steps free of APs
@@ -929,7 +929,7 @@ def plot_all_FI_curves(feature_df,  color_dict):
               # by_label = dict(zip(labels, handles))
               # ax.legend(by_label.values(), by_label.keys()) https://stackoverflow.com/questions/13588920/stop-matplotlib-repeating-labels-in-legend
 
-            ax.set_xlabel( "Current (nA)", fontsize = 15)
+            ax.set_xlabel( "Current (pA)", fontsize = 15)
             ax.set_ylabel( "AP frequency", fontsize = 15)
             ax.set_title( cell_ID_name + " FI curves", fontsize = 20)
             ax.legend(fontsize = 10)
@@ -979,7 +979,7 @@ def plot_FI_AP_curves(feature_df):
                   
               ax.plot(x, y, lw = 1, label = str(row['replication_no']) + " " + row['drug'] + str(np.round(v_rest)) + ' mV RMP', color = plt_color)
 
-            ax.set_xlabel( "Current (nA)", fontsize = 15)
+            ax.set_xlabel( "Current (pA)", fontsize = 15)
             ax.set_ylabel( "AP frequency", fontsize = 15)
             ax.set_title( cell_ID_name + " FI curves", fontsize = 20)
             ax.legend(fontsize = 10)
@@ -1024,7 +1024,6 @@ plot_FI_AP_curves(feature_df) #generated PDF with FI-AP for each cell
 
 #%%   EXPAND FEATURE_DF
 feature_df_ex = feature_df.copy()
-
 
 
 def apply_group_by_funcs(df, groupby_cols, handleFn):
@@ -1164,33 +1163,65 @@ def _getstats_FP(mouseline_drug_datatype, df, color_dict):
     return df
 
 def _plotwithstats_FP(mouseline_datatype, df, color_dict):
-    
+    global multi_page_pdf
     
     mouse_line, data_type = mouseline_datatype
     order = list(color_dict.keys()) #ploting in order of dict keys
     
     if data_type == 'AP': #if data type is not firing properties (FP then return df)
         return df
-    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df)
+    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
         return df
     
-    # generating plot by single file values e.g. max_firing or mean_voltage_threshold_file
-    
+    # bar plots generated for each drug group n=1 point per file 
     factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
-    names_to_plot = ['_max_firing_Hz', 'rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
+    names_to_plot = ['_max_firing_Hz', '_rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
     
     for _y, name in zip(factors_to_plot, names_to_plot):
-    
         sns_barplot_swarmplot (df, order, mouse_line, _x='drug', _y=_y, name = name)
     
-
     plt.close("all") #close open figures
     
     return df 
 
+
+def loopCombinations_stats(df):
+    global multi_page_pdf
+    multi_page_pdf = PdfPages('patch_daddy_output/FP_metrics_histogram.pdf')
+    #create a copy of file_folder column to use at end of looping to restore  origional row order !!! NEEDS TO BE DONE
+    # df_row_order = df['folder_file']
+    
+    #keepingin mind that the order is vital  as the df is passed through againeach one
+    combinations = [
+                    (["mouseline", "drug", "data_type"], _getstats_FP), #stats_df to be fed to next function mouseline 
+                    (["mouseline",  "data_type"], _plotwithstats_FP) #finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
+                    # (["cell_ID", "drug", "data_type"], _pAD_detector_AP)
+    ]
+
+    for col_names, handlingFn in combinations:
+        df = apply_group_by_funcs(df, col_names, handlingFn) #note that as each function is run the updated df is fed to the next function
+
+    multi_page_pdf.close()
+    # df[ order(match(df['folder_file'], df_row_order)) ]
+    return df
+
+#RUN
+multi_page_pdf = None
+
+feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
+
+#REMI: the df that i gave you is the current output here you can use it to rerun from this cell (currently i would like you to help me to understand how ot moidularise this cell as I am beginning to herad code shit) .... 
+# but actualy values you will not be able to work on until the OG PatchData file is online in inputs to code i.e. a good place tp start would be the funcion for potting bellow and how I have set thete here .... 
+
+#%% FUNCS FOR PLOTING POST STATS working...
+
 def sns_barplot_swarmplot (df, order, mouse_line, _x='drug', _y='max_firing', name = '_max_firing_Hz'):
     '''
     Generates figure and plot and saves to patch_daddy_output/
+    
+    ##FIX ME : 
+            be able to chose error bar: whn i use errorbar = 'cd' AttributeError: 'Rectangle' object has no property 'errorbar'
+            PRE dots should be the colout of the drug treatments corrispoinding to their first treatment 
     '''
     fig, axs = plt.subplots(1,1, figsize = (20, 10))
     sns.barplot(data = df, x=_x, y=_y,  order=order, palette=color_dict, capsize=.1, 
@@ -1200,171 +1231,11 @@ def sns_barplot_swarmplot (df, order, mouse_line, _x='drug', _y='max_firing', na
     axs.set_ylabel( name, fontsize = 20)
     axs.set_title( mouse_line + name + '  (CI 95%)', fontsize = 30)
     
-    fig.savefig('patch_daddy_output/' + mouse_line + name + '.pdf')
-    
+    # fig.savefig('patch_daddy_output/' + mouse_line + name + '.pdf')
+    multi_page_pdf.savefig()
     return
 
-def loopCombinations_stats(df):
-    #create a copy of file_folder column to use at end of looping to restore  origional row order !!! NEEDS TO BE DONE
-    
-    #keepingin mind that the order is vital  as the df is passed through againeach one
-    combinations = [
-                    (["mouseline", "drug", "data_type"], _getstats_FP), #stats_df to be fed to next function mouseline 
-                    (["mouseline",  "data_type"], _plotwithstats_FP) #finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
-                    # (["cell_ID", "drug", "data_type"], _plotstats_FP)
-    ]
-    
-    # pdf = PdfPages('patch_daddy_output.pdf') # open pdf for plotsto be saved in
-    # pdf.savefig(fig)
-    # pdf.close()
 
-    for col_names, handlingFn in combinations:
-
-    
-        df = apply_group_by_funcs(df, col_names, handlingFn) #note that as each function is run the updated df is fed to the next function
-    
-    
-    
-    return df
-
-#RUN
-feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
-
-#REMI: the df that i gave you is the current output here you can use it to rerun from this cell (currently i would like you to help me to understand how ot moidularise this cell as I am beginning to herad code shit) .... 
-# but actualy values you will not be able to work on until the OG PatchData file is online in inputs to code
-
-#%% EXPANDIN DF ALTERNATE SOLOUTION //// insecured to delete stats  plot structure
-def apply_group_by_funcs(df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
-    res_dfs_li = [] #list of dfs
-    for group_info, group_df in df.groupby(groupby_cols):
-        
-        # print("group_info:", group_info, "Group len:", len(group_df))
-        res_df = handleFn(group_info, group_df)
-        res_dfs_li.append(res_df)
-        
-    new_df = pd.concat(res_dfs_li)
-    return new_df
-
-
-
-def _getstats(mouse_line_drug, df):
-    mouse_line, drug = mouse_line_drug
-    # fp_idx = cell_df.data_type == "FP" #indexes of FP data in cell_df
-    # cell_df.loc[fp_idx, "new_col"] = calcValue()
-    df = df.copy()
-    df['mean_max_firing'] = df['max_firing'].mean() #dealing with pd.series a ingld df column
-    df['mean_voltage_thresh'] = df.voltage_threshold.apply(np.mean) #apply 'loops' through the slied df and applies the function np.mean
-    return df
-
-
-    # list_of_all_cell_IDs = list(df['cell_ID'])
-    # unique_mouse_line =  [list_of_all_cell_IDs[i][0:3] for i in range(len(list_of_all_cell_IDs))]
-    # unique_mouse_line = np.unique(unique_mouse_line)
-    
-    # unique_drug_list = [] #do same as above 
-    
-    # unique_condition_list = [unique_mouse_line, unique_drug_list]
-    
-    # #  dj pseudo
-    # for mouseline in unique_mouse_line:
-    #     df_ = df[df['cell_ID'].str[:3] == mouseline]
-        
-        
-    #     #[x for l in list for x in l]
-        
-    #     # once df is sliced we perwrform some plots and stats
-    #     # look at voltage threshold
-    #     list_list_voltage_threshold =[*df_['voltage_threshold']]
-    #     list_voltage_threshold = []
-    #     for idx in range(len(list_list_voltage_threshold )):
-    #         list_voltage_threshold  += list_list_voltage_threshold[idx]
-        
-    #         plt.plot(list_voltage_threshold, label = mouseline)
-    #     plt.legend()
-    #     plt.show()
-            
-        
-    #     return None 
-    
-def loopCombinations_stats(df):
-    
-    combinations = [
-                    (["mouseline", "drug"], _getstats), #stats_df to be fed to next function 
-                    (["mouseline", "drug"], _plotwithstats)#finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
-                    #(["cell_type", "drug"], _poltbygroup) #same as df.apply as folder_file is unique for each row
-    ]
-    
-    # df_stat = df.copy()
-    for col_names, handlingFn in combinations:
-        
-#here would be adding to the df and 
-        # #creating new df roto be fed to next func
-        # df_stat = apply_group_by_funcs(df_stat, col_names, handlingFn) #handel function is the generic function to be applied to different column group by
-        
-        #expand the df expanded
-        df = apply_group_by_funcs(df, col_names, handlingFn) #handel function is the generic function to be applied to different column group by
-
-  
-    
-    return df
-
-#RUN
-feature_df_ex_tau = loopCombinations(feature_df_ex)
-
-# feature_df_ex_tau.to_csv('middle_TCB_data.xls')
-
-
-# #MAXs soloution
-# #add emptyy columns to append extracted values to FP data 
-# feature_df = feature_df.assign(max_firing=np.NaN, 
-#                                rheobased_threshold = np.NaN, 
-#                                voltag_threshold = np.NaN, 
-#                                AP_height = np.NaN, 
-#                                AP_width = np.NaN, 
-#                                AP_slope = np.NaN, 
-#                                FI_slope = np.NaN, 
-#                                tau_rc = np.NaN, 
-#                                sag = np.NaN)
-
-
-
-# # combinations = feature_df.folder_file.unique()
-
-# combinations = product(feature_df.data_type.unique(),
-#                 feature_df.drug.unique())
-
-
-# for data_type, drug in combinations:
-    
-#     #take slice of data 
-#     sliced_df= feature_df.loc[(feature_df.data_type== 'FP') &
-#                               (feature_df.drug == 'PRE')]
-    
-#     # sliced_df= feature_df.loc[(feature_df.folder_file== file ) ] # single row
-    
-#     print(sliced_df.data_type)
-
-#     if sliced_df.data_type[0] == 'FP' :
-#         print('hi')
-    
-    
-#     or 'FP_AP':
-        
-#         path = 
-#         func
-#         folder_file = ' '  
-#         out = []
-#         ...
-        
-#     elif data_type == 'AP':
-#         continue
-
-
-#     # call on a specific set of rows and set to whatever 
-#     feature_df = feature_df.loc[(feature_df.data_type==a) &
-#                    (feature_df.drug == b), 'max_firing'] = max_firing
-
-              
 #%%TEST PATHS / FUNCS
 
 #FP tester paths 
