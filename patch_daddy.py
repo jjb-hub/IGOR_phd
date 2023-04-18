@@ -1230,7 +1230,7 @@ def loopCombinations_stats(df):
 #RUN
 feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
 
-
+#REMI: the df that i gave you is the current output here you can use it to rerun from this cell forward .... butnactualy values you will not be able to work on until the OG PatchData file is online in inputs to code
 
 #%% EXPANDIN DF ALTERNATE SOLOUTION //// insecured to delete stats  plot structure
 def apply_group_by_funcs(df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
