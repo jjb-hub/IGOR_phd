@@ -28,6 +28,9 @@ This code is to handel data collected in current clamp from Igor stored as .ibw 
         IV_curve_slope: 
         pAD: T/F
         
+3 PLOTTING OF INTRINSIC PROPERTIES
+
+4 DETECTION AND PLOTTING OF pAD APs
         
 """
 #%% IMPORTS
@@ -1057,7 +1060,7 @@ def reject_outliers(data, m = 2.):
 #%% PLOTTING FUNCS: AP, FI, FI_AP, pAD
 
 # https://www.google.com/search?q=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&rlz=1C5CHFA_enAU794AU794&sxsrf=APwXEdcAmrqZK5nDrVeiza4rtKgMqeIQKQ%3A1681904232199&ei=aNI_ZMvLC_KTxc8P7Z-a-A8&ved=0ahUKEwjLn7nC7bX-AhXySfEDHe2PBv8Q4dUDCA8&uact=5&oq=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&gs_lcp=Cgxnd3Mtd2l6LXNlcnAQAzoKCAAQRxDWBBCwAzoECCMQJzoHCCMQsAIQJzoFCAAQogRKBAhBGABQ_gRYuWpgwmtoBHABeACAAacBiAGiHZIBBDEuMjiYAQCgAQHIAQjAAQE&sclient=gws-wiz-serp#bsht=CgRmYnNtEgQIBDAB&kpvalbx=_oNI_ZJSCFPbOxc8Pwf-MkA8_30
-# add the I injected as a subplot to show the AP method
+# add the I injected as a subplot to show the AP method #FIX ME 
 def drug_aplication_visualisation(feature_df,  color_dict):
     '''
     Plots continuious points (sweeps combined, voltage data)
@@ -1095,7 +1098,7 @@ def drug_aplication_visualisation(feature_df,  color_dict):
             axs.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
             axs.set_xlabel( "Time (s)", fontsize = 15)
             axs.set_ylabel( "Membrane Potential (mV)", fontsize = 15)
-            axs.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Aplication" + " (" + str(row['aplication_order']) + ")", fontsize = 25)
+            axs.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 25)
             pdf.savefig(fig)
             plt.close("all")
     stop = timeit.default_timer()
@@ -1390,7 +1393,7 @@ def _handleFile(row): #takes a row of the df (a single file) and extractes value
         row["AP_height"] = peak_heights_all
         row["AP_width"] = peak_fw_all
         row["AP_slope"] = peak_slope_all 
-
+        row["AP_latencie"] = peak_latencies_all
         #not yet working    #UnboundLocalError: local variable 'last_current_point' referenced before assignment
         #extract_FI_x_y has been used differently by DJ check this is correct  # step_current_values  == x
         tau_all         =  tau_analyser(V_array, I_array, x, plotting_viz= False, analysis_mode = 'max')
@@ -1485,7 +1488,30 @@ def _getstats_FP(mouseline_drug_datatype, df, color_dict):
     
     return df
 
-def _plotwithstats_FP(mouseline_datatype, df, color_dict):
+def _plotwithstats_FP(cell_type_datatype, df, color_dict):
+    global multi_page_pdf
+    
+    cell_type, data_type = cell_type_datatype
+    order = list(color_dict.keys()) #ploting in order of dict keys
+    
+    if data_type == 'AP': #if data type is not firing properties (FP then return df)
+        return df
+    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
+        return df
+    
+    # bar plots generated for each drug group n=1 point per file 
+    factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
+    names_to_plot = ['_max_firing_Hz', '_rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
+    
+    for _y, name in zip(factors_to_plot, names_to_plot):
+        sns_barplot_swarmplot (df, order, cell_type, _x='drug', _y=_y, name = name)
+    
+    plt.close("all") #close open figures
+    
+    return df 
+
+
+def _plotwithstats_FP_mouseline(mouseline_datatype, df, color_dict):
     global multi_page_pdf
     
     mouse_line, data_type = mouseline_datatype
@@ -1507,7 +1533,6 @@ def _plotwithstats_FP(mouseline_datatype, df, color_dict):
     
     return df 
 
-
 def loopCombinations_stats(df):
     global multi_page_pdf
     multi_page_pdf = PdfPages('patch_daddy_output/FP_metrics_histogram.pdf')
@@ -1517,7 +1542,8 @@ def loopCombinations_stats(df):
     #keepingin mind that the order is vital  as the df is passed through againeach one
     combinations = [
                     (["mouseline", "drug", "data_type"], _getstats_FP), #stats_df to be fed to next function mouseline 
-                    (["mouseline",  "data_type"], _plotwithstats_FP) #finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
+                    (["cell_type",  "data_type"], _plotwithstats_FP)
+                    # (["mouseline",  "data_type"], _plotwithstats_mouseline_FP) #finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
                     # (["cell_ID", "drug", "data_type"], _pAD_detector_AP)
     ]
 
@@ -1573,13 +1599,13 @@ path_V = '/Users/jasminebutler/Desktop/PatchData/JJB230222/t17Soma.ibw'
 _, dfV = igor_exporter(path_V)
 _, dfI = igor_exporter(path_I)
 
-plot_single_df_I_or_V_by_col (dfV.iloc[:, 0:4], y_label = 'V (mV)') ### fix me : can only section df from 0:x otherwise IndexError: single positional indexer is out-of-bounds
+plot_single_df_I_or_V_by_col (dfV.iloc[:, 0:8], y_label = 'V (mV)') ### fix me : can only section df from 0:x otherwise IndexError: single positional indexer is out-of-bounds
 plot_single_df_I_or_V_by_col (dfI.iloc[:,0:1], y_label = 'I injected (pA)')
 
 
 #pAD for V_df of AP 
 peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, X_pca = pAD_detection(dfV, pca_plotting = True , kmeans_plotting = True , histogram_plotting=True)
 
-#working for :  JJB221230/t7, JJB210401/t6 , JJB230411/t10
+#working for :  JJB221230/t7, JJB210401/t6 , JJB230411/t10, JJB230222/t5
 
 
