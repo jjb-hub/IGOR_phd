@@ -1393,7 +1393,7 @@ def _handleFile(row): #takes a row of the df (a single file) and extractes value
         row["AP_height"] = peak_heights_all
         row["AP_width"] = peak_fw_all
         row["AP_slope"] = peak_slope_all 
-        row["AP_latencie"] = peak_latencies_all
+        row["AP_latency"] = peak_latencies_all
         #not yet working    #UnboundLocalError: local variable 'last_current_point' referenced before assignment
         #extract_FI_x_y has been used differently by DJ check this is correct  # step_current_values  == x
         tau_all         =  tau_analyser(V_array, I_array, x, plotting_viz= False, analysis_mode = 'max')
@@ -1445,123 +1445,6 @@ feature_df_expanded_raw = loopCombinations(feature_df_ex)
 
 # feature_df_ex_tau.to_csv('middle_TCB_data.xls')
 
-#%% stats/plotting 
-
-def apply_group_by_funcs(df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
-    res_dfs_li = [] #list of dfs
-    for group_info, group_df in df.groupby(groupby_cols):
-        
-        res_df = handleFn(group_info, group_df, color_dict)
-        res_dfs_li.append(res_df)
-        
-    new_df = pd.concat(res_dfs_li)
-    return new_df
-
-
-
-def _getstats_FP(mouseline_drug_datatype, df, color_dict):
-    
-    mouse_line, drug, data_type = mouseline_drug_datatype
-    
-    if data_type == 'AP': #if data type is not firing properties (FP then return df)
-            return df
-        
-    df = df.copy()
-    #for entire mouseline_drug combination
-    df['mean_max_firing'] = df['max_firing'].mean() #dealing with pd.series a single df column
-    df['SD_max_firing'] = df['max_firing'].std()
-    
-    df['mean_FI_slope'] = df['FI_slope'].mean() #dealing with pd.series a single df column
-    df['SD_FI_slope'] = df['FI_slope'].std()
-    
-    df['mean_rheobased_threshold'] =df['rheobased_threshold'].mean()
-    
-    #AP Charecteristics i.e. mean/SD e.c.t. for a single file (replications not combined consider STATISTICAL IMPLICATIONS FORPLOTTING)
-    df['mean_voltage_threshold_file'] = df.voltage_threshold.apply(np.mean) #apply 'loops' through the slied df and applies the function np.mean
-    df['SD_voltage_threshold_file'] = df.voltage_threshold.apply(np.std)
-    
-    df['mean_AP_height_file'] = df.AP_height.apply(np.mean)
-    
-    df['mean_AP_slope_file'] = df.AP_slope.apply(np.mean)
-    
-    df['mean_AP_width'] = df.AP_width.apply(np.mean)
-    
-    return df
-
-def _plotwithstats_FP(cell_type_datatype, df, color_dict):
-    global multi_page_pdf
-    
-    cell_type, data_type = cell_type_datatype
-    order = list(color_dict.keys()) #ploting in order of dict keys
-    
-    if data_type == 'AP': #if data type is not firing properties (FP then return df)
-        return df
-    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
-        return df
-    
-    # bar plots generated for each drug group n=1 point per file 
-    factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
-    names_to_plot = ['_max_firing_Hz', '_rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
-    
-    for _y, name in zip(factors_to_plot, names_to_plot):
-        sns_barplot_swarmplot (df, order, cell_type, _x='drug', _y=_y, name = name)
-    
-    plt.close("all") #close open figures
-    
-    return df 
-
-
-def _plotwithstats_FP_mouseline(mouseline_datatype, df, color_dict):
-    global multi_page_pdf
-    
-    mouse_line, data_type = mouseline_datatype
-    order = list(color_dict.keys()) #ploting in order of dict keys
-    
-    if data_type == 'AP': #if data type is not firing properties (FP then return df)
-        return df
-    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
-        return df
-    
-    # bar plots generated for each drug group n=1 point per file 
-    factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
-    names_to_plot = ['_max_firing_Hz', '_rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
-    
-    for _y, name in zip(factors_to_plot, names_to_plot):
-        sns_barplot_swarmplot (df, order, mouse_line, _x='drug', _y=_y, name = name)
-    
-    plt.close("all") #close open figures
-    
-    return df 
-
-def loopCombinations_stats(df):
-    global multi_page_pdf
-    multi_page_pdf = PdfPages('patch_daddy_output/FP_metrics_histogram.pdf')
-    #create a copy of file_folder column to use at end of looping to restore  origional row order !!! NEEDS TO BE DONE
-    # df_row_order = df['folder_file']
-    
-    #keepingin mind that the order is vital  as the df is passed through againeach one
-    combinations = [
-                    (["mouseline", "drug", "data_type"], _getstats_FP), #stats_df to be fed to next function mouseline 
-                    (["cell_type",  "data_type"], _plotwithstats_FP)
-                    # (["mouseline",  "data_type"], _plotwithstats_mouseline_FP) #finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
-                    # (["cell_ID", "drug", "data_type"], _pAD_detector_AP)
-    ]
-
-    for col_names, handlingFn in combinations:
-        df = apply_group_by_funcs(df, col_names, handlingFn) #note that as each function is run the updated df is fed to the next function
-
-    multi_page_pdf.close()
-    # df[ order(match(df['folder_file'], df_row_order)) ]
-    return df
-
-#RUN
-multi_page_pdf = None
-
-feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
-
-#REMI: the df that i gave you is the current output here you can use it to rerun from this cell (currently i would like you to help me to understand how ot moidularise this cell as I am beginning to herad code shit) .... 
-# but actualy values you will not be able to work on until the OG PatchData file is online in inputs to code i.e. a good place tp start would be the funcion for potting bellow and how I have set thete here .... 
-
 #%% FUNCS FOR PLOTING POST STATS working...
 
 def sns_barplot_swarmplot (df, order, mouse_line, _x='drug', _y='max_firing', name = '_max_firing_Hz'):
@@ -1584,6 +1467,159 @@ def sns_barplot_swarmplot (df, order, mouse_line, _x='drug', _y='max_firing', na
     multi_page_pdf.savefig()
     return
 
+#%% stats/plotting 
+
+def apply_group_by_funcs(df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
+    res_dfs_li = [] #list of dfs
+    for group_info, group_df in df.groupby(groupby_cols):
+        
+        res_df = handleFn(group_info, group_df, color_dict)
+        res_dfs_li.append(res_df)
+        
+    new_df = pd.concat(res_dfs_li)
+    return new_df
+
+
+
+def _getstats_FP(celltype_drug_datatype, df, color_dict):
+    #this functuon should colaps all metrics to a single value for each file i.e. lists become a mean ect.
+    cell_type, drug, data_type = celltype_drug_datatype
+    
+    if data_type == 'AP': #if data type is not firing properties (FP then return df)
+            return df
+        
+    df = df.copy()
+
+    #AP Charecteristics i.e. mean/SD e.c.t. for a single file (replications not combined consider STATISTICAL IMPLICATIONS FORPLOTTING)
+    df['mean_voltage_threshold_file'] = df.voltage_threshold.apply(np.mean) #apply 'loops' through the slied df and applies the function np.mean
+    df['mean_AP_height_file'] = df.AP_height.apply(np.mean)
+    df['mean_AP_slope_file'] = df.AP_slope.apply(np.mean)
+    df['mean_AP_width'] = df.AP_width.apply(np.mean)
+    df['mean_AP_latency'] = df.AP_latency.apply(np.mean)
+    
+    # df['SD_voltage_threshold_file'] = df.voltage_threshold.apply(np.std)
+    
+    #Tau and Sag colapse to lowest value
+    
+    #older peans by grouping  probably redundant 
+        # #for entire celltype_drug_datatype combination calculate te mean this needs to be moved to where the stats are calculated or a df is saved
+    # df['mean_max_firing'] = df['max_firing'].mean() #dealing with pd.series a single df column
+    # df['SD_max_firing'] = df['max_firing'].std()
+
+    # df['mean_FI_slope'] = df['FI_slope'].mean() #dealing with pd.series a single df column
+    # df['SD_FI_slope'] = df['FI_slope'].std()
+    
+    # # df['mean_rheobased_threshold'] =df['rheobased_threshold'].mean()
+    
+    
+    return df
+
+def _plotwithstats_FP(celltype_datatype, df, color_dict):
+    global multi_page_pdf
+    
+    cell_type, data_type = celltype_datatype
+    
+    
+    if data_type == 'AP': #if data type is not firing properties (FP then return df)
+        return df
+    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
+        return df
+        
+    order = list(color_dict.keys()) #ploting in order of dict keys
+    cell_id_list = list(df['cell_ID'].unique())
+    drug_list = list(df['drug'].unique())
+    
+    first_drug_list = []
+    df['first_drug_AP'] = ''
+    for cell_id in cell_id_list:
+        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only
+         
+        #create a column for  specifying the first drug applied for each cell
+        first_drug_series = cell_df.loc[df['aplication_order'] == 1, 'drug']  
+        first_drug_string = first_drug_series.all() #as all values are the same *should be* will return a string of the value 'DMT' #HATIEEM : returning boolian True sometimes?
+        
+        first_drug_list.append(first_drug_string)
+        
+        if first_drug_string == True:
+            print( first_drug_series)
+        
+        
+       
+        df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
+        # df[df.SomdCol == some_val, 'col_to_set'] = new_val
+
+            
+     #student t test pre = p[] drug = p[]    
+    
+    
+
+    # get PRE drug relevant to cell and use to colout plot 
+    
+        
+    
+    # bar plots generated for each drug group n=1 point per file 
+    factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
+    names_to_plot = ['_max_firing_Hz', '_rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
+    
+    for _y, name in zip(factors_to_plot, names_to_plot):
+        sns_barplot_swarmplot (df, order, cell_type, _x='drug', _y=_y, name = name)
+    
+    plt.close("all") #close open figures
+    
+
+    
+    return df 
+
+
+def _generatedata_student_t_paired(cellid_drug_datatype, df, color_dict):
+    
+    #for each cellid_drug_datatype I need a single value for a metric to do testing on 
+
+    
+    cell_id, drug , data_type = cellid_drug_datatype
+    
+    if data_type == 'AP': #if data type is not firing properties (FP then return df)
+        return df
+    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
+        return df
+   
+    df['max_firing_cell_drug'] = df['max_firing'].mean()
+    
+   
+   
+    return df 
+
+def loopCombinations_stats(df):
+    global multi_page_pdf
+    multi_page_pdf = PdfPages('patch_daddy_output/FP_metrics_histogram.pdf')
+    #create a copy of file_folder column to use at end of looping to restore  origional row order !!! NEEDS TO BE DONE
+    # df_row_order = df['folder_file']
+    
+    #finding all combination in df and applying a function to them 
+    #keepingin mind that the order is vital  as the df is passed through againeach one
+    combinations = [
+                    (["cell_type", "drug", "data_type"], _getstats_FP),
+                    (["cell_ID", "drug",  "data_type"], _generatedata_student_t_paired), #stats_df to be fed to next function mouseline 
+                    (["cell_type",  "data_type"], _plotwithstats_FP)
+                     
+                    # (["cell_ID", "drug", "data_type"], _pAD_detector_AP)
+    ]
+
+    for col_names, handlingFn in combinations:
+        df = apply_group_by_funcs(df, col_names, handlingFn) #note that as each function is run the updated df is fed to the next function
+
+    multi_page_pdf.close()
+    # df[ order(match(df['folder_file'], df_row_order)) ]
+    return df
+
+#RUN
+multi_page_pdf = None
+
+feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
+
+#PLANTZ
+#get a single mean value for each  metric to be statisticly compared by a student t-test (cell_PRE, cell_POST), 
+#t test will then compare within a cell_type the lists 
 
 #%%TEST PATHS / FUNCS
 
