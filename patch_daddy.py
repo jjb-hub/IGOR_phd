@@ -1088,7 +1088,8 @@ def drug_aplication_visualisation(feature_df,  color_dict):
             path_V, path_I = make_path(row['folder_file'])
             y, df_y = igor_exporter(path_V) # df_y each sweep is a column
             fig, axs = plt.subplots(1,1, figsize = (10, 5))
-            
+            # fig, axs = plt.subplots(1,2, figsize = (10, 5)) to make subplot ?
+  
             x_scaler_drug_bar = len(df_y[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
             x = np.arange(len(y)) * 0.0001 #sampeling at 10KHz will give time in seconds
             
@@ -1467,7 +1468,8 @@ def sns_barplot_swarmplot (df, order, mouse_line, _x='drug', _y='max_firing', na
     multi_page_pdf.savefig()
     return
 
-#%% stats/plotting 
+
+#%% STATS/PLOTTING WAS WORKING 
 
 def apply_group_by_funcs(df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
     res_dfs_li = [] #list of dfs
@@ -1481,7 +1483,7 @@ def apply_group_by_funcs(df, groupby_cols, handleFn): #creating a list of new va
 
 
 
-def _getstats_FP(celltype_drug_datatype, df, color_dict):
+def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
     #this functuon should colaps all metrics to a single value for each file i.e. lists become a mean ect.
     cell_type, drug, data_type = celltype_drug_datatype
     
@@ -1506,70 +1508,8 @@ def _getstats_FP(celltype_drug_datatype, df, color_dict):
     # df['mean_max_firing'] = df['max_firing'].mean() #dealing with pd.series a single df column
     # df['SD_max_firing'] = df['max_firing'].std()
 
-    # df['mean_FI_slope'] = df['FI_slope'].mean() #dealing with pd.series a single df column
-    # df['SD_FI_slope'] = df['FI_slope'].std()
-    
-    # # df['mean_rheobased_threshold'] =df['rheobased_threshold'].mean()
-    
     
     return df
-
-def _plotwithstats_FP(celltype_datatype, df, color_dict):
-    global multi_page_pdf
-    
-    cell_type, data_type = celltype_datatype
-    
-    
-    if data_type == 'AP': #if data type is not firing properties (FP then return df)
-        return df
-    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
-        return df
-        
-    order = list(color_dict.keys()) #ploting in order of dict keys
-    cell_id_list = list(df['cell_ID'].unique())
-    drug_list = list(df['drug'].unique())
-    
-    first_drug_list = []
-    df['first_drug_AP'] = ''
-    for cell_id in cell_id_list:
-        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only
-         
-        #create a column for  specifying the first drug applied for each cell
-        first_drug_series = cell_df.loc[df['aplication_order'] == 1, 'drug']  
-        first_drug_string = first_drug_series.all() #as all values are the same *should be* will return a string of the value 'DMT' #HATIEEM : returning boolian True sometimes?
-        
-        first_drug_list.append(first_drug_string)
-        
-        if first_drug_string == True:
-            print( first_drug_series)
-        
-        
-       
-        df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
-        # df[df.SomdCol == some_val, 'col_to_set'] = new_val
-
-            
-     #student t test pre = p[] drug = p[]    
-    
-    
-
-    # get PRE drug relevant to cell and use to colout plot 
-    
-        
-    
-    # bar plots generated for each drug group n=1 point per file 
-    factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
-    names_to_plot = ['_max_firing_Hz', '_rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
-    
-    for _y, name in zip(factors_to_plot, names_to_plot):
-        sns_barplot_swarmplot (df, order, cell_type, _x='drug', _y=_y, name = name)
-    
-    plt.close("all") #close open figures
-    
-
-    
-    return df 
-
 
 def _generatedata_student_t_paired(cellid_drug_datatype, df, color_dict):
     
@@ -1584,23 +1524,156 @@ def _generatedata_student_t_paired(cellid_drug_datatype, df, color_dict):
         return df
    
     df['max_firing_cell_drug'] = df['max_firing'].mean()
-    
-   
-   
+
     return df 
+
+
+def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
+    global multi_page_pdf
+    
+    cell_type, data_type = celltype_datatype
+    
+    
+    if data_type == 'AP': #if data type is not firing properties (FP then return df)
+        return df
+    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
+        return df
+
+
+    df['first_drug_AP'] = ''  #create a column for  specifying the first drug applied for each cell
+    
+    #listsfor _statistical_df
+    cell_id_list = list(df['cell_ID'].unique())
+    PRE_ = []
+    POST_ = []
+    first_drug_ = []
+    
+    for cell_id in cell_id_list:
+        
+        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only
+
+        first_drug_series = cell_df.loc[df['application_order'] == 1, 'drug'] 
+        
+        # first_drug_string = first_drug_series.all() #as all values are the same *should be* will return a string of the value 'DMT' #HATIEEM : returning boolian True sometimes? or use #.unique() and if len()==1 
+        # if first_drug_string == True:
+        #     second_drug_series = cell_df.loc[df['application_order'] == 2, 'drug'] 
+        #     first_drug_string = 'NaN'
+        #     print( 'empty series: looking for second drug applied', second_drug_series)
+            
+            
+        first_drug_string = first_drug_series.unique()[0] #need check here for len() == 1
+
+        df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
+        
+        
+        PRE = cell_df.loc[cell_df['drug'] == 'PRE', 'max_firing_cell_drug'] #REMOVE HARD CODE
+        POST = cell_df.loc[cell_df['application_order'] == 1, 'max_firing_cell_drug' ]
+        PRE = PRE.unique()
+        POST = POST.unique()
+        
+        if len(PRE) ==1 & len(POST) ==1 :
+            PRE_.append(float(PRE))
+            POST_.append(float(POST))
+            first_drug_.append(first_drug_string)
+        else:
+            print('error in data : values for single cell_drug not congruent' )
+            print('PRE = ', PRE)
+            print('POST = ', POST)
+            PRE_.append('NaN')   
+            POST_.append('NaN')
+            first_drug_.append(first_drug_string)
+    
+    #create statistical df for celltype with all raw data for single value type e.g. max firing
+    statistical_df = pd.DataFrame({'cell_ID': cell_id_list,
+                                  'drug': first_drug_,
+                                  'PRE': PRE_,
+                                  'POST': POST_
+                                  })
+    print(statistical_df)
+    # statistical_df.to_csv('statistical_df.csv')
+    
+    ###PLOTTING start for cell_type property plot
+    df_only_first_app = df.loc[df['application_order'] <= 1] #only include first drug application data 
+    
+    order_dict = list(color_dict.keys()) #ploting in order of dict keys
+    order_me = list(df_only_first_app['drug'].unique())
+    order = [x for x in order_dict if x in order_me]
+
+    fig, axs = plt.subplots(1,1, figsize = (20, 10))
+    
+    student_t_df_list = []
+    for drug, drug_df in statistical_df.groupby('drug'):
+        print(drug_df)
+        T_stat, p_val = scipy.stats.ttest_rel(drug_df['PRE'], drug_df['POST']) #H0: two related or repeated samples have identical average (expected) values
+        student_t_df_row = [cell_type, drug, T_stat, p_val]
+        student_t_df_list.append(student_t_df_row)
+        
+    student_t_df = pd.DataFrame(student_t_df_list, columns = ['cell_type', 'drug', 't_stat', 'p_val' ])     
+    print (student_t_df)
+
+    
+        
+    sns.barplot(data = df_only_first_app, x='drug', y='max_firing',  order=order, palette=color_dict, capsize=.1, 
+                         alpha=0.8, errcolor=".2", edgecolor=".2" )
+    sns.swarmplot(data = df_only_first_app,x='drug', y='max_firing', order=order, palette=color_dict,  hue= 'first_drug_AP', linewidth=1, linestyle='-')  #, legend=False #would like to remove legend 
+    #add stats from student t_test above
+    
+    axs.set_xlabel( "Drug applied", fontsize = 20)
+    axs.set_ylabel( 'Firing (Hz)', fontsize = 20)
+    axs.set_title( cell_type + 'Firing (Hz)' + '  (CI 95%)', fontsize = 30) 
+    multi_page_pdf.savefig() #save barplot
+    plt.close("all")
+    
+    #https://stackoverflow.com/questions/53828284/how-to-save-pandas-dataframe-into-existing-pdf-from-pdfpages #style
+    fig, ax = plt.subplots()# save student_t_test
+    table = ax.table(cellText=student_t_df.values, colLabels=student_t_df.columns, loc='center')
+    table.set_fontsize(14)
+    table.scale(1,4)
+    ax.axis('off')
+    multi_page_pdf.savefig()
+    plt.close("all")
+    
+
+    
+    return df 
+
+def _plotwithstats_FP(celltype_datatype, df, color_dict):
+    global multi_page_pdf
+    
+    cell_type, data_type = celltype_datatype
+    order = list(color_dict.keys()) #ploting in order of dict keys
+    
+    if data_type == 'AP': #if data type is not firing properties (FP then return df)
+        return df
+    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
+        return df
+    
+    # get PRE drug relevant to cell and use to colout plot  + GET STATS
+
+
+    # bar plots generated for each drug group n=1 point per file 
+    factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
+    names_to_plot = ['_max_firing_Hz', '_rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
+    
+    for _y, name in zip(factors_to_plot, names_to_plot):
+        sns_barplot_swarmplot (df, order, cell_type, _x='drug', _y=_y, name = name)
+    
+    plt.close("all") #close open figures
+    return df 
+
 
 def loopCombinations_stats(df):
     global multi_page_pdf
-    multi_page_pdf = PdfPages('patch_daddy_output/FP_metrics_histogram.pdf')
+    multi_page_pdf = PdfPages('patch_daddy_output/FP_metrics_.pdf')
     #create a copy of file_folder column to use at end of looping to restore  origional row order !!! NEEDS TO BE DONE
     # df_row_order = df['folder_file']
     
     #finding all combination in df and applying a function to them 
     #keepingin mind that the order is vital  as the df is passed through againeach one
     combinations = [
-                    (["cell_type", "drug", "data_type"], _getstats_FP),
+                    (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP),
                     (["cell_ID", "drug",  "data_type"], _generatedata_student_t_paired), #stats_df to be fed to next function mouseline 
-                    (["cell_type",  "data_type"], _plotwithstats_FP)
+                    (["cell_type",  "data_type"], _prep_plotwithstats_FP)
                      
                     # (["cell_ID", "drug", "data_type"], _pAD_detector_AP)
     ]
@@ -1613,13 +1686,13 @@ def loopCombinations_stats(df):
     return df
 
 #RUN
-multi_page_pdf = None
+
+#cell_type is used s an exclusion
+multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
 
 feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
 
-#PLANTZ
-#get a single mean value for each  metric to be statisticly compared by a student t-test (cell_PRE, cell_POST), 
-#t test will then compare within a cell_type the lists 
+
 
 #%%TEST PATHS / FUNCS
 
