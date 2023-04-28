@@ -1086,14 +1086,85 @@ def drug_aplication_visualisation(feature_df,  color_dict):
         for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
         
             path_V, path_I = make_path(row['folder_file'])
-            y, df_y = igor_exporter(path_V) # df_y each sweep is a column
-            fig, axs = plt.subplots(1,1, figsize = (10, 5))
-            # fig, axs = plt.subplots(1,2, figsize = (10, 5)) to make subplot ?
-  
-            x_scaler_drug_bar = len(df_y[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
-            x = np.arange(len(y)) * 0.0001 #sampeling at 10KHz will give time in seconds
+            array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+            array_I, df_I = igor_exporter(path_I) 
             
-            axs.plot(x,y, c = color_dict[row['drug']], lw=1)
+            x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
+            x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
+            x_I = np.arange(len(array_I))*0.0001
+            
+            plt.close('all')
+            figure = plt.Figure()
+            ax1 = plt.subplot2grid((20, 20), (0, 0), rowspan = 15, colspan =20) #(nrows, ncols)
+            ax2 = plt.subplot2grid((20, 20), (17, 0), rowspan = 5, colspan=20)
+            
+            ax1.plot(x_V,array_V, c = color_dict[row['drug']], lw=1) #voltage trace plot
+            ax2.plot(x_I, array_I)
+            
+            
+            # ax2.axis('off')
+            ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
+            ax1.spines['right'].set_visible(False)
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+            ax2.spines['left'].set_visible(False)
+            ax2.spines['bottom'].set_visible(False)
+            
+            
+            ax1.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
+            ax1.set_xlabel( "Time (s)", fontsize = 15)
+            ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 15)
+            ax1.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 25)
+            pdf.savefig(figure)
+            plt.close("all")
+    stop = timeit.default_timer()
+    print('Time: ', stop - start)  
+    return
+
+def drug_aplication_visualisation_old(feature_df,  color_dict):
+    '''
+    Plots continuious points (sweeps combined, voltage data)
+    Generates 'drug_aplications_all_cells.pdf' with a single AP recording plot per page, drug aplication by bath shown in grey bar
+
+    Parameters
+    ----------
+    feature_df : df including all factors needed to distinguish data 
+    color_dict : dict with a colour for each drug to be plotted
+
+    Returns
+    -------
+    None.
+
+    '''
+  
+    start = timeit.default_timer()
+
+    with PdfPages('drug_aplications_all_cells.pdf') as pdf:
+        
+        aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
+        
+        for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
+        
+            path_V, path_I = make_path(row['folder_file'])
+            array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+            array_I, df_I = igor_exporter(path_I) 
+            
+            fig, axs = plt.subplots(1,1, figsize = (10, 5))
+            
+            ##
+            # figure = plt.Figure()
+            # ax1 = plt.subplot2grid((10, 10), (0, 0), rowspan = 7, colspan =10) #(nrows, ncols)
+            # ax2 = plt.subplot2grid((10, 10), (5, 0), rowspan = 2, colspan=10)
+            
+            # ax1.plot(x,array_V, c = color_dict[row['drug']], lw=1) #voltage trace plot
+            
+            # fig, axs = plt.subplots(1,2, figsize = (10, 5)) to make subplot ?
+            #https://matplotlib.org/stable/tutorials/intermediate/tight_layout_guide.html#sphx-glr-tutorials-intermediate-tight-layout-guide-py
+  
+            x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
+            x = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
+            
+            axs.plot(x,array_V, c = color_dict[row['drug']], lw=1)
             # plt.ylim(-65, -35)
             
             axs.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
@@ -1627,7 +1698,7 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
     #https://stackoverflow.com/questions/53828284/how-to-save-pandas-dataframe-into-existing-pdf-from-pdfpages #style
     fig, ax = plt.subplots()# save student_t_test
     table = ax.table(cellText=student_t_df.values, colLabels=student_t_df.columns, loc='center')
-    table.set_fontsize(14)
+    table.set_fontsize(24)
     table.scale(1,4)
     ax.axis('off')
     multi_page_pdf.savefig()
@@ -1649,7 +1720,10 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
         return df
     
     # get PRE drug relevant to cell and use to colout plot  + GET STATS
-
+    
+    #REMI SAYS DO THIS!
+    # plot_list = [['max_firing', '_max_firing_Hz'], []]
+    # for _y, name in plot_list:
 
     # bar plots generated for each drug group n=1 point per file 
     factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
