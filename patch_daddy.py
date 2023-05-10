@@ -74,6 +74,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans 
 from sklearn.mixture import GaussianMixture
 
+#ploitting
+from statannotations.Annotator import Annotator
+from statannot import add_stat_annotation
 
 #%% BASIC FUNCTIONS:
 
@@ -1084,38 +1087,53 @@ def drug_aplication_visualisation(feature_df,  color_dict):
         aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
         
         for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
-        
-            path_V, path_I = make_path(row['folder_file'])
-            array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
-            array_I, df_I = igor_exporter(path_I) 
             
+            path_V, path_I = make_path(row['folder_file'])
+            
+            array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+            I_color = 'cornflowerblue'
+            try:
+                array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
+            except FileNotFoundError: #if no I file exists 
+                print(f"no I file found for {row['cell_ID']}, I setting used was: {row['I_set']}")
+                array_I = np.zeros(len(df_V)-1)
+                I_color='grey'
+                
             x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
             x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
             x_I = np.arange(len(array_I))*0.0001
             
-            plt.close('all')
-            figure = plt.Figure()
-            ax1 = plt.subplot2grid((20, 20), (0, 0), rowspan = 15, colspan =20) #(nrows, ncols)
-            ax2 = plt.subplot2grid((20, 20), (17, 0), rowspan = 5, colspan=20)
+
+            plt.figure(figsize = (12,9))
+            # ax1 = plt.subplot2grid((20, 20), (0, 0), rowspan = 15, colspan =20) #(nrows, ncols)
+            # ax2 = plt.subplot2grid((20, 20), (17, 0), rowspan = 5, colspan=20)
+            
+            ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
+            ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
             
             ax1.plot(x_V,array_V, c = color_dict[row['drug']], lw=1) #voltage trace plot
-            ax2.plot(x_I, array_I)
-            
+            ax2.plot(x_I, array_I, label = row['I_set'], color=I_color )#label=
+            ax2.legend()
             
             # ax2.axis('off')
             ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
             ax1.spines['right'].set_visible(False)
+            
             ax2.spines['top'].set_visible(False)
             ax2.spines['right'].set_visible(False)
-            ax2.spines['left'].set_visible(False)
-            ax2.spines['bottom'].set_visible(False)
+            # ax2.spines['left'].set_visible(False)
+            # ax2.spines['bottom'].set_visible(False)
             
             
             ax1.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
-            ax1.set_xlabel( "Time (s)", fontsize = 15)
-            ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 15)
-            ax1.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 25)
-            pdf.savefig(figure)
+            ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15
+            ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
+            ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
+            ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
+            ax1.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 16) # , fontsize = 25
+            plt.tight_layout()
+            pdf.savefig()
+
             plt.close("all")
     stop = timeit.default_timer()
     print('Time: ', stop - start)  
@@ -1540,7 +1558,7 @@ def sns_barplot_swarmplot (df, order, mouse_line, _x='drug', _y='max_firing', na
     return
 
 
-#%% STATS/PLOTTING WAS WORKING 
+#%% STATS/PLOTTING IS WORKING 
 
 def apply_group_by_funcs(df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
     res_dfs_li = [] #list of dfs
@@ -1567,8 +1585,8 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
     df['mean_voltage_threshold_file'] = df.voltage_threshold.apply(np.mean) #apply 'loops' through the slied df and applies the function np.mean
     df['mean_AP_height_file'] = df.AP_height.apply(np.mean)
     df['mean_AP_slope_file'] = df.AP_slope.apply(np.mean)
-    df['mean_AP_width'] = df.AP_width.apply(np.mean)
-    df['mean_AP_latency'] = df.AP_latency.apply(np.mean)
+    df['mean_AP_width_file'] = df.AP_width.apply(np.mean)
+    df['mean_AP_latency_file'] = df.AP_latency.apply(np.mean)
     
     # df['SD_voltage_threshold_file'] = df.voltage_threshold.apply(np.std)
     
@@ -1582,7 +1600,8 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
     
     return df
 
-def _generatedata_student_t_paired(cellid_drug_datatype, df, color_dict):
+
+def _colapse_to_cell_pre_post_FP(cellid_drug_datatype, df, color_dict):
     
     #for each cellid_drug_datatype I need a single value for a metric to do testing on 
 
@@ -1595,8 +1614,11 @@ def _generatedata_student_t_paired(cellid_drug_datatype, df, color_dict):
         return df
    
     df['max_firing_cell_drug'] = df['max_firing'].mean()
+    
+    df['voltage_threshold_cell_drug'] = df['mean_voltage_threshold_file'].mean()
 
     return df 
+
 
 
 def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
@@ -1609,61 +1631,40 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
         return df
     if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
         return df
-
-
-    df['first_drug_AP'] = ''  #create a column for  specifying the first drug applied for each cell
     
-    #listsfor _statistical_df
+    
     cell_id_list = list(df['cell_ID'].unique())
+
+    build_first_drug_ap_column(df, cell_id_list) #builds df['first_drug_AP']
+
+        
+    #LOOP HERE FOR VALUES i.e. columns to analise
+    
+    #listsfor statistical_df
     PRE_ = []
     POST_ = []
     first_drug_ = []
+    lists_to_fill = [PRE_, POST_, first_drug_]
     
     for cell_id in cell_id_list:
         
-        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only
+        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only  ###OLD MOVED ABOVE
+        first_drug_string = cell_df['first_drug_AP'].unique()[0]
 
-        first_drug_series = cell_df.loc[df['application_order'] == 1, 'drug'] 
-        
-        # first_drug_string = first_drug_series.all() #as all values are the same *should be* will return a string of the value 'DMT' #HATIEEM : returning boolian True sometimes? or use #.unique() and if len()==1 
-        # if first_drug_string == True:
-        #     second_drug_series = cell_df.loc[df['application_order'] == 2, 'drug'] 
-        #     first_drug_string = 'NaN'
-        #     print( 'empty series: looking for second drug applied', second_drug_series)
-            
-            
-        first_drug_string = first_drug_series.unique()[0] #need check here for len() == 1
+        fill_statistical_df_lists(cell_df, 'max_firing_cell_drug', first_drug_string, lists_to_fill)
 
-        df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
-        
-        
-        PRE = cell_df.loc[cell_df['drug'] == 'PRE', 'max_firing_cell_drug'] #REMOVE HARD CODE
-        POST = cell_df.loc[cell_df['application_order'] == 1, 'max_firing_cell_drug' ]
-        PRE = PRE.unique()
-        POST = POST.unique()
-        
-        if len(PRE) ==1 & len(POST) ==1 :
-            PRE_.append(float(PRE))
-            POST_.append(float(POST))
-            first_drug_.append(first_drug_string)
-        else:
-            print('error in data : values for single cell_drug not congruent' )
-            print('PRE = ', PRE)
-            print('POST = ', POST)
-            PRE_.append('NaN')   
-            POST_.append('NaN')
-            first_drug_.append(first_drug_string)
-    
     #create statistical df for celltype with all raw data for single value type e.g. max firing
     statistical_df = pd.DataFrame({'cell_ID': cell_id_list,
                                   'drug': first_drug_,
                                   'PRE': PRE_,
                                   'POST': POST_
                                   })
+    
+    
     print(statistical_df)
     # statistical_df.to_csv('statistical_df.csv')
     
-    ###PLOTTING start for cell_type property plot
+    
     df_only_first_app = df.loc[df['application_order'] <= 1] #only include first drug application data 
     
     order_dict = list(color_dict.keys()) #ploting in order of dict keys
@@ -1672,22 +1673,26 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
 
     fig, axs = plt.subplots(1,1, figsize = (20, 10))
     
-    student_t_df_list = []
-    for drug, drug_df in statistical_df.groupby('drug'):
-        print(drug_df)
-        T_stat, p_val = scipy.stats.ttest_rel(drug_df['PRE'], drug_df['POST']) #H0: two related or repeated samples have identical average (expected) values
-        student_t_df_row = [cell_type, drug, T_stat, p_val]
-        student_t_df_list.append(student_t_df_row)
-        
-    student_t_df = pd.DataFrame(student_t_df_list, columns = ['cell_type', 'drug', 't_stat', 'p_val' ])     
-    print (student_t_df)
-
+    student_t_df = build_student_t_df(statistical_df, cell_type)
     
+    # student_t_df_list = []
+    # for drug, drug_df in statistical_df.groupby('drug'):
+    #     # print(drug_df)
+    #     T_stat, p_val = scipy.stats.ttest_rel(drug_df['PRE'], drug_df['POST']) #H0: two related or repeated samples have identical average (expected) values
+    #     student_t_df_row = [cell_type, drug, T_stat, p_val]
+    #     student_t_df_list.append(student_t_df_row)
         
+    # student_t_df = pd.DataFrame(student_t_df_list, columns = ['cell_type', 'drug', 't_stat', 'p_val' ])     
+    # # print (student_t_df)
+
+    #def plot_sns_swarm_hist_withstats():
+    # def plot_sns_swarm_hist(): #more sinple and generic 
     sns.barplot(data = df_only_first_app, x='drug', y='max_firing',  order=order, palette=color_dict, capsize=.1, 
                          alpha=0.8, errcolor=".2", edgecolor=".2" )
     sns.swarmplot(data = df_only_first_app,x='drug', y='max_firing', order=order, palette=color_dict,  hue= 'first_drug_AP', linewidth=1, linestyle='-')  #, legend=False #would like to remove legend 
     #add stats from student t_test above
+    
+    put_significnce_stars(axs, student_t_df, data=df_only_first_app, x='drug', y='max_firing', order = order) #MAX WILL FIX 
     
     axs.set_xlabel( "Drug applied", fontsize = 20)
     axs.set_ylabel( 'Firing (Hz)', fontsize = 20)
@@ -1695,18 +1700,16 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
     multi_page_pdf.savefig() #save barplot
     plt.close("all")
     
-    #https://stackoverflow.com/questions/53828284/how-to-save-pandas-dataframe-into-existing-pdf-from-pdfpages #style
-    fig, ax = plt.subplots()# save student_t_test
-    table = ax.table(cellText=student_t_df.values, colLabels=student_t_df.columns, loc='center')
-    table.set_fontsize(24)
-    table.scale(1,4)
-    ax.axis('off')
-    multi_page_pdf.savefig()
-    plt.close("all")
+    save_df_to_pdf(student_t_df, multi_page_pdf)
     
 
-    
     return df 
+
+
+
+
+   
+
 
 def _plotwithstats_FP(celltype_datatype, df, color_dict):
     global multi_page_pdf
@@ -1746,7 +1749,7 @@ def loopCombinations_stats(df):
     #keepingin mind that the order is vital  as the df is passed through againeach one
     combinations = [
                     (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP),
-                    (["cell_ID", "drug",  "data_type"], _generatedata_student_t_paired), #stats_df to be fed to next function mouseline 
+                    (["cell_ID", "drug",  "data_type"], _colapse_to_cell_pre_post_FP), #stats_df to be fed to next function mouseline 
                     (["cell_type",  "data_type"], _prep_plotwithstats_FP)
                      
                     # (["cell_ID", "drug", "data_type"], _pAD_detector_AP)
@@ -1765,6 +1768,138 @@ def loopCombinations_stats(df):
 multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
 
 feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
+
+
+#%%BABY FUNCTIONS FOR ABOVE SHIT 
+
+def build_first_drug_ap_column(df, cell_id_list):
+    '''
+    Parameters
+    ----------
+    df : df to add column too
+    cell_id_list : list of cell IDs to loop
+
+    Returns
+    -------
+    None.
+    '''
+    df['first_drug_AP'] = ''  #create a column for  specifying the first drug applied for each cell
+    for cell_id in cell_id_list:
+        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only
+    
+        first_drug_series = cell_df.loc[df['application_order'] == 1, 'drug'] 
+        if len(first_drug_series.unique()) > 1: 
+            print ('ERROR IN DATA ENTERY: multiple drugs for first aplication on cell ', cell_id)
+            
+        first_drug_string = first_drug_series.unique()[0] 
+        df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
+    return
+
+def fill_statistical_df_lists(cell_df, column_cell_drug, first_drug_string, lists_to_fill):
+    '''
+    Parameters
+    ----------
+    cell_df : df for a single cell
+    column_cell_drug : string of column name for cell and drug  e.g. 'max_firing_cell_drug'
+    lists_to_fill: list of THREE  lists to be filled e.g. [PRE_, POST_, first_drug_]
+
+    Returns
+    -------
+    None.
+
+    '''   
+    PRE = cell_df.loc[cell_df['drug'] == 'PRE', column_cell_drug] #REMOVE HARD CODE
+    POST = cell_df.loc[cell_df['application_order'] == 1, 'max_firing_cell_drug' ]
+    PRE = PRE.unique()
+    POST = POST.unique()
+    
+    if len(PRE) ==1 & len(POST) ==1 :
+        lists_to_fill[0].append(float(PRE))
+        lists_to_fill[1].append(float(POST))
+        lists_to_fill[2].append(first_drug_string)
+    else:
+        print('ERROR IN DATA : values for single cell_drug not congruent' )
+        print('PRE = ', PRE)
+        print('POST = ', POST)
+        lists_to_fill[0].append('NaN')   
+        lists_to_fill[1].append('NaN')
+        lists_to_fill[2].append(first_drug_string)
+    return
+
+def build_student_t_df(statistical_df, cell_type):
+    '''
+    Parameters
+    ----------
+    statistical_df : df with single cell value PRE POST
+    cell_type : string indicating the cell type  e.g. L6b_DRD
+
+    Returns
+    -------
+    student_t_df : df with columns ['cell_type', 'drug', 't_stat', 'p_val' ]
+    '''
+    student_t_df_list = []
+    for drug, drug_df in statistical_df.groupby('drug'):
+        # print(drug_df)
+        T_stat, p_val = scipy.stats.ttest_rel(drug_df['PRE'], drug_df['POST']) #H0: two related or repeated samples have identical average (expected) values
+        student_t_df_row = [cell_type, drug, T_stat, p_val]
+        student_t_df_list.append(student_t_df_row)
+        
+    student_t_df = pd.DataFrame(student_t_df_list, columns = ['cell_type', 'drug', 't_stat', 'p_val' ])     
+    # print (student_t_df)
+    return student_t_df
+
+def save_df_to_pdf(df, pdf_name):
+    '''
+    Parameters
+    ----------
+    df : df to be saved
+    pdf_name : name of OPEN multipage.pdf #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
+
+    Returns
+    -------
+    None.
+
+    '''
+        #https://stackoverflow.com/questions/53828284/how-to-save-pandas-dataframe-into-existing-pdf-from-pdfpages #style
+    fig, ax = plt.subplots()# save student_t_test
+    table = ax.table(cellText=df.values, colLabels=df.columns, loc='center')
+    table.set_fontsize(24)
+    table.scale(1,4)
+    ax.axis('off')
+    pdf_name.savefig()
+    plt.close("all")
+    return
+
+def put_significnce_stars(axs, df, data=None,
+                          x=None, y=None, order=None):  # , p_values):
+    '''
+     Parameters
+    ----------
+    axs : axis of figure to plot significance on
+    df: data frame with columns ['cell_type', 'drug', 't_stat', 'p_val' ]
+    data: data frame plotted (bar/hist or scatter)
+    x: x plotted
+    y: y plotted
+    order : order of x_tics
+
+    Returns
+    -------
+    None.
+    '''
+    significant_drugs = df.loc[df.p_val <= 0.05, 'drug']
+    print(significant_drugs)
+    
+    if significant_drugs.empty:
+        return
+        
+    p_values = df.loc[df.p_val <= 0.05, 'p_val']
+    pairs = list(zip(['PRE'] * len(significant_drugs), significant_drugs,))
+    annotator = Annotator(axs, pairs, data=data,
+                          x=x, y=y, order=order)
+    annotator.configure(text_format="star",
+                        loc="inside", fontsize='xx-large')
+    annotator.set_pvalues_and_annotate(p_values.values)
+    return 
 
 
 
