@@ -1590,11 +1590,13 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
     
     
     #Tau and Sag colapse to lowest value
-    #HATEM: what is the best way to extract the values of sag i.e. take the mean of the first valueof the labeled trubple 
-
+    extract_truple_data('sag', df) #creating columns 'tau_file' and 'sag_file'
+    extract_truple_data('tau_rc', df)
+        
     
     return df
 
+    
 
 def _colapse_to_cell_pre_post_FP(cellid_drug_datatype, df, color_dict):
     
@@ -1617,7 +1619,10 @@ def _colapse_to_cell_pre_post_FP(cellid_drug_datatype, df, color_dict):
     df['AP_slope_cell_drug'] = df['mean_AP_slope_file'].mean()
     df['AP_width_cell_drug'] = df['mean_AP_width_file'].mean()
     df['AP_latency_cell_drug'] = df['mean_AP_latency_file'].mean()
-
+    
+    #Tau and Sag 
+    df['tau_cell_drug'] = df['tau_rc_file'].mean()
+    df['sag_cell_drug'] = df['sag_file'].mean()
     return df 
 
 
@@ -1647,7 +1652,11 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
     plot_list = [['max_firing_cell_drug', 'Firing (Hz)'], 
                  ['voltage_threshold_cell_drug','Voltage Threshold (mV)'], 
                  ['AP_height_cell_drug', ' AP Height (mV)'], 
-                 ['AP_slope_cell_drug', 'AP slope ']
+                 ['AP_slope_cell_drug', 'AP slope (V/s)'],
+                 ['AP_width_cell_drug', 'AP width (s) '],
+                 ['AP_latency_cell_drug', 'AP latency ()'],
+                 ['tau_cell_drug', 'Tau RC (ms)'],
+                 ['sag_cell_drug', 'Percentage sag (%)']
                  ]
     for col_name, name in plot_list:
         
@@ -1674,12 +1683,8 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
         multi_page_pdf.savefig() #save barplot
         plt.close("all")
         # save_df_to_pdf(student_t_df, multi_page_pdf) #save table of p_values to pdf with figures
-    
 
     return df 
-
-
-
 
 
 
@@ -1714,6 +1719,10 @@ multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.
 feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
 
 
+
+# ### WARNINGS
+# Users/jasminebutler/opt/anaconda3/lib/python3.8/site-packages/numpy/core/fromnumeric.py:3702: RuntimeWarning: Degrees of freedom <= 0 for slice
+#   return _methods._var(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
 #%%BABY FUNCTIONS FOR ABOVE SHIT 
 
 def build_first_drug_ap_column(df, cell_id_list):
@@ -1877,6 +1886,22 @@ def plot_sns_swarm_hist(cell_type, df_to_plot, order, color_dict, x='drug', y='m
     axs.set_ylabel( y_label, fontsize = 20)
     axs.set_title( cell_type +' '+ y_label + '  (CI 95%)', fontsize = 30) 
     return fig, axs
+
+
+def extract_truple_data(col_name, df): #col_name = 'tau' / 'sag'
+    for row_ind, row in df.iterrows(): #truple structure forces loop
+        val_lst_file = []
+    
+        list_of_truples = row[col_name]
+        for el in list_of_truples:
+            val_lst_file.append( el.val) # truple has: val , steady_state and current_inj
+        
+        if col_name == 'sag':
+            df.at[row_ind, col_name+'_file'] = 100 * np.mean(val_lst_file)
+        else:
+            df.at[row_ind, col_name+'_file'] = np.mean(val_lst_file)
+        
+    return
 
 #%%TEST PATHS / FUNCS
 
