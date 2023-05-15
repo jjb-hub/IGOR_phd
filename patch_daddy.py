@@ -1588,14 +1588,9 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
     df['mean_AP_width_file'] = df.AP_width.apply(np.mean)
     df['mean_AP_latency_file'] = df.AP_latency.apply(np.mean)
     
-    # df['SD_voltage_threshold_file'] = df.voltage_threshold.apply(np.std)
     
     #Tau and Sag colapse to lowest value
-    
-    #older peans by grouping  probably redundant 
-        # #for entire celltype_drug_datatype combination calculate te mean this needs to be moved to where the stats are calculated or a df is saved
-    # df['mean_max_firing'] = df['max_firing'].mean() #dealing with pd.series a single df column
-    # df['SD_max_firing'] = df['max_firing'].std()
+    #HATEM: what is the best way to extract the values of sag i.e. take the mean of the first valueof the labeled trubple 
 
     
     return df
@@ -1613,9 +1608,15 @@ def _colapse_to_cell_pre_post_FP(cellid_drug_datatype, df, color_dict):
     if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
         return df
    
+    
     df['max_firing_cell_drug'] = df['max_firing'].mean()
     
+    #AP Charecteristics 
     df['voltage_threshold_cell_drug'] = df['mean_voltage_threshold_file'].mean()
+    df['AP_height_cell_drug'] = df['mean_AP_height_file'].mean()
+    df['AP_slope_cell_drug'] = df['mean_AP_slope_file'].mean()
+    df['AP_width_cell_drug'] = df['mean_AP_width_file'].mean()
+    df['AP_latency_cell_drug'] = df['mean_AP_latency_file'].mean()
 
     return df 
 
@@ -1625,82 +1626,54 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
     global multi_page_pdf
     
     cell_type, data_type = celltype_datatype
-    
-    
-    if data_type == 'AP': #if data type is not firing properties (FP then return df)
+    #if data type is not firing properties (FP then return df)
+    if data_type == 'AP': 
         return df
-    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
+    if data_type == 'FP_AP': 
         return df
     
-    
+    print(f'analising... {cell_type}')
     cell_id_list = list(df['cell_ID'].unique())
+    
+    #tobuild dummy df
+    # subset = feature_df_expanded_stats.loc[feature_df_expanded_stats['cell_type']== 'L5a_TLX']
+    # subset = subset.loc[subset['data_type']== 'FP']
+    # df_only_first_app = subset.loc[subset['application_order'] <= 1]
 
     build_first_drug_ap_column(df, cell_id_list) #builds df['first_drug_AP']
-
-        
-    #LOOP HERE FOR VALUES i.e. columns to analise
-    
-    #listsfor statistical_df
-    PRE_ = []
-    POST_ = []
-    first_drug_ = []
-    lists_to_fill = [PRE_, POST_, first_drug_]
-    
-    for cell_id in cell_id_list:
-        
-        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only  ###OLD MOVED ABOVE
-        first_drug_string = cell_df['first_drug_AP'].unique()[0]
-
-        fill_statistical_df_lists(cell_df, 'max_firing_cell_drug', first_drug_string, lists_to_fill)
-
-    #create statistical df for celltype with all raw data for single value type e.g. max firing
-    statistical_df = pd.DataFrame({'cell_ID': cell_id_list,
-                                  'drug': first_drug_,
-                                  'PRE': PRE_,
-                                  'POST': POST_
-                                  })
-    
-    
-    print(statistical_df)
-    # statistical_df.to_csv('statistical_df.csv')
-    
     
     df_only_first_app = df.loc[df['application_order'] <= 1] #only include first drug application data 
-    
-    order_dict = list(color_dict.keys()) #ploting in order of dict keys
-    order_me = list(df_only_first_app['drug'].unique())
-    order = [x for x in order_dict if x in order_me]
-
-    fig, axs = plt.subplots(1,1, figsize = (20, 10))
-    
-    student_t_df = build_student_t_df(statistical_df, cell_type)
-    
-    # student_t_df_list = []
-    # for drug, drug_df in statistical_df.groupby('drug'):
-    #     # print(drug_df)
-    #     T_stat, p_val = scipy.stats.ttest_rel(drug_df['PRE'], drug_df['POST']) #H0: two related or repeated samples have identical average (expected) values
-    #     student_t_df_row = [cell_type, drug, T_stat, p_val]
-    #     student_t_df_list.append(student_t_df_row)
         
-    # student_t_df = pd.DataFrame(student_t_df_list, columns = ['cell_type', 'drug', 't_stat', 'p_val' ])     
-    # # print (student_t_df)
-
-    #def plot_sns_swarm_hist_withstats():
-    # def plot_sns_swarm_hist(): #more sinple and generic 
-    sns.barplot(data = df_only_first_app, x='drug', y='max_firing',  order=order, palette=color_dict, capsize=.1, 
-                         alpha=0.8, errcolor=".2", edgecolor=".2" )
-    sns.swarmplot(data = df_only_first_app,x='drug', y='max_firing', order=order, palette=color_dict,  hue= 'first_drug_AP', linewidth=1, linestyle='-')  #, legend=False #would like to remove legend 
-    #add stats from student t_test above
+    plot_list = [['max_firing_cell_drug', 'Firing (Hz)'], 
+                 ['voltage_threshold_cell_drug','Voltage Threshold (mV)'], 
+                 ['AP_height_cell_drug', ' AP Height (mV)'], 
+                 ['AP_slope_cell_drug', 'AP slope ']
+                 ]
+    for col_name, name in plot_list:
+        
+        statistical_df = build_statistical_df(df_only_first_app, cell_id_list, col_name)
+            
+        #generate order for plotting with only relevant data 
+        order_dict = list(color_dict.keys()) #ploting in order of dict keys
+        order_me = list(df_only_first_app['drug'].unique())
+        order = [x for x in order_dict if x in order_me]
+        
+        #create df_to_plot with only one value per cell (not per file)
+        df_to_plot = df_only_first_app[['cell_ID','drug',col_name, 'first_drug_AP']]
+        df_to_plot = df_to_plot.drop_duplicates()
+        
+        student_t_df = build_student_t_df(statistical_df, cell_type) #calculate and create student t test df to be used to plot stars
+        
+        fig, axs = plot_sns_swarm_hist(cell_type, df_to_plot, order, color_dict, x='drug', y=col_name, 
+                                       hue='first_drug_AP', x_label='Drug applied', y_label=name)
+        
+        put_significnce_stars(axs, student_t_df, data=df_to_plot, x='drug', y=col_name, order = order) #add stats from student t_test above
+        
     
-    put_significnce_stars(axs, student_t_df, data=df_only_first_app, x='drug', y='max_firing', order = order) #MAX WILL FIX 
-    
-    axs.set_xlabel( "Drug applied", fontsize = 20)
-    axs.set_ylabel( 'Firing (Hz)', fontsize = 20)
-    axs.set_title( cell_type + 'Firing (Hz)' + '  (CI 95%)', fontsize = 30) 
-    multi_page_pdf.savefig() #save barplot
-    plt.close("all")
-    
-    save_df_to_pdf(student_t_df, multi_page_pdf)
+        
+        multi_page_pdf.savefig() #save barplot
+        plt.close("all")
+        # save_df_to_pdf(student_t_df, multi_page_pdf) #save table of p_values to pdf with figures
     
 
     return df 
@@ -1708,35 +1681,6 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
 
 
 
-   
-
-
-def _plotwithstats_FP(celltype_datatype, df, color_dict):
-    global multi_page_pdf
-    
-    cell_type, data_type = celltype_datatype
-    order = list(color_dict.keys()) #ploting in order of dict keys
-    
-    if data_type == 'AP': #if data type is not firing properties (FP then return df)
-        return df
-    if data_type == 'FP_AP': #if data type is not firing properties (FP then return df) #later this will be filled with other plots
-        return df
-    
-    # get PRE drug relevant to cell and use to colout plot  + GET STATS
-    
-    #REMI SAYS DO THIS!
-    # plot_list = [['max_firing', '_max_firing_Hz'], []]
-    # for _y, name in plot_list:
-
-    # bar plots generated for each drug group n=1 point per file 
-    factors_to_plot = ['max_firing', 'rheobased_threshold', 'FI_slope', 'mean_voltage_threshold_file', 'mean_AP_height_file', 'mean_AP_slope_file', 'mean_AP_width']
-    names_to_plot = ['_max_firing_Hz', '_rheobased_threshold_pA' , '_FI_slope_linear', '_voltage_threshold_mV', '_AP_height_mV', '_AP_slope', '_AP_width_ms']
-    
-    for _y, name in zip(factors_to_plot, names_to_plot):
-        sns_barplot_swarmplot (df, order, cell_type, _x='drug', _y=_y, name = name)
-    
-    plt.close("all") #close open figures
-    return df 
 
 
 def loopCombinations_stats(df):
@@ -1795,12 +1739,12 @@ def build_first_drug_ap_column(df, cell_id_list):
         df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
     return
 
-def fill_statistical_df_lists(cell_df, column_cell_drug, first_drug_string, lists_to_fill):
+def fill_statistical_df_lists(cell_df, col_name, first_drug_string, lists_to_fill):
     '''
     Parameters
     ----------
     cell_df : df for a single cell
-    column_cell_drug : string of column name for cell and drug  e.g. 'max_firing_cell_drug'
+    col_name : string of column name for cell and drug  e.g. 'max_firing_cell_drug'
     lists_to_fill: list of THREE  lists to be filled e.g. [PRE_, POST_, first_drug_]
 
     Returns
@@ -1808,8 +1752,8 @@ def fill_statistical_df_lists(cell_df, column_cell_drug, first_drug_string, list
     None.
 
     '''   
-    PRE = cell_df.loc[cell_df['drug'] == 'PRE', column_cell_drug] #REMOVE HARD CODE
-    POST = cell_df.loc[cell_df['application_order'] == 1, 'max_firing_cell_drug' ]
+    PRE = cell_df.loc[cell_df['drug'] == 'PRE', col_name] #REMOVE HARD CODE
+    POST = cell_df.loc[cell_df['application_order'] == 1, col_name ]
     PRE = PRE.unique()
     POST = POST.unique()
     
@@ -1887,7 +1831,7 @@ def put_significnce_stars(axs, df, data=None,
     None.
     '''
     significant_drugs = df.loc[df.p_val <= 0.05, 'drug']
-    print(significant_drugs)
+    # print(significant_drugs)
     
     if significant_drugs.empty:
         return
@@ -1901,7 +1845,38 @@ def put_significnce_stars(axs, df, data=None,
     annotator.set_pvalues_and_annotate(p_values.values)
     return 
 
+def build_statistical_df(df_only_first_app, cell_id_list, col_name):  #col_name = 'max_firing_cell_drug'
+    PRE_ = []
+    POST_ = []
+    first_drug_ = []
+    lists_to_fill = [PRE_, POST_, first_drug_]
+    
+    for cell_id in cell_id_list:
+        
+        cell_df = df_only_first_app.loc[df_only_first_app['cell_ID'] == cell_id] #slice df to cell only 
+        first_drug_string = cell_df['first_drug_AP'].unique()[0]
 
+        fill_statistical_df_lists(cell_df, col_name, first_drug_string, lists_to_fill) #col_name = 'max_firing_cell_drug'
+
+    #create statistical df for celltype with all raw data for single value type e.g. max firing
+    statistical_df = pd.DataFrame({'cell_ID': cell_id_list,
+                                  'drug': first_drug_,
+                                  'PRE': PRE_,
+                                  'POST': POST_
+                                  })
+    
+    # print(statistical_df)
+    return statistical_df
+
+def plot_sns_swarm_hist(cell_type, df_to_plot, order, color_dict, x='drug', y='max_firing_cell_drug', hue='first_drug_AP', x_label='Drug applied', y_label='Firing (Hz)'): #y = col_name
+    fig, axs = plt.subplots(1,1, figsize = (20, 10))
+    sns.barplot(data = df_to_plot, x=x, y=y,  order=order, palette=color_dict, capsize=.1, 
+                         alpha=0.8, errcolor=".2", edgecolor=".2" )
+    sns.swarmplot(data = df_to_plot,x=x, y=y, order=order, palette=color_dict,  hue= hue, linewidth=1, linestyle='-')  #, legend=False #would like to remove legend 
+    axs.set_xlabel( x_label, fontsize = 20)
+    axs.set_ylabel( y_label, fontsize = 20)
+    axs.set_title( cell_type +' '+ y_label + '  (CI 95%)', fontsize = 30) 
+    return fig, axs
 
 #%%TEST PATHS / FUNCS
 
