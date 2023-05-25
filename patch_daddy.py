@@ -3,7 +3,7 @@
 """
 Created on Fri Mar 10 16:11:46 2023
 
-@author: jasminebutler
+@author: Debapratim Jana, Jasmine Butler
 
 This code is to handel data collected in current clamp from Igor stored as .ibw formats:
     cleaned version of IGOR_analysis.py
@@ -65,8 +65,25 @@ from collections import namedtuple
 import seaborn as sns
 from collections import OrderedDict
 
-#%% BASIC FUNCTIONS:
+#%% BASIC FUNCTIONS: 
 
+def make_path(folder_file):
+    '''
+    Parameters
+    ----------
+    folder_file : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    path_V : string - path for V data 
+    path_I : string - path for I data 
+    '''
+    extension_V = "Soma.ibw"
+    extension_I = "Soma_outwave.ibw" 
+    path_V = base_path + folder_file + extension_V
+    path_I = base_path + folder_file + extension_I
+    return path_V, path_I
 
 def igor_exporter(path):
     ''' 
@@ -95,23 +112,7 @@ def igor_exporter(path):
     return (point_list, igor_df)
 
 
-def make_path(folder_file):
-    '''
-    Parameters
-    ----------
-    folder_file : TYPE
-        DESCRIPTION.
 
-    Returns
-    -------
-    path_V : string - path for V data 
-    path_I : string - path for I data 
-    '''
-    extension_V = "Soma.ibw"
-    extension_I = "Soma_outwave.ibw" 
-    path_V = base_path + folder_file + extension_V
-    path_I = base_path + folder_file + extension_I
-    return path_V, path_I
 
 def ap_finder(voltage_trace, smoothing_kernel = 10):
     '''
@@ -1005,7 +1006,7 @@ color_dict = {"PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "P
 #                           ("PSIL","orange"), 
 #                           ("LSD","purple"),  
 #                           ("MDL",'blue')]
-# )
+# ) 
 
 base_path = "/Users/jasminebutler/Desktop/PatchData/"
 
