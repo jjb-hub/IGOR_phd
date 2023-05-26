@@ -442,8 +442,7 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
     v_deriv_transformed = np.heaviside( -np.diff(v_array)+ np.exp(1), 0 )
     
     if len(peak_locs) == 0 :
-        print("nothing")
-        print(peak_locs_corr)
+        print("no peaks found in trace..")
         return  [] ,   [] ,  []  , [] ,  [] ,  [] , [] 
     
     
@@ -484,8 +483,8 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         # Get AP slice  
         
         if ap_backwards_window <  end_loc: 
-            print('debugging')
-            print(end_loc - ap_backwards_window,  end_loc )
+            #print('debugging')
+            #print(end_loc - ap_backwards_window,  end_loc )
             if end_loc - ap_backwards_window ==  end_loc and  end_loc >= 50 :
                 ap_backwards_window = 50 ### HARD CODED TO MAKE IT WORK FOR NOW!!
                 v_temp = v_array[end_loc - ap_backwards_window: end_loc ]
@@ -505,7 +504,7 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         
         upshoot_loc_array = np.where(x_  <  0)[0]   # define array where the dip / upshoot happens 
         
-        print(v_temp)
+        #print(v_temp) 
         v_peak   = np.where(v_temp == np.max(v_temp))[0][0]
 
         

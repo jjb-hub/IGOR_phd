@@ -85,17 +85,23 @@ def _handleFile(row, base_path = "/Users/debap/Desktop/PatchData/"): #takes a ro
     # Dataframe extraction 
     path_V, path_I = make_path(base_path, row.folder_file)
     
-    
-    # DATA MISSING (for DJ at least)
-    if path_I == '/Users/debap/Desktop/PatchData/JJB221229/t8Soma_outwave.ibw': 
-        return row 
-    
-    
-    
+    skip_I = False
     
     V_list, V_df = igor_exporter(path_V)
-    I_list, I_df = igor_exporter(path_I)
-    V_array , I_array = np.array(V_df) , np.array(I_df)
+    V_array      = np.array(V_df) 
+    
+    # DATA MISSING (for DJ at least)
+    missing_data_files = ['/Users/debap/Desktop/PatchData/JJB221229/t9Soma_outwave.ibw', '/Users/debap/Desktop/PatchData/JJB221229/t8Soma_outwave.ibw'
+                          , '/Users/debap/Desktop/PatchData/JJB221230/t7Soma_outwave.ibw', '/Users/debap/Desktop/PatchData/JJB221230/t12Soma_outwave.ibw'
+                          , '/Users/debap/Desktop/PatchData/JJB221230/t21Soma_outwave.ibw', '/Users/debap/Desktop/PatchData/JJB221230/t25Soma_outwave.ibw',
+                          '/Users/debap/Desktop/PatchData/JJB230113/t9Soma_outwave.ibw', '/Users/debap/Desktop/PatchData/JJB230126/t7Soma_outwave.ibw'
+                          ,'/Users/debap/Desktop/PatchData/JJB230207/t16Soma_outwave.ibw', '/Users/debap/Desktop/PatchData/JJB230207/t26Soma_outwave.ibw'
+                          ,'/Users/debap/Desktop/PatchData/JJB230207/t33Soma_outwave.ibw', '/Users/debap/Desktop/PatchData/JJB230220/t45Soma_outwave.ibw']
+    if path_I in missing_data_files: 
+        print('Missing Current Data!!')
+    else:    
+        I_list, I_df = igor_exporter(path_I)
+        I_array      = np.array(I_df)
     
 
     if row.data_type in ["FP", "FP_AP"]:
