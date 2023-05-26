@@ -1,0 +1,25 @@
+# Depencies required for the code to run
+# These are by order of installation (ex pandas requires numpy)
+# Make sure you have last versions of pip and setuptools with : "pip3 install -U pip" then "pip3 install -U setuptools" in venv
+# Use command "pip install -r requirements.txt" to install
+
+Cython
+wheel
+
+collections
+igor
+numpy #remi you had these here maybe the order matters I have them bellow in order
+openpyxl
+pandas
+# outlier_utils
+matplotlib
+# pingouin
+scipy
+seaborn
+sklearn
+statannotations
+# statannot
+statsmodels
+sys
+# weasyprint
+
