@@ -5,21 +5,17 @@
 
 Cython
 wheel
-
-collections
+numpy<=1.19
 igor
-numpy #remi you had these here maybe the order matters I have them bellow in order
 openpyxl
 pandas
-# outlier_utils
+outlier_utils
 matplotlib
-# pingouin
+pingouin
 scipy
 seaborn
 sklearn
 statannotations
-# statannot
+statannot
 statsmodels
-sys
-# weasyprint
-
+weasyprint
