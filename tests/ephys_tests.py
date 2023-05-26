@@ -48,8 +48,8 @@ path_V =  '/Users/debap/Desktop/PatchData/JJB221230/t15Soma.ibw'
 
 
 #AP tester paths
-path_I =  '/Users/debap/Desktop/PatchData/JJB210427/t6Soma_outwave.ibw'
-path_V = '/Users/debap/Desktop/PatchData/JJB210427/t6Soma.ibw'
+path_I =  '/Users/debap/Desktop/PatchData/JJB210209/t14Soma_outwave.ibw'
+path_V = '/Users/debap/Desktop/PatchData/JJB210209/t14Soma.ibw'
 
 #to plot I steps or V responce to steps all in 1 
 _, dfV = igor_exporter(path_V)
@@ -61,11 +61,15 @@ V = np.array(dfV)
 
 
 #ap_functions.ap_characteristics_extractor_main(V, 0)
-#ap_functions.ap_characteristics_extractor_subroutine_derivative(V, 0)
+for idx in range(V.shape[-1]):
+    print("sweep %s " % idx)
+    ap_functions.ap_characteristics_extractor_subroutine_derivative(V, idx)
+    #plt.plot(V[:,idx])
 
 
 
+# ap_functions.ap_characteristics_extractor_main(V, all_sweeps=True)
 
 
 peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, X_pca   =  ap_functions.pAD_detection(V)
-pAD_df
+#pAD_df

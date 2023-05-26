@@ -1,1 +1,1 @@
-# IGOR_phd
+# Read me file for R

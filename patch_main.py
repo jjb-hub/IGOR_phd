@@ -7,7 +7,7 @@ Created on Wed May 10 13:58:27 2023
 
 
 from utils.helper_functions import loopCombinations, loopCombinations_stats, igor_exporter
-from ephys import ap_functions, pAD
+from ephys import ap_functions
 import openpyxl
 import pandas as pd
 import numpy as np
