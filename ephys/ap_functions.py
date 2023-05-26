@@ -454,9 +454,9 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
 
 
         # Correct for peak offsets 
+        while peak_locs[peak_idx]  < ap_backwards_window: 
+            ap_backwards_window = int(ap_backwards_window - 10)
         
-        print( ap_backwards_window   , peak_locs[peak_idx] - ap_backwards_window  ,  peak_locs[peak_idx] + pre_ap_baseline_forwards_window)
-
         v_max  = np.max(v_array[peak_locs[peak_idx] - ap_backwards_window : peak_locs[peak_idx] + pre_ap_baseline_forwards_window]) 
         peak_locs_shift = ap_backwards_window - np.where(v_array[peak_locs[peak_idx] - ap_backwards_window: peak_locs[peak_idx] + pre_ap_baseline_forwards_window] == v_max)[0][0]
 
@@ -468,7 +468,7 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
     peak_locs_corr  = [peak_locs_corr[ls_ ] for ls_ in ls ] 
 
     if len(peak_locs_corr) >= 2 : 
-        ap_backwards_window = min(ap_backwards_window ,  np.min(np.diff(peak_locs_corr)))
+        ap_backwards_window = int(min(ap_backwards_window ,  np.mean(np.diff(peak_locs_corr))))
     
     
 
@@ -484,8 +484,17 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         # Get AP slice  
         
         if ap_backwards_window <  end_loc: 
-            v_temp = v_array[end_loc - ap_backwards_window: end_loc ]
-            v_derivative_temp = v_deriv_transformed[end_loc - ap_backwards_window: end_loc ]
+            print('debugging')
+            print(end_loc - ap_backwards_window,  end_loc )
+            if end_loc - ap_backwards_window ==  end_loc and  end_loc >= 50 :
+                ap_backwards_window = 50 ### HARD CODED TO MAKE IT WORK FOR NOW!!
+                v_temp = v_array[end_loc - ap_backwards_window: end_loc ]
+                v_derivative_temp = v_deriv_transformed[end_loc - ap_backwards_window: end_loc ]
+        
+            else:
+                # Normally 
+                v_temp = v_array[end_loc - ap_backwards_window: end_loc ]
+                v_derivative_temp = v_deriv_transformed[end_loc - ap_backwards_window: end_loc ]
         else: 
             v_temp = v_array[0:end_loc]
             v_derivative_temp = v_deriv_transformed[0:end_loc]
@@ -495,6 +504,8 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         x_                = np.diff(v_derivative_temp)
         
         upshoot_loc_array = np.where(x_  <  0)[0]   # define array where the dip / upshoot happens 
+        
+        print(v_temp)
         v_peak   = np.where(v_temp == np.max(v_temp))[0][0]
 
         
@@ -528,16 +539,27 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         first_x_array    =  np.where( v_array >= half_y  )[0] 
         return_x_array   = np.where( v_array <= half_y  )[0] 
         
+        
         return_x_ = return_x_array[return_x_array > peak_x]
         first_x_  = first_x_array[first_x_array   < peak_x]
-        return_x = return_x_[0]
-        first_x  = first_x_[0]
         
-
-
-        
+        # check these have values actually!!
+        if len(first_x_ ) == 0 or len(return_x_) == 0: 
+            print('AP width calculation not accurate!!')
+            first_x  = upshoot_x + (peak_x - upshoot_x) / 2 
+            return_x = peak_x + (peak_x - upshoot_x) / 2 
+            
+            
+        else: 
+            
+            return_x = return_x_[0]
+            first_x  = first_x_[0]     
+            
         peak_fw       += [ sec_to_ms * (return_x  - first_x)  / sampling_rate ]
 
+            
+        
+        
                        
     # Plotting Stuff
     if main_big_plot: 

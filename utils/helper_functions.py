@@ -84,6 +84,15 @@ def _handleFile(row, base_path = "/Users/debap/Desktop/PatchData/"): #takes a ro
     row = row.copy()
     # Dataframe extraction 
     path_V, path_I = make_path(base_path, row.folder_file)
+    
+    
+    # DATA MISSING (for DJ at least)
+    if path_I == '/Users/debap/Desktop/PatchData/JJB221229/t8Soma_outwave.ibw': 
+        return row 
+    
+    
+    
+    
     V_list, V_df = igor_exporter(path_V)
     I_list, I_df = igor_exporter(path_I)
     V_array , I_array = np.array(V_df) , np.array(I_df)
@@ -126,6 +135,8 @@ def _handleFile(row, base_path = "/Users/debap/Desktop/PatchData/"): #takes a ro
      
         
     elif row.data_type == "AP":
+        
+        
         print("AP type file")
         print(row.folder_file)        
         # row["new_data_type"] = ["Boo", 0, 1 ,2]
