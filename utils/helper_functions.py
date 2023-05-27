@@ -4,22 +4,22 @@ Created on Wed May 10 10:43:53 2023
 
 @author: Debapratim Jana, Jasmine Butler
 """
-
+import pandas as pd
 
 import igor.packed
 import igor.binarywave
-import pandas as pd
 import numpy as np
 from ephys.ap_functions import calculate_max_firing, extract_FI_x_y, extract_FI_slope_and_rheobased_threshold
 from ephys.ap_functions import ap_characteristics_extractor_main, tau_analyser, sag_current_analyser , pAD_detection
 import matplotlib.pyplot as plt 
 import seaborn as sns
+import os
 
 #%% BASIC FUNCTIONS:  igor data extractor, path manager 
 
 color_dict = {"PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue'}
  
-def make_path(base_path, folder_file):
+def make_path(folder_file): #base_path, 
     '''
     Parameters       
     ----------
@@ -31,10 +31,14 @@ def make_path(base_path, folder_file):
     path_V : string - path for V data 
     path_I : string - path for I data 
     '''
+    ROOT = os.getcwd() #This gives terminal location (terminal working dir)  #HARD CODE ISH
+    INPUT_DIR = f'{ROOT}/input'
+    data_path = f'{INPUT_DIR}/PatchData/'
+
     extension_V = "Soma.ibw"
     extension_I = "Soma_outwave.ibw" 
-    path_V = base_path + folder_file + extension_V
-    path_I = base_path + folder_file + extension_I
+    path_V = data_path + folder_file + extension_V
+    path_I = data_path + folder_file + extension_I
     return path_V, path_I
 
 def igor_exporter(path):
@@ -67,68 +71,62 @@ def igor_exporter(path):
 
 
 
-#%% RUN PLOTS
 
-#drug_aplication_visualisation(feature_df, color_dict) # generates PDF of drug aplications
-
-#plot_all_FI_curves(feature_df,  color_dict)  # generates PDF with all FI curves for single cell labed with drug and aplication order #### MAKE HZ NOT APs per sweep also isnt it in pA not nA??
-
-#plot_FI_AP_curves(feature_df) #generated PDF with FI-AP for each cell
 
 
 #%%   EXPAND FEATURE_DF
+#takes a row of the df (a single file) and extractes values based on the data type  FP or AP then appends values to df
 
-def _handleFile(row, base_path = "/Users/debap/Desktop/PatchData/"): #takes a row of the df (a single file) and extractes values based on the data type  FP or AP then appends values to df
+def _handleFile(row): # , base_path = "/Users/debap/Desktop/PatchData/"  # DJ WHY WAS THIS HERE?
     # print(row.index)
     # print(row.folder_file)# "- num entries:", row)
     row = row.copy()
     # Dataframe extraction 
-    path_V, path_I = make_path(base_path, row.folder_file)
+    path_V, path_I = make_path(row.folder_file)
     V_list, V_df = igor_exporter(path_V)
     I_list, I_df = igor_exporter(path_I)
-    V_array , I_array = np.array(V_df) , np.array(I_df)
-    
+    V_array , I_array = np.array(V_df) , np.array(I_df) 
 
     if row.data_type in ["FP", "FP_AP"]:
-        pass
+        # pass
         
     
-        # print("FP type file")
-        # print(row.folder_file)
-        # # row["new_data_type"] = ["Boo", 0, 1 ,2] #creating a new column or filling a pre existing column with values or list of values
+        print("FP type file")
+        print(row.folder_file)
+        # row["new_data_type"] = ["Boo", 0, 1 ,2] #creating a new column or filling a pre existing column with values or list of values
         
-        # #data files to be fed into extraction funcs
+        #data files to be fed into extraction funcs
                 
         
-        # row["max_firing"] = calculate_max_firing(V_array)
+        row["max_firing"] = calculate_max_firing(V_array)
         
-        # x, y, v_rest = extract_FI_x_y (path_I, path_V) # x = current injected, y = number of APs, v_rest = the steady state voltage
-        # FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True) ## FIX ME some values are negative! this should not be so better to use slope or I step? Needs a pAD detector 
-        # row["rheobased_threshold"] = rheobase_threshold
-        # row["FI_slope"] = FI_slope
+        x, y, v_rest = extract_FI_x_y (path_I, path_V) # x = current injected, y = number of APs, v_rest = the steady state voltage
+        FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True) ## FIX ME some values are negative! this should not be so better to use slope or I step? Needs a pAD detector 
+        row["rheobased_threshold"] = rheobase_threshold
+        row["FI_slope"] = FI_slope
         
         
 
-        # peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(V_df)
-        # row["voltage_threshold"] = v_thresholds_all 
-        # row["AP_height"] = peak_heights_all
-        # row["AP_width"] = peak_fw_all
-        # row["AP_slope"] = peak_slope_all 
+        peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(V_df)
+        row["voltage_threshold"] = v_thresholds_all 
+        row["AP_height"] = peak_heights_all
+        row["AP_width"] = peak_fw_all
+        row["AP_slope"] = peak_slope_all 
 
-        # #not yet working    #UnboundLocalError: local variable 'last_current_point' referenced before assignment
-        # #extract_FI_x_y has been used differently by DJ check this is correct  # step_current_values  == x
-        # tau_all         =  tau_analyser(V_array, I_array, x, plotting_viz= False, analysis_mode = 'max')
-        # sag_current_all =  sag_current_analyser(V_array, I_array, x)
+        #not yet working    #UnboundLocalError: local variable 'last_current_point' referenced before assignment
+        #extract_FI_x_y has been used differently by DJ check this is correct  # step_current_values  == x
+        tau_all         =  tau_analyser(V_array, I_array, x, plotting_viz= False, analysis_mode = 'max')
+        sag_current_all =  sag_current_analyser(V_array, I_array, x)
 
-        # row["tau_rc"] = tau_all
-        # row["sag"]    = sag_current_all
+        row["tau_rc"] = tau_all
+        row["sag"]    = sag_current_all
     
      
         
     elif row.data_type == "AP":
         print("AP type file")
         print(row.folder_file)        
-        # row["new_data_type"] = ["Boo", 0, 1 ,2]
+        
         # pAD classification
         peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, X_pca   =   pAD_detection(V_array)
         if len(pAD_df["pAD_count"]) == 0: 
