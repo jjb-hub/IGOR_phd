@@ -83,9 +83,19 @@ def _handleFile(row): # , base_path = "/Users/debap/Desktop/PatchData/"  # DJ WH
     row = row.copy()
     # Dataframe extraction 
     path_V, path_I = make_path(row.folder_file)
+    
+    skip_I = False
+    
     V_list, V_df = igor_exporter(path_V)
-    I_list, I_df = igor_exporter(path_I)
-    V_array , I_array = np.array(V_df) , np.array(I_df) 
+    V_array      = np.array(V_df) 
+    
+    # missing I traces (Soma_outwave)
+    try:
+        I_list, I_df = igor_exporter(path_I)
+        I_array      = np.array(I_df)
+    except FileNotFoundError:
+        print('I file not found, path:', path_I)
+
 
     if row.data_type in ["FP", "FP_AP"]:
         # pass
@@ -124,6 +134,8 @@ def _handleFile(row): # , base_path = "/Users/debap/Desktop/PatchData/"  # DJ WH
      
         
     elif row.data_type == "AP":
+        
+        
         print("AP type file")
         print(row.folder_file)        
         

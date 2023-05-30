@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+    # -*- coding: utf-8 -*-
 """
 Created on Wed May 10 13:58:27 2023
 
@@ -12,8 +12,11 @@ import openpyxl
 import pandas as pd
 import numpy as np
 import os
+import warnings
 
-
+os.environ["OMP_NUM_THREADS"] ='3'
+warnings.filterwarnings('ignore')
+   
 
 #%% LOAD FEATURE_DF + START INPUTS
 
