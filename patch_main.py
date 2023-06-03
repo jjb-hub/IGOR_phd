@@ -7,6 +7,7 @@ Created on Wed May 10 13:58:27 2023
 #%%
 
 from utils.helper_functions import loopCombinations, loopCombinations_stats
+from utils.plotter import drug_aplication_visualisation, plot_all_FI_curves, plot_FI_AP_curves
 from utils import igor_utils 
 from ephys import ap_functions
 import openpyxl
@@ -20,7 +21,7 @@ warnings.filterwarnings('ignore')
    
 #setters 
 
-# color_dict = {"PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue'}  
+color_dict = {"PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue'}  
 #hard coded in helper funftions need to fix!
  
 
@@ -37,11 +38,11 @@ data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_fo
 
 
 #%% RUN PLOTS
-#drug_aplication_visualisation(feature_df, color_dict) # generates PDF of drug aplications # in plotters in utils
+drug_aplication_visualisation(feature_df, color_dict) # generates PDF of drug aplications # in plotters in utils
 
-#plot_all_FI_curves(feature_df,  color_dict)  # generates PDF with all FI curves for single cell labed with drug and aplication order #### MAKE HZ NOT APs per sweep also isnt it in pA not nA??
+plot_all_FI_curves(feature_df,  color_dict)  # generates PDF with all FI curves for single cell labed with drug and aplication order #### MAKE HZ NOT APs per sweep also isnt it in pA not nA??
 
-#plot_FI_AP_curves(feature_df) #generated PDF with FI-AP for each cell
+plot_FI_AP_curves(feature_df) #generated PDF with FI-AP for each cell
 
 
 #%% Extrapolate data from files
@@ -52,7 +53,7 @@ feature_df_expanded_raw = loopCombinations(feature_df_ex)  #in helper functions 
 
 #Do statistical anlaysis of FP data and plot
 multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
-feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw, OUTPUT_DIR)
+feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw, OUTPUT_DIR, color_dict)
 
 
 print(feature_df_expanded_raw)

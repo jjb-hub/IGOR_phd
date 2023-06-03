@@ -28,7 +28,7 @@ from statannotations.Annotator import Annotator
 
 
 
-color_dict = {"PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue'}
+# color_dict = {"PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue'}
  
 ##nee to remove hard coded color_dict
 
@@ -127,13 +127,6 @@ def _handleFile(row): # , base_path = "/Users/debap/Desktop/PatchData/"  # DJ WH
         raise NotADirectoryError(f"Didn't handle: {row.data_type}") # data_type can be AP, FP_AP or FP
     return row
 
-def _handleCellID(cell_id_drug, cell_df):
-    cell_id, drug = cell_id_drug
-    # fp_idx = cell_df.data_type == "FP" #indexes of FP data in cell_df
-    # cell_df.loc[fp_idx, "new_col"] = calcValue()
-
-    return cell_df
-
 
 def loopCombinations(df):
     og_columns = df.columns.copy() #origional columns #for ordering columns
@@ -141,14 +134,7 @@ def loopCombinations(df):
     # print("Columns: ", df.columns[-40:])
     # df = pd.read_excel(r'E:\OneDrive - Floating Reality\analysis\feature_df_py.xlsx')
     df = df.apply(_handleFile, axis=1) #Apply a function along an axis (rows = 1) of the DataFrame
-    # display(df)
-    combinations = [
-                    (["cell_ID", "drug"], _handleCellID), #finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
-                    #(["cell_type", "drug"], _poltbygroup) #same as df.apply as folder_file is unique for each row
-    ]
-    # for col_names, handlingFn in combinations:
-    #     df = apply_group_by_funcs(df, col_names, handlingFn) #handel function is the generic function to be applied to different column group by
-    
+
     #ORDERING DF internal: like this new columns added will appear at the end of the df in the order they were created in _handelfile()
     all_cur_columns = df.columns.copy()
     new_colums_set = set(all_cur_columns ) - set(og_columns) # Subtract mathematical sets of all cols - old columns to get a set of the new columns
@@ -161,7 +147,7 @@ def loopCombinations(df):
 
 #%% stats/plotting  
 
-def apply_group_by_funcs(df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
+def apply_group_by_funcs(df, groupby_cols, handleFn, color_dict): #creating a list of new values and adding them to the existign df
     res_dfs_li = [] #list of dfs
     for group_info, group_df in df.groupby(groupby_cols):
         
@@ -291,7 +277,7 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
 
 
 
-def loopCombinations_stats(df, OUTPUT_DIR):
+def loopCombinations_stats(df, OUTPUT_DIR, color_dict):
     global multi_page_pdf
     multi_page_pdf = PdfPages(f'{OUTPUT_DIR}/FP_metrics_.pdf')
     #create a copy of file_folder column to use at end of looping to restore  origional row order !!! NEEDS TO BE DONE
@@ -308,7 +294,7 @@ def loopCombinations_stats(df, OUTPUT_DIR):
     ]
 
     for col_names, handlingFn in combinations:
-        df = apply_group_by_funcs(df, col_names, handlingFn) #note that as each function is run the updated df is fed to the next function
+        df = apply_group_by_funcs(df, col_names, handlingFn, color_dict) #note that as each function is run the updated df is fed to the next function
 
     multi_page_pdf.close()
     # df[ order(match(df['folder_file'], df_row_order)) ]
