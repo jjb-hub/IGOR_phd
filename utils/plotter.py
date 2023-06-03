@@ -37,7 +37,7 @@ def get_color_gradient(c1, c2, n):
 
 # https://www.google.com/search?q=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&rlz=1C5CHFA_enAU794AU794&sxsrf=APwXEdcAmrqZK5nDrVeiza4rtKgMqeIQKQ%3A1681904232199&ei=aNI_ZMvLC_KTxc8P7Z-a-A8&ved=0ahUKEwjLn7nC7bX-AhXySfEDHe2PBv8Q4dUDCA8&uact=5&oq=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&gs_lcp=Cgxnd3Mtd2l6LXNlcnAQAzoKCAAQRxDWBBCwAzoECCMQJzoHCCMQsAIQJzoFCAAQogRKBAhBGABQ_gRYuWpgwmtoBHABeACAAacBiAGiHZIBBDEuMjiYAQCgAQHIAQjAAQE&sclient=gws-wiz-serp#bsht=CgRmYnNtEgQIBDAB&kpvalbx=_oNI_ZJSCFPbOxc8Pwf-MkA8_30
 # add the I injected as a subplot to show the AP method #FIX ME 
-def drug_aplication_visualisation(feature_df,  color_dict):
+def drug_aplication_visualisation(feature_df,  OUTPUT_DIR, color_dict):
     '''
     Plots continuious points (sweeps combined, voltage data)
     Generates 'drug_aplications_all_cells.pdf' with a single AP recording plot per page, drug aplication by bath shown in grey bar
@@ -55,7 +55,7 @@ def drug_aplication_visualisation(feature_df,  color_dict):
   
     start = timeit.default_timer()
 
-    with PdfPages('drug_aplications_all_cells.pdf') as pdf:
+    with PdfPages(f'{OUTPUT_DIR}/drug_aplications_all_cells.pdf') as pdf:
         
         aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
         
@@ -168,7 +168,7 @@ def drug_aplication_visualisation_old(feature_df,  color_dict):
     print('Time: ', stop - start)  
     return
 
-def plot_all_FI_curves(feature_df,  color_dict):
+def plot_all_FI_curves(feature_df,  OUTPUT_DIR, color_dict):
     '''
     Generates 'FI_curves_all_cells.pdf' with all FI curves for a single cell polotted on  one page , coloured to indicate drug
 
@@ -185,7 +185,7 @@ def plot_all_FI_curves(feature_df,  color_dict):
 
     start = timeit.default_timer()
     
-    with PdfPages('FI_curves_all_cells.pdf') as pdf:
+    with PdfPages(f'{OUTPUT_DIR}/FI_curves_all_cells.pdf') as pdf:
         
         FI_df = feature_df[feature_df.data_type == 'FP'] #create sub dataframe of firing properties
         
@@ -198,7 +198,7 @@ def plot_all_FI_curves(feature_df,  color_dict):
               x, y, v_rest = extract_FI_x_y (path_I, path_V)
               
               #add V_rest to  label plot 
-              ax.plot(x, y, lw = 1, label = row['drug'] + ' ' + str(row['aplication_order']) + " " + str(np.round(v_rest)) + " mV RMP", c = color_dict[row['drug']])
+              ax.plot(x, y, lw = 1, label = row['drug'] + ' ' + str(row['application_order']) + " " + str(np.round(v_rest)) + " mV RMP", c = color_dict[row['drug']])
 
               
               # handles, labels = plt.gca().get_legend_handles_labels() #remove duplicate labels in legend #FIX ME 
@@ -217,7 +217,7 @@ def plot_all_FI_curves(feature_df,  color_dict):
     return 
 
 
-def plot_FI_AP_curves(feature_df):
+def plot_FI_AP_curves(feature_df, OUTPUT_DIR):
     '''
     Generates 'aplication_FI_curves_all_cells.pdf' with a plot of all FI_AP curves for a single cell on one plot per page, colour gradient after startof drug AP
 
@@ -235,7 +235,7 @@ def plot_FI_AP_curves(feature_df):
     
     color1 =  '#0000EE' #"#8A5AC2" #'#AAFF32' #blue
     color2 = '#FF4040'  #"#3575D5" #'#C20078' #red
-    with PdfPages('aplication_FI_curves_all_cells.pdf') as pdf:
+    with PdfPages(f'{OUTPUT_DIR}aplication_FI_curves_all_cells.pdf') as pdf:
         
         FI_AP_df = feature_df[feature_df.data_type == 'FP_AP'] #create sub dataframe of firing properties
         

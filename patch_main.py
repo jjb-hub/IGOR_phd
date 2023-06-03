@@ -34,21 +34,27 @@ OUTPUT_DIR = f'{ROOT}/output'
 
 feature_df = pd.read_excel (f'{INPUT_DIR}/feature_df_py.xlsx') 
 
-data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_folder)
+data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_folder) in utils.igor_utils
 
 
 #%% RUN PLOTS
-drug_aplication_visualisation(feature_df, color_dict) # generates PDF of drug aplications # in plotters in utils
+# ' ypour system has run out of appllication memory ' WILL NOT RUN #FIX ME
+# drug_aplication_visualisation(feature_df, OUTPUT_DIR, color_dict) # generates PDF of drug aplications # in plotters in utils
 
-plot_all_FI_curves(feature_df,  color_dict)  # generates PDF with all FI curves for single cell labed with drug and aplication order #### MAKE HZ NOT APs per sweep also isnt it in pA not nA??
-
-plot_FI_AP_curves(feature_df) #generated PDF with FI-AP for each cell
+# #working
+# plot_all_FI_curves(feature_df,  OUTPUT_DIR, color_dict)  # generates PDF with all FI curves for single cell labed with drug and aplication order #### MAKE HZ NOT APs per sweep also isnt it in pA not nA??
+# #working
+# plot_FI_AP_curves(feature_df, OUTPUT_DIR) #generated PDF with FI-AP for each cell
 
 
 #%% Extrapolate data from files
 feature_df_ex = feature_df.copy()
 feature_df_expanded_raw = loopCombinations(feature_df_ex)  #in helper functions #check dif in make_path and passing of directory
 
+#fix tau and sag from named tuples to: sag_val, sag_steady_state, sag_I_inj       and        tau_val, tau_steady_state, tau_I_inj
+#FIX ME
+# feature_df_expanded_raw.to_pickle(f'{OUTPUT_DIR}/feature_df_ecpanded_raw.pkl')
+# feature_df_expanded_raw_pkl= pd.read_pickle(f'{OUTPUT_DIR}/feature_df_ecpanded_raw.pkl')
 #%%
 
 #Do statistical anlaysis of FP data and plot
