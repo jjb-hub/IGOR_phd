@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter1d
 import scipy.signal as sg
 from scipy import stats
 from collections import namedtuple
-from utils import helper_functions 
+from utils import igor_utils 
 from scipy.optimize import curve_fit
 import sys
 
@@ -162,8 +162,8 @@ def extract_FI_x_y (path_I, path_V):
     v_rest : int - V when ni I injected
 
     '''
-    _, df_V = helper_functions.igor_exporter(path_V) # _ will be the continious wave which is no use here
-    _, df_I = helper_functions.igor_exporter(path_I)
+    _, df_V = igor_utils.igor_exporter(path_V) # _ will be the continious wave which is no use here
+    _, df_I = igor_utils.igor_exporter(path_I)
     
     # setting df_V and df_I to be the same dimentions
     df_I_test = df_I.iloc[:, 0:df_V.shape[1]]

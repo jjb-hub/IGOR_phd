@@ -51,19 +51,24 @@ from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path    
 import timeit
 import time
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d #not in helper_funcs
 
-from scipy.signal import butter, lfilter
-from scipy.signal import freqz
-import scipy.io.wavfile
-import scipy.signal
+from scipy.signal import butter, lfilter #not in helper_funcs
+from scipy.signal import freqz#not in helper_funcs
+import scipy.io.wavfile #not in helper_funcs
+import scipy.signal #not in helper_funcs
 
-from scipy.optimize import curve_fit
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans 
+
+from scipy.optimize import curve_fit #not in helper_funcs
 import sys
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression #not in helper_funcs
 import scipy.signal as sg
 
 from scipy import stats
+from statannotations.Annotator import Annotator
 from collections import namedtuple
 import seaborn as sns
 from collections import OrderedDict
