@@ -55,64 +55,65 @@ def drug_aplication_visualisation(feature_df,  OUTPUT_DIR, color_dict):
   
     start = timeit.default_timer()
 
-    with PdfPages(f'{OUTPUT_DIR}/drug_aplications_all_cells.pdf') as pdf:
+    # with PdfPages(f'{OUTPUT_DIR}/drug_aplications_all_cells.pdf') as pdf:
         
-        aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
+    aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
+    
+    for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
         
-        for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
+        path_V, path_I = make_path(row['folder_file'])
+        
+        array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+        I_color = 'cornflowerblue'
+        try:
+            array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
+        except FileNotFoundError: #if no I file exists 
+            print(f"no I file found for {row['cell_ID']}, I setting used was: {row['I_set']}")
+            array_I = np.zeros(len(df_V)-1)
+            I_color='grey'
             
-            path_V, path_I = make_path(row['folder_file'])
-            
-            array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
-            I_color = 'cornflowerblue'
-            try:
-                array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
-            except FileNotFoundError: #if no I file exists 
-                print(f"no I file found for {row['cell_ID']}, I setting used was: {row['I_set']}")
-                array_I = np.zeros(len(df_V)-1)
-                I_color='grey'
-                
-            x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
-            x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
-            x_I = np.arange(len(array_I))*0.0001
-            
+        x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
+        x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
+        x_I = np.arange(len(array_I))*0.0001
+        
 
-            plt.figure(figsize = (12,9))
-            # ax1 = plt.subplot2grid((20, 20), (0, 0), rowspan = 15, colspan =20) #(nrows, ncols)
-            # ax2 = plt.subplot2grid((20, 20), (17, 0), rowspan = 5, colspan=20)
-            
-            ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
-            ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
-            
-            ax1.plot(x_V,array_V, c = color_dict[row['drug']], lw=1) #voltage trace plot
-            ax2.plot(x_I, array_I, label = row['I_set'], color=I_color )#label=
-            ax2.legend()
-            
-            # ax2.axis('off')
-            ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
-            ax1.spines['right'].set_visible(False)
-            
-            ax2.spines['top'].set_visible(False)
-            ax2.spines['right'].set_visible(False)
-            # ax2.spines['left'].set_visible(False)
-            # ax2.spines['bottom'].set_visible(False)
-            
-            
-            ax1.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
-            ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15
-            ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
-            ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
-            ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
-            ax1.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 16) # , fontsize = 25
-            plt.tight_layout()
-            pdf.savefig()
+        plt.figure(figsize = (12,9))
+        # ax1 = plt.subplot2grid((20, 20), (0, 0), rowspan = 15, colspan =20) #(nrows, ncols)
+        # ax2 = plt.subplot2grid((20, 20), (17, 0), rowspan = 5, colspan=20)
+        
+        ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
+        ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
+        
+        ax1.plot(x_V,array_V, c = color_dict[row['drug']], lw=1) #voltage trace plot
+        ax2.plot(x_I, array_I, label = row['I_set'], color=I_color )#label=
+        ax2.legend()
+        
+        # ax2.axis('off')
+        ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
+        ax1.spines['right'].set_visible(False)
+        
+        ax2.spines['top'].set_visible(False)
+        ax2.spines['right'].set_visible(False)
+        # ax2.spines['left'].set_visible(False)
+        # ax2.spines['bottom'].set_visible(False)
+        
+        
+        ax1.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
+        ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15
+        ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
+        ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
+        ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
+        ax1.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 16) # , fontsize = 25
+        plt.tight_layout()
+        plt.savefig(f"{OUTPUT_DIR}/AP/{row['cell_ID']}.svg") #not run remi comented stuff bellow also didnt run : application memory
+            # pdf.savefig() #rewite as svg
 
-            plt.close("all")
+            # plt.close("all")
     stop = timeit.default_timer()
     print('Time: ', stop - start)  
     return
 
-def drug_aplication_visualisation_old(feature_df,  color_dict):
+def drug_aplication_visualisation_old(feature_df, OUTPUT_DIR, color_dict):
     '''
     Plots continuious points (sweeps combined, voltage data)
     Generates 'drug_aplications_all_cells.pdf' with a single AP recording plot per page, drug aplication by bath shown in grey bar
@@ -130,7 +131,7 @@ def drug_aplication_visualisation_old(feature_df,  color_dict):
   
     start = timeit.default_timer()
 
-    with PdfPages('drug_aplications_all_cells.pdf') as pdf:
+    with PdfPages(f'{OUTPUT_DIR}/drug_aplications_all_cells_old.pdf') as pdf:
         
         aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
         

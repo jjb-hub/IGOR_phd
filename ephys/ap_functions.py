@@ -742,8 +742,10 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
     
     visualisation = plotting_viz
     tau_array = [] 
+
     # Define Named Tuple 
-    tau_tuple  = namedtuple('Tau', ['val', 'steady_state', 'current_inj'])
+    # tau_tuple  = namedtuple('Tau', ['val', 'steady_state', 'current_inj'])
+
     num_tau_analysed_counter = 0   
     counter = 0                                                      #   as we might potentially skip some step currents as they are too noisy, need to keep track of which/ how many taus are actually analysed (we need two)
     if verbose: 
@@ -803,15 +805,16 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
                 time_frames_ = time_frames[time_frames > current_inj_first_point]
                 tau = sec_to_ms*(time_frames_[0] - current_inj_first_point) / sampling_rate
 
-                tau_temp = tau_tuple(val = tau , steady_state = asym_current, current_inj=step_current_val)
+                # tau_temp = tau_tuple(val = tau , steady_state = asym_current, current_inj=step_current_val)
+                tau_temp = [tau, asym_current, step_current_val]
 
                 tau_array.append(tau_temp)
         
         counter += 1
 
     if num_tau_analysed_counter == 0 : 
-        return tau_tuple(val = np.nan , steady_state = np.nan, current_inj=np.nan)
-
+        # return tau_tuple(val = np.nan , steady_state = np.nan, current_inj=np.nan)
+        return [np.nan, np.nan, np.nan]
     return tau_array
 
 
@@ -832,7 +835,7 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
     # the 1st two (least absolute value) step current injections. Later expand for positive current inj too? 
     sag_indices = [0,1]
     sag_current_all =  [] 
-    sag_tuple = namedtuple('Sag', ['val', 'steady_state', 'current_inj'])
+    # sag_tuple = namedtuple('Sag', ['val', 'steady_state', 'current_inj'])
     current_avging_window = input_current_avging_window 
 
     for sag_idx in sag_indices: 
@@ -860,11 +863,13 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
             
 
-            sag_current_temp = sag_tuple(val=sag_current, steady_state=asym_current , current_inj=input_step_current_values[sag_idx])
+            # sag_current_temp = sag_tuple(val=sag_current, steady_state=asym_current , current_inj=input_step_current_values[sag_idx])
+            sag_current_temp = [sag_current, asym_current, input_step_current_values[sag_idx]] 
 
         elif num_peaks > 0: 
             print('Spike found in Sag analysis, skipping')
-            sag_current_temp = sag_tuple(val= np.nan, steady_state=np.nan, current_inj = np.nan)
+            # sag_current_temp = sag_tuple(val= np.nan, steady_state=np.nan, current_inj = np.nan)
+            sag_current_temp = [np.nan, np.nan, np.nan] 
         
         # Append Value to existing named tuple
         sag_current_all.append(sag_current_temp) 

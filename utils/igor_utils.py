@@ -4,12 +4,10 @@ import igor.binarywave
 import os
 
 def igor_exporter(path):
-    
     ''' 
      Parameters
     ----------
-    path: path of data, .ibw files
-    
+    path: path to .ibw file
     Returns
     -------
     'point_list' : a continious points  (combining sweeps into continious wave)  
@@ -56,3 +54,6 @@ def make_path(folder_file): #base_path,
     path_V = data_path + folder_file + extension_V
     path_I = data_path + folder_file + extension_I
     return path_V, path_I
+
+
+## Cache system:

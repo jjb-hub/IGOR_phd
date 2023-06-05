@@ -82,8 +82,7 @@ def _handleFile(row): # , base_path = "/Users/debap/Desktop/PatchData/"  # DJ WH
         row["AP_slope"] = peak_slope_all 
         row["AP_latency"] = peak_latencies_all
 
-        #not yet working    #UnboundLocalError: local variable 'last_current_point' referenced before assignment
-        #extract_FI_x_y has been used differently by DJ check this is correct  # step_current_values  == x
+        #to DJ: to remove the named tuples I just mad them lists of lists i.e. [[value, steady_state, I_injected], [value, steady_state, I_injected] ]
         tau_all         =  tau_analyser(V_array, I_array, x, plotting_viz= False, analysis_mode = 'max')
         sag_current_all =  sag_current_analyser(V_array, I_array, x)
 
@@ -121,7 +120,9 @@ def _handleFile(row): # , base_path = "/Users/debap/Desktop/PatchData/"  # DJ WH
             row['WASH_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
 
         pass
-
+    
+    elif row.data_type == "pAD":
+        print('data_type pAD')
 
     else:
         raise NotADirectoryError(f"Didn't handle: {row.data_type}") # data_type can be AP, FP_AP or FP
@@ -175,11 +176,19 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
         df['mean_AP_latency_file'] = df.AP_latency.apply(np.mean)
         
         
-        #Tau and Sag colapse to lowest value
-        extract_truple_data('sag', df) #creating columns 'tau_file' and 'sag_file'
-        extract_truple_data('tau_rc', df)
+        #Tau and Sag colapse to lowest value #NO LOBGER TUPLES
+        # extract_truple_data('sag', df) #creating columns 'tau_file' and 'sag_file'
+        # extract_truple_data('tau_rc', df)
+        ### FIX ME 
+        #List of Lists len 0 - 2 each item = [value, steady_state, I_injected]
+        #intelegent function needed here to find comparible tau and sag values PRE and POST drug i.e. same I injection list[2]
+    
+    elif row.data_type == "pAD":
+        print('data_type = pAD')
+    
     else:
         raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP or FP
+    
     return df
     
 
