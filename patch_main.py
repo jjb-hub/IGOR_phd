@@ -6,9 +6,9 @@ Created on Wed May 10 13:58:27 2023
 """
 #%%
 
-from utils.helper_functions import loopCombinations, loopCombinations_stats
+from utils.mettabuild_functions import expandFeatureDF, loopCombinations_stats
 from utils.plotter import drug_aplication_visualisation, plot_all_FI_curves, plot_FI_AP_curves
-from utils import igor_utils 
+from utils import base_utils 
 from ephys import ap_functions
 import openpyxl
 import pandas as pd
@@ -31,6 +31,7 @@ color_dict = {"PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "P
 ROOT = os.getcwd() #This gives terminal location (terminal working dir)
 INPUT_DIR = f'{ROOT}/input'
 OUTPUT_DIR = f'{ROOT}/output'
+CACHE_DIR = f'{INPUT_DIR}/cache'
 
 feature_df = pd.read_excel (f'{INPUT_DIR}/feature_df_py.xlsx') 
 
@@ -49,7 +50,7 @@ data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_fo
 
 #%% Extrapolate data from files
 feature_df_ex = feature_df.copy()
-feature_df_expanded_raw = loopCombinations(feature_df_ex)  #in helper functions #check dif in make_path and passing of directory
+feature_df_expanded_raw = expandFeatureDF(feature_df_ex)  #in helper functions #check dif in make_path and passing of directory
 
 #fix tau and sag from named tuples to: sag_val, sag_steady_state, sag_I_inj       and        tau_val, tau_steady_state, tau_I_inj
 #FIX ME
