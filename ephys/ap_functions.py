@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter1d
 import scipy.signal as sg
 from scipy import stats
 from collections import namedtuple
-from utils import helper_functions 
+from utils import igor_utils 
 from scipy.optimize import curve_fit
 import sys
 
@@ -162,8 +162,8 @@ def extract_FI_x_y (path_I, path_V):
     v_rest : int - V when ni I injected
 
     '''
-    _, df_V = helper_functions.igor_exporter(path_V) # _ will be the continious wave which is no use here
-    _, df_I = helper_functions.igor_exporter(path_I)
+    _, df_V = igor_utils.igor_exporter(path_V) # _ will be the continious wave which is no use here
+    _, df_I = igor_utils.igor_exporter(path_I)
     
     # setting df_V and df_I to be the same dimentions
     df_I_test = df_I.iloc[:, 0:df_V.shape[1]]
@@ -742,8 +742,10 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
     
     visualisation = plotting_viz
     tau_array = [] 
+
     # Define Named Tuple 
-    tau_tuple  = namedtuple('Tau', ['val', 'steady_state', 'current_inj'])
+    # tau_tuple  = namedtuple('Tau', ['val', 'steady_state', 'current_inj'])
+
     num_tau_analysed_counter = 0   
     counter = 0                                                      #   as we might potentially skip some step currents as they are too noisy, need to keep track of which/ how many taus are actually analysed (we need two)
     if verbose: 
@@ -803,15 +805,16 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
                 time_frames_ = time_frames[time_frames > current_inj_first_point]
                 tau = sec_to_ms*(time_frames_[0] - current_inj_first_point) / sampling_rate
 
-                tau_temp = tau_tuple(val = tau , steady_state = asym_current, current_inj=step_current_val)
+                # tau_temp = tau_tuple(val = tau , steady_state = asym_current, current_inj=step_current_val)
+                tau_temp = [tau, asym_current, step_current_val]
 
                 tau_array.append(tau_temp)
         
         counter += 1
 
     if num_tau_analysed_counter == 0 : 
-        return tau_tuple(val = np.nan , steady_state = np.nan, current_inj=np.nan)
-
+        # return tau_tuple(val = np.nan , steady_state = np.nan, current_inj=np.nan)
+        return [np.nan, np.nan, np.nan]
     return tau_array
 
 
@@ -832,7 +835,7 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
     # the 1st two (least absolute value) step current injections. Later expand for positive current inj too? 
     sag_indices = [0,1]
     sag_current_all =  [] 
-    sag_tuple = namedtuple('Sag', ['val', 'steady_state', 'current_inj'])
+    # sag_tuple = namedtuple('Sag', ['val', 'steady_state', 'current_inj'])
     current_avging_window = input_current_avging_window 
 
     for sag_idx in sag_indices: 
@@ -860,11 +863,13 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
             
 
-            sag_current_temp = sag_tuple(val=sag_current, steady_state=asym_current , current_inj=input_step_current_values[sag_idx])
+            # sag_current_temp = sag_tuple(val=sag_current, steady_state=asym_current , current_inj=input_step_current_values[sag_idx])
+            sag_current_temp = [sag_current, asym_current, input_step_current_values[sag_idx]] 
 
         elif num_peaks > 0: 
             print('Spike found in Sag analysis, skipping')
-            sag_current_temp = sag_tuple(val= np.nan, steady_state=np.nan, current_inj = np.nan)
+            # sag_current_temp = sag_tuple(val= np.nan, steady_state=np.nan, current_inj = np.nan)
+            sag_current_temp = [np.nan, np.nan, np.nan] 
         
         # Append Value to existing named tuple
         sag_current_all.append(sag_current_temp) 
