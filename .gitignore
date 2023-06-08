@@ -1,0 +1,6 @@
+output
+.vscode
+.venv
+__pycache__
+input
+debug.py
