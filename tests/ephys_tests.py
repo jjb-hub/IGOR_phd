@@ -22,9 +22,11 @@ INPUT_DIR = f'{ROOT}/input'
 OUTPUT_DIR = f'{ROOT}/output'
 CACHE_DIR = f'{INPUT_DIR}/cache'
 
-feature_df = pd.read_excel (f'{INPUT_DIR}/feature_df_py.xlsx') 
-
-data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_folder)
+feature_df = openpyxl.load_workbook (f'{INPUT_DIR}/feature_df_py.xlsx') 
+data = feature_df['Sheet1'].values
+feature_df = pd.DataFrame(data)
+header = feature_df.iloc[0]
+feature_df = feature_df[1:]
 
 
 #%%TEST PATHS / FUNCS

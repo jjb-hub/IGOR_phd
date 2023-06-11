@@ -878,6 +878,7 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
 
 
+
 def pAD_detection(V_dataframe, pca_plotting = False , kmeans_plotting = False , histogram_plotting=False):
 
     '''
@@ -992,7 +993,7 @@ def pAD_detection(V_dataframe, pca_plotting = False , kmeans_plotting = False , 
         #print(np.nanmean( peak_slope_all  [kmeans_2.labels_ == 0] ) , np.nanmean( peak_slope_all  [kmeans_2.labels_ == 1] ))
         
         
-        if np.nanmean( peak_slope_all  [kmeans_2.labels_ == 0] )  < np.nanmean( peak_slope_all  [kmeans_2.labels_ == 1] ):
+        if np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 0] )  < np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ):
             pAD_df["pAD"] = pAD_class_labels[np.array(kmeans_2.labels_)]
             pAD_df["pAD_count"] = np.sum(kmeans_2.labels_)
         else:
@@ -1094,3 +1095,77 @@ def pAD_detection(V_dataframe, pca_plotting = False , kmeans_plotting = False , 
     return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, X_pca  
         
         
+def pAD_checker_and_plotter(pAD_dataframe, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100):
+    
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    plot_forwards_window        =  input_plot_forwards_window  
+    plot_backwards_window       =  input_plot_backwards_window
+    plot_window = plot_forwards_window + plot_backwards_window
+    sampling_rate               = 1e4 
+    sec_to_ms                   = 1e3
+    time_                       = sec_to_ms* np.arange(0,150) / sampling_rate  
+    # pAD subdataframe and indices
+  
+    # pAD subdataframe and indices
+    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+    pAD_ap_indices = pAD_sub_df[["AP_loc", "AP_sweep_num"]].values
+
+    # Somatic subdataframe and indices
+
+    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+    Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num"]].values
+    
+    
+    
+    
+
+    pAD_spike_array = np.zeros([len(pAD_ap_indices), plot_window  ])
+    Somatic_spike_array = np.zeros([len(Somatic_ap_indices), plot_window ])
+
+
+    # Plotter for pAD and Somatic Spikes 
+
+    # initialise empty line list 
+    fig, ax = plt.subplots()
+    lines  = []  
+
+    for idx in range(len(pAD_ap_indices)): 
+        pAD_spike_array[idx,:] = V[ pAD_ap_indices[:,0][idx] - plot_backwards_window :  pAD_ap_indices[:,0][idx] +  plot_forwards_window  ,  pAD_ap_indices[:,1][idx]    ]
+        line, = ax.plot(time_, pAD_spike_array[idx,:] , color = 'grey')
+        lines.append(line)
+        #plt.plot(pAD_spike_array[idx,:], color ='grey', label = 'pAD')
+
+    line, = ax.plot(time_, np.mean(pAD_spike_array , axis = 0)  , color = 'red')
+    lines.append(line)
+
+    for idx_ in range(len(Somatic_ap_indices)): 
+        Somatic_spike_array[idx_,:] = V[ Somatic_ap_indices[:,0][idx_] - plot_backwards_window :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_ap_indices[:,1][idx_]    ]
+        line, = ax.plot(time_,Somatic_spike_array[idx_,:] , color = 'green')
+        lines.append(line)
+
+
+    line, = ax.plot(time_, np.mean(Somatic_spike_array , axis = 0)  , c = '#E3CF57')
+    lines.append(line)
+
+    # Create the custom legend with the correct colors
+    legend_elements = [Line2D([0], [0], color='grey', lw=2, label='pAD Ensemble'),
+                       Line2D([0], [0], color='red', lw=2, label= 'pAD Mean'),
+                       Line2D([0], [0], color='green', lw=2, label='Somatic Ensemble'),
+                       Line2D([0], [0], color='#E3CF57', lw=2, label='Somatic Mean')]
+
+    # Set the legend with the custom elements
+    ax.legend(handles=legend_elements)
+
+        
+    #plt.plot(np.mean(Somatic_spike_array, axis = 0 ) , c = '#E3CF57', label = 'Somatic Mean')
+    plt.ylabel('Membrane Potential (mV)')
+    plt.xlabel('Time (ms)')
+    plt.show()    
+
+    
+    return None 
+    
+    
+    
