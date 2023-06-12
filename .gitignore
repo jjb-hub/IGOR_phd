@@ -1,6 +1,8 @@
 output
 .vscode
 .venv
+*.pkl
+.DS_Store
 __pycache__
 input
 debug.py
