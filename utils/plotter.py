@@ -5,7 +5,9 @@ Created on Wed May 10 15:29:46 2023
 @author: GUEST1
 """
 #myshit 
-from utils.base_utils import igor_exporter, make_path
+
+from utils.mettabuild_functions import expandFeatureDF, loopCombinations_stats
+from utils.base_utils import *
 from utils.mettabuild_functions import extract_FI_x_y
 #shitshit
 from matplotlib import pyplot as plt
@@ -14,7 +16,7 @@ import numpy as np
 
 import timeit
 
-#simp funcs
+#external functions #CHECK USEAGE
 def hex_to_RGB(hex_str):
     """ #FFFFFF -> [255,255,255]"""
     #Pass 16 to the integer function for change of base
@@ -33,6 +35,71 @@ def get_color_gradient(c1, c2, n):
     return ["#" + "".join([format(int(round(val*255)), "02x") for val in item]) for item in rgb_colors]
 
 
+# My Functions
+
+def getorBuildApplicationFig(filename, cell_ID, from_scratch=None):
+    color_dict = getColors(filename)
+    expanded_df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
+    from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
+    #inputs to builder if not cached:
+    cell_df = expanded_df[(expanded_df['cell_ID']== cell_ID)&(expanded_df['data_type']=='AP')]
+    folder_file = cell_df['folder_file'].values[0]
+    I_set = cell_df['I_set'].values[0]
+    drug = cell_df['drug'].values[0]
+    drug_in = cell_df['drug_in'].values[0]
+    drug_out = cell_df['drug_out'].values[0]
+    application_order = cell_df['application_order'].values[0]
+    pAD_locs = cell_df['APP_pAD_AP_locs'].values[0]  #FIX ME perhaps this should also be in try so can run without pAD! or add pAD == True in vairables
+    buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
+
+
+def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, application_order=None, pAD_locs=None):
+    #load raw data
+    path_V, path_I = make_path(folder_file)
+    array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+    try:
+        array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
+    except FileNotFoundError: #if no I file exists 
+        print(f"no I file found for {cell_ID}, I setting used was: {I_set}")
+        array_I = np.zeros(len(df_V)-1)
+    #scale data
+    x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
+    x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
+    x_I = np.arange(len(array_I))*0.00005 #20kHz igor 
+    #plot 
+    fig = plt.figure(figsize = (12,9))
+    ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
+    ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
+    ax1.plot(x_V,array_V, c = color_dict[drug], lw=1) #voltage trace plot # "d", markevery=pAD_locs
+    
+    if pAD_locs is not None: #FIX ME
+        print('plotting pAD')
+    
+    ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
+    ax2.legend()
+    # ax2.axis('off')
+    ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
+    ax1.spines['right'].set_visible(False)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
+    # ax2.spines['left'].set_visible(False)
+    # ax2.spines['bottom'].set_visible(False)
+    ax1.axvspan((int((drug_in)* x_scaler_drug_bar) - x_scaler_drug_bar), (int(drug_out)* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
+    ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15
+    ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
+    ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
+    ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
+    ax1.set_title(cell_ID + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
+    plt.tight_layout()
+
+    saveAplicationFig(fig, cell_ID)
+    return 
+
+
+
+
+
+# OLD SHIT BELLOW WILL DELETE ONCE metta looper works
 #%% PLOTTING FUNCS: AP, FI, FI_AP, pAD
 
 # https://www.google.com/search?q=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&rlz=1C5CHFA_enAU794AU794&sxsrf=APwXEdcAmrqZK5nDrVeiza4rtKgMqeIQKQ%3A1681904232199&ei=aNI_ZMvLC_KTxc8P7Z-a-A8&ved=0ahUKEwjLn7nC7bX-AhXySfEDHe2PBv8Q4dUDCA8&uact=5&oq=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&gs_lcp=Cgxnd3Mtd2l6LXNlcnAQAzoKCAAQRxDWBBCwAzoECCMQJzoHCCMQsAIQJzoFCAAQogRKBAhBGABQ_gRYuWpgwmtoBHABeACAAacBiAGiHZIBBDEuMjiYAQCgAQHIAQjAAQE&sclient=gws-wiz-serp#bsht=CgRmYnNtEgQIBDAB&kpvalbx=_oNI_ZJSCFPbOxc8Pwf-MkA8_30
