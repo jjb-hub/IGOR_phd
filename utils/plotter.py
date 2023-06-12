@@ -37,21 +37,36 @@ def get_color_gradient(c1, c2, n):
 
 # My Functions
 
-def getorBuildApplicationFig(filename, cell_ID, from_scratch=None):
+def getorBuildApplicationFig(filename, cell_ID_or_cell_df, from_scratch=None):
     color_dict = getColors(filename)
-    expanded_df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
-    from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
-    #inputs to builder if not cached:
-    cell_df = expanded_df[(expanded_df['cell_ID']== cell_ID)&(expanded_df['data_type']=='AP')]
-    folder_file = cell_df['folder_file'].values[0]
-    I_set = cell_df['I_set'].values[0]
-    drug = cell_df['drug'].values[0]
-    drug_in = cell_df['drug_in'].values[0]
-    drug_out = cell_df['drug_out'].values[0]
-    application_order = cell_df['application_order'].values[0]
-    pAD_locs = cell_df['APP_pAD_AP_locs'].values[0]  #FIX ME perhaps this should also be in try so can run without pAD! or add pAD == True in vairables
-    buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
 
+    if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
+        expanded_df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
+        cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
+    else:
+        cell_df = cell_ID_or_cell_df
+    cell_ID = cell_df['cell_ID'].iloc[0]
+
+    from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
+    if from_scratch or not isCached(filename, cell_ID):
+        print(f'BUILDING "{cell_ID} Application Figure"')    #Build useing callback otherwise and cache result
+        #inputs to builder if not cached:
+        folder_file = cell_df['folder_file'].values[0]
+        I_set = cell_df['I_set'].values[0]
+        drug = cell_df['drug'].values[0]
+        drug_in = cell_df['drug_in'].values[0]
+        drug_out = cell_df['drug_out'].values[0]
+        application_order = cell_df['application_order'].values[0]
+        pAD_locs = cell_df['APP_pAD_AP_locs'].values[0]  #FIX ME perhaps this should also be in try so can run without pAD! or add pAD == True in vairables
+        
+        df = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
+        cache(filename, cell_ID, df)
+
+    else : df = getCache(filename, cell_ID)
+
+    
+    
+    
 
 def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, application_order=None, pAD_locs=None):
     #load raw data
@@ -91,11 +106,27 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
     ax1.set_title(cell_ID + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
     plt.tight_layout()
-
     saveAplicationFig(fig, cell_ID)
     return 
 
+def loopBuildAplicationFigs(filename):
+    df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
+    color_dict = getColors(filename)
+    application_df = df[df.data_type == 'AP'] 
+    for row_ind, row in application_df.iterrows():  #row is a series that can be called row['colname']
+        #inputs to builder if not cached:
+        cell_ID = row['cell_ID']
+        folder_file = row['folder_file']
+        I_set = row['I_set']
+        drug = row['drug']
+        drug_in = row['drug_in']
+        drug_out = row['drug_out']
+        application_order = row['application_order']
+        pAD_locs = row['APP_pAD_AP_locs']
 
+        buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
+        plt.close()
+    return
 
 
 

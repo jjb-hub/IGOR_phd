@@ -4,6 +4,7 @@ import pandas as pd
 import igor.packed
 import igor.binarywave
 import os
+import matplotlib.pyplot as plt
 
 ######## CONSTANTS ######################
 # Constants are like variables that should not be rewritten, they are declared in all caps by convention
@@ -131,11 +132,15 @@ def isCached(filename, identifier):
 
 
 #need to also add from_scratch = None 
-#need to make fo rloop combinations
+#need to make forloop combinations
+def getCellDF(df, cell_id, data_type = None):
+    cell_df = df[df['cell_ID']==cell_id]
+    if data_type is not None:
+        cell_df = cell_df[cell_df['data_type']== data_type]
+    return cell_df
+
 def getorBuildExpandedDF(filename, identifier, builder_cb, from_scratch=None):
     filename_no_extension = filename.split(".")[0]
-    # if isCached(filename_no_extension, identifier): #Check cache to avoid recalcuating from scratch if alreasy done
-    #     return getCache(filename_no_extension, identifier)
     from_scratch = from_scratch if from_scratch is not None else input("Recalculate DF even if previous version exists? (y/n)") == 'y'
     if from_scratch or not isCached(filename, identifier):
         print(f'BUILDING "{identifier}"')    #Build useing callback otherwise and cache result
@@ -150,7 +155,8 @@ def saveFigure(fig, identifier, fig_type):
     fig.savefig(f"{output_subdir}/{identifier}.svg")
     print(f'SAVED {output_subdir}/{identifier}.svg') 
     fig.savefig(f"{output_subdir}/{identifier}.png")
-    print(f'SAVED {output_subdir}/{identifier}.png') 
+    print(f'SAVED {output_subdir}/{identifier}.png')
+    
 
 def saveAplicationFig(fig, identifier):
     saveFigure(fig, identifier, 'DrugApplication')

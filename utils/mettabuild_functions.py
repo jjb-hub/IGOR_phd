@@ -37,11 +37,9 @@ CACHE_DIR = f'{INPUT_DIR}/cache'
 n_minimum = 3 
 p_value_threshold=0.05 #FIX ME build these in with simple get or guild functions outside the metta loop also interrate with metta loop
 
-# color_dict = {"PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue'}
- 
-##nee to remove hard coded color_dict
 
-#%%   EXPAND FEATURE_DF
+
+#EXPAND FEATURE_DF
 #takes a row of the df (a single file) and extractes values based on the data type  FP or AP then appends values to df
 
 def _handleFile(row): 
@@ -61,8 +59,8 @@ def _handleFile(row):
 
     if row.data_type in ["FP", "FP_AP"]:
         # pass 
-        print("FP type file")
-        print(row.folder_file)
+        # print("FP type file")
+        # print(row.folder_file)
 
         #data files to be fed into extraction funcs feature_df_extended
         row["max_firing"] = calculate_max_firing(V_array)
@@ -86,8 +84,8 @@ def _handleFile(row):
         
     elif row.data_type == "AP":
 
-        print("AP type file")
-        print(row.folder_file)        
+        # print("AP type file")
+        # print(row.folder_file)        
         
         # pAD classification
         peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, X_pca   =   pAD_detection(V_array)
@@ -137,7 +135,7 @@ def expandFeatureDF(filename):
     return df_reordered
 
 
-#%% stats/plotting  
+# GENERATE STATS AND PLOT EXPANDED_DF  
 
 def apply_group_by_funcs(df, groupby_cols, handleFn, color_dict): #creating a list of new values and adding them to the existign df
     res_dfs_li = [] #list of dfs

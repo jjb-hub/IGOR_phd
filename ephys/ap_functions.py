@@ -8,6 +8,7 @@ Created on Wed May 10 12:30:00 2023
 
 import numpy as np 
 import matplotlib.pyplot as plt 
+from matplotlib.lines import Line2D 
 from scipy.ndimage import gaussian_filter1d
 import scipy.signal as sg
 from scipy import stats
