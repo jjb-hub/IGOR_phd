@@ -9,9 +9,11 @@ Created on Wed May 10 15:29:46 2023
 from utils.mettabuild_functions import expandFeatureDF, loopCombinations_stats
 from utils.base_utils import *
 from utils.mettabuild_functions import extract_FI_x_y
+from ephys.ap_functions import pAD_detection
 #shitshit
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.lines import Line2D 
 import numpy as np
 
 import timeit
@@ -59,11 +61,10 @@ def getorBuildApplicationFig(filename, cell_ID_or_cell_df, from_scratch=None):
         application_order = cell_df['application_order'].values[0]
         pAD_locs = cell_df['APP_pAD_AP_locs'].values[0]  #FIX ME perhaps this should also be in try so can run without pAD! or add pAD == True in vairables
         
-        df = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
-        cache(filename, cell_ID, df)
-
-    else : df = getCache(filename, cell_ID)
-
+        fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
+        saveAplicationFig(fig, cell_ID)
+    else : fig = getCache(filename, cell_ID)
+    fig.show()
     
     
     
@@ -106,8 +107,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
     ax1.set_title(cell_ID + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
     plt.tight_layout()
-    saveAplicationFig(fig, cell_ID)
-    return 
+    return fig
 
 def loopBuildAplicationFigs(filename):
     df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
@@ -128,7 +128,94 @@ def loopBuildAplicationFigs(filename):
         plt.close()
     return
 
+#PLOTTERS FOR pAD
 
+def getorbuildMeanAPFig(filename, cell_ID_or_cell_df, from_scratch=None):
+        if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
+            expanded_df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
+            cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
+        else:
+            cell_df = cell_ID_or_cell_df
+        cell_ID = cell_df['cell_ID'].iloc[0]
+
+        from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
+        if from_scratch or not isCached(filename, cell_ID):
+            print(f'BUILDING "{cell_ID} Mean APs Figure"') 
+            folder_file = cell_df['folder_file'].values[0]
+            path_V, path_I = make_path(folder_file)
+            listV, dfV = igor_exporter(path_V)
+            V_array = np.array(dfV)
+            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
+            if peak_heights_all <=1:
+                return print(f'No APs in trace for {cell_ID}')
+            fig = buildMeanAPFig(cell_ID, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
+            saveMeanAPFig(fig, cell_ID)
+        else : fig = getCache(filename, cell_ID)
+        fig.show()
+
+def buildMeanAPFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100):
+
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    plot_forwards_window        =  input_plot_forwards_window  
+    plot_backwards_window       =  input_plot_backwards_window
+    plot_window = plot_forwards_window + plot_backwards_window
+    sampling_rate               = 1e4 
+    sec_to_ms                   = 1e3
+    time_                       = sec_to_ms* np.arange(0,150) / sampling_rate  
+    # pAD subdataframe and indices
+    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+    pAD_ap_indices = pAD_sub_df[["AP_loc", "AP_sweep_num"]].values
+
+    # Somatic subdataframe and indices
+    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+    Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num"]].values
+
+    pAD_spike_array = np.zeros([len(pAD_ap_indices), plot_window  ])
+    Somatic_spike_array = np.zeros([len(Somatic_ap_indices), plot_window ])
+
+    # Plotter for pAD and Somatic Spikes 
+    fig, ax = plt.subplots()
+    lines  = []  # initialise empty line list 
+
+    for idx in range(len(pAD_ap_indices)): 
+        pAD_spike_array[idx,:] = V[ pAD_ap_indices[:,0][idx] - plot_backwards_window :  pAD_ap_indices[:,0][idx] +  plot_forwards_window  ,  pAD_ap_indices[:,1][idx]    ]
+        line, = ax.plot(time_, pAD_spike_array[idx,:] , color = 'salmon', alpha=0.05)
+        lines.append(line)
+        #plt.plot(pAD_spike_array[idx,:], color ='grey', label = 'pAD')
+
+    line, = ax.plot(time_, np.mean(pAD_spike_array , axis = 0)  , color = 'red')
+    lines.append(line)
+
+    for idx_ in range(len(Somatic_ap_indices)): 
+        Somatic_spike_array[idx_,:] = V[ Somatic_ap_indices[:,0][idx_] - plot_backwards_window :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_ap_indices[:,1][idx_]    ]
+        line, = ax.plot(time_,Somatic_spike_array[idx_,:] , color = 'cornflowerblue', alpha=0.05)
+        lines.append(line)
+
+    line, = ax.plot(time_, np.mean(Somatic_spike_array , axis = 0)  , c = 'blue')
+    lines.append(line)
+
+    # Create the custom legend with the correct colors
+    legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble', alpha=0.2),
+                       Line2D([0], [0], color='red', lw=2, label= 'pAD Mean'),
+                       Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble', alpha=0.2),
+                       Line2D([0], [0], color='blue', lw=2, label='Somatic Mean')]
+
+    # Set the legend with the custom elements
+    ax.legend(handles=legend_elements)
+
+        
+    #plt.plot(np.mean(Somatic_spike_array, axis = 0 ) , c = 'blue', label = 'Somatic Mean')
+    plt.title(cell_id)
+    plt.ylabel('Membrane Potential (mV)')
+    plt.xlabel('Time (ms)')
+    plt.tight_layout
+    plt.show()    
+    return fig 
+    
+    
+    
 
 # OLD SHIT BELLOW WILL DELETE ONCE metta looper works
 #%% PLOTTING FUNCS: AP, FI, FI_AP, pAD
@@ -211,109 +298,6 @@ def drug_aplication_visualisation(feature_df,  OUTPUT_DIR, color_dict):
     print('Time: ', stop - start)  
     return
 
-def drug_aplication_visualisation_old(feature_df, OUTPUT_DIR, color_dict):
-    '''
-    Plots continuious points (sweeps combined, voltage data)
-    Generates 'drug_aplications_all_cells.pdf' with a single AP recording plot per page, drug aplication by bath shown in grey bar
-
-    Parameters
-    ----------
-    feature_df : df including all factors needed to distinguish data 
-    color_dict : dict with a colour for each drug to be plotted
-
-    Returns
-    -------
-    None.
-
-    '''
-  
-    start = timeit.default_timer()
-
-    with PdfPages(f'{OUTPUT_DIR}/drug_aplications_all_cells_old.pdf') as pdf:
-        
-        aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
-        
-        for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
-        
-            path_V, path_I = make_path(row['folder_file'])
-            array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
-            array_I, df_I = igor_exporter(path_I) 
-            
-            fig, axs = plt.subplots(1,1, figsize = (10, 5))
-            
-            ##
-            # figure = plt.Figure()
-            # ax1 = plt.subplot2grid((10, 10), (0, 0), rowspan = 7, colspan =10) #(nrows, ncols)
-            # ax2 = plt.subplot2grid((10, 10), (5, 0), rowspan = 2, colspan=10)
-            
-            # ax1.plot(x,array_V, c = color_dict[row['drug']], lw=1) #voltage trace plot
-            
-            # fig, axs = plt.subplots(1,2, figsize = (10, 5)) to make subplot ?
-            #https://matplotlib.org/stable/tutorials/intermediate/tight_layout_guide.html#sphx-glr-tutorials-intermediate-tight-layout-guide-py
-  
-            x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
-            x = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
-            
-            axs.plot(x,array_V, c = color_dict[row['drug']], lw=1)
-            # plt.ylim(-65, -35)
-            
-            axs.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
-            axs.set_xlabel( "Time (s)", fontsize = 15)
-            axs.set_ylabel( "Membrane Potential (mV)", fontsize = 15)
-            axs.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 25)
-            pdf.savefig(fig)
-            plt.close("all")
-    stop = timeit.default_timer()
-    print('Time: ', stop - start)  
-    return
-
-def plot_all_FI_curves(feature_df,  OUTPUT_DIR, color_dict):
-    '''
-    Generates 'FI_curves_all_cells.pdf' with all FI curves for a single cell polotted on  one page , coloured to indicate drug
-
-    Parameters
-    ----------
-    feature_df : df including all factors needed to distinguish data 
-    color_dict : dict with a colour for each drug to be plotted
-
-    Returns
-    -------
-    None.
-
-    '''
-
-    start = timeit.default_timer()
-    
-    with PdfPages(f'{OUTPUT_DIR}/FI_curves_all_cells.pdf') as pdf:
-        
-        FI_df = feature_df[feature_df.data_type == 'FP'] #create sub dataframe of firing properties
-        
-        for cell_ID_name, cell_df in FI_df.groupby('cell_ID'): # looping for each cell 
-            fig, ax = plt.subplots(1,1, figsize = (10,5)) #generate empty figure for each cell to plot all FI curves on
-            
-            for row_ind, row in cell_df.iterrows(): 
-                
-              path_V, path_I = make_path(row['folder_file'])  #get paths
-              x, y, v_rest = extract_FI_x_y (path_I, path_V)
-              
-              #add V_rest to  label plot 
-              ax.plot(x, y, lw = 1, label = row['drug'] + ' ' + str(row['application_order']) + " " + str(np.round(v_rest)) + " mV RMP", c = color_dict[row['drug']])
-
-              
-              # handles, labels = plt.gca().get_legend_handles_labels() #remove duplicate labels in legend #FIX ME 
-              # by_label = dict(zip(labels, handles))
-              # ax.legend(by_label.values(), by_label.keys()) https://stackoverflow.com/questions/13588920/stop-matplotlib-repeating-labels-in-legend
-
-            ax.set_xlabel( "Current (pA)", fontsize = 15)
-            ax.set_ylabel( "AP frequency", fontsize = 15)
-            ax.set_title( cell_ID_name + " FI curves", fontsize = 20)
-            ax.legend(fontsize = 10)
-            pdf.savefig(fig)
-            plt.close("all") 
-                
-        stop = timeit.default_timer()
-        print('Time: ', stop - start)    
-    return 
 
 
 def plot_FI_AP_curves(feature_df, OUTPUT_DIR):
