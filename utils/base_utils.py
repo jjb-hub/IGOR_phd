@@ -155,6 +155,9 @@ def saveFigure(fig, identifier, fig_type):
 def saveAplicationFig(fig, identifier):
     saveFigure(fig, identifier, 'DrugApplication')
 
+def saveHistogramFig(fig, identifier):
+    saveFigure(fig, identifier, 'Histogram')
+
 
 ######## INIT ##########
 #Start by checking filesystem has all the folders necessary for read/write operations (cache) or create them otherwise

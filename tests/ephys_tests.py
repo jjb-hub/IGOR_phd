@@ -42,8 +42,6 @@ path_V = f'{INPUT_DIR}/PatchData/JJB230110/t6Soma.ibw'
 #to plot I steps or V responce to steps all in 1 
 listV, dfV = igor_exporter(path_V)
 listI, dfI = igor_exporter(path_I)
-
-
 V = np.array(dfV)
 I = np.array(dfI)
 
