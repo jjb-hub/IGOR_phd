@@ -6,3 +6,4 @@ output
 __pycache__
 input
 debug.py
+cache
