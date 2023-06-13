@@ -146,7 +146,7 @@ def getorbuildMeanAPFig(filename, cell_ID_or_cell_df, from_scratch=None):
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
-            if peak_heights_all <=1:
+            if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_ID}')
             fig = buildMeanAPFig(cell_ID, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
             saveMeanAPFig(fig, cell_ID)
