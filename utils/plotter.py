@@ -269,3 +269,66 @@ def plot_FI_AP_curves(feature_df, OUTPUT_DIR):
         
     return 
 
+def buildPhasePlotFig(cell_id, pAD_dataframe, V_array) :
+    '''
+    Input pAD_dataframe corresponding to cell_id and V_array
+    '''
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    plot_forwards_window = 50 
+    voltage_max = 60.0 
+    voltage_min = -120.0
+    
+    # pAD subdataframe and indices
+    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+    pAD_ap_indices = pAD_sub_df[["AP_loc", "AP_sweep_num"]].values
+
+    # Somatic subdataframe and indices
+    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+    Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num"]].values
+    
+    # # Plotter for pAD and Somatic Spikes but separated into DRD, CTG, TLX celltypes
+    
+    fig, ax = plt.subplots()
+    lines  = []  # initialise empty line list 
+    
+    for idx in range(len(pAD_ap_indices)):
+        
+        
+        
+        v_temp = V[ pAD_ap_indices[:,0][idx] :  pAD_ap_indices[:,0][idx] +  plot_forwards_window  ,  pAD_ap_indices[:,1][idx]    ]
+        dv_temp = np.diff(v_temp) 
+        
+        if max(v_temp) > voltage_max or min(v_temp) < voltage_min:             # don't plot artifacts
+            pass
+        else:
+            line, = ax.plot(v_temp[:-1], dv_temp ,, color = 'salmon', alpha=0.05)        
+            lines.append(line)
+        
+    for idx_ in range(len(Somatic_ap_indices)): 
+        
+        
+        v_temp = V[ Somatic_ap_indices[:,0][idx_]  :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_ap_indices[:,1][idx_]    ]
+        dv_temp = np.diff(v_temp) 
+        
+        if max(v_temp) > voltage_max or min(v_temp) < voltage_min:             # don't plot artifacts
+            pass
+        else:
+            line, = ax.plot(v_temp[:-1], dv_temp ,, color = 'cornflowerblue' , alpha=0.05)
+            lines.append(line)
+            
+        
+        # Create the custom legend with the correct colors
+        legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble', alpha=0.2),
+                           Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble', alpha=0.2)]
+
+        # Set the legend with the custom elements
+        ax.legend(handles=legend_elements)
+    
+    plt.title(cell_id)
+    plt.ylabel(' dV (mV)')
+    plt.xlabel(' Membrane Potential (mV)')
+    plt.tight_layout
+    plt.show()    
+    return fig 
