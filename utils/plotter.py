@@ -482,4 +482,58 @@ def buildRateOfDepolFig(cell_id, pAD_dataframe, V_array):
     plt.show()    
     return fig 
 
+def buildPCA(cell_id, pAD_dataframe, V_array):
+
+    '''
+    PCA plotter build on top of pAD labelling
+    '''
+    
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    
+    # pAD subdataframe and indices
+    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+    pAD_upshoot_indices = pAD_sub_df[["upshoot_loc", "AP_sweep_num"]].values
+
+    # Somatic subdataframe and indices
+    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+    Somatic_upshoot_indices = Somatic_sub_df[["upshoot_loc", "AP_sweep_num"]].values
+    
+    X = pAD_df[["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
+    
+    
+    y = pAD_df['pAD'] 
+    
+        
+    # Standardize the features
+    scaler = StandardScaler()
+    X_std = scaler.fit_transform(X)
+    
+    # Perform PCA with 2 components
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X_std)
+    
+    # Plot the PCA results with different colors for each AP_type label
+    
+    fig, ax = plt.subplots()
+    
+    
+    
+    
+    ax.scatter(X_pca[:, 0], X_pca[:, 1], c= list(y.map({"Somatic": 'cornflowerblue' , "pAD": 'salmon'})))
+    plt.xlabel('Principal Component 1')
+    plt.ylabel('Principal Component 2')
+    plt.title(cell_id)
+    
+    # Create the custom legend with the correct colors
+    legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble'),
+                       Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble')]
+
+    # Set the legend with the custom elements
+    ax.legend(handles=legend_elements)
+    plt.show()
+    
+    return fig 
+
     
