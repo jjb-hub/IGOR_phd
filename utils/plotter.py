@@ -536,4 +536,45 @@ def buildPCA(cell_id, pAD_dataframe, V_array):
     
     return fig 
 
+def buildpADHistogram(cell_id, pAD_dataframe, V_array):
     
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    
+    # Define colors 
+    colors = ['salmon', 'cornflowerblue' ]
+    plot_labels = ['pAD' , 'Somatic' ]
+
+    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+
+    # Add each subplot to the figure
+    
+    for idx in [0,1] : 
+        axs[0, 0].hist(pAD_df[pAD_df["pAD"] == plot_labels[idx] ]["AP_threshold"], bins=20, color= colors[idx], label =plot_labels[idx] )
+        axs[0, 1].hist(pAD_df[pAD_df["pAD"] == plot_labels[idx] ]["AP_slope"], bins=20, color= colors[idx], label =plot_labels[idx])
+        axs[1, 0].hist(pAD_df[pAD_df["pAD"] == plot_labels[idx] ]["AP_height"], bins=20, color= colors[idx], label =plot_labels[idx])
+        axs[1, 1].hist(pAD_df[pAD_df["pAD"] == plot_labels[idx] ]["AP_latency"], bins=20, color= colors[idx], label =plot_labels[idx])
+
+    # Add x and y labels to each subplot
+    for ax in axs.flat:
+        ax.set(xlabel='x-label', ylabel='Counts')
+
+    # Add a legend to each subplot
+    for ax in axs.flat:
+        ax.legend()
+
+    # Add a title to each subplot
+    axs[0, 0].set_title('Voltage Thresholds')
+    axs[0, 1].set_title('AP Slopes')
+    axs[1, 0].set_title('AP Heights')
+    axs[1, 1].set_title('Peak Latency')
+    
+    plt.title(cell_id)
+    fig.tight_layout()   
+    plt.show()
+    
+    return fig
+
+
+
