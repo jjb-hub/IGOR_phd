@@ -84,11 +84,11 @@ def _handleFile(row):
         
     elif row.data_type == "AP":
 
-        # print("AP type file")
-        # print(row.folder_file)        
+        print("AP type file")
+        print(row.folder_file)        
         
         # pAD classification
-        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, X_pca   =   pAD_detection(V_array)
+        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
 
         if len(pAD_df["pAD_count"]) == 0:  #if there are no APs of any kind detected
             row["pAD_count"] =  np.nan
@@ -105,10 +105,15 @@ def _handleFile(row):
             row['APP_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
             row['WASH_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
 
-        #make points list for PRE , AP and WASH voltages
-        row['PRE_V'] = V_array[: (row.drug_in - 1)*len(V_df.index)] # number of sweeps withoug drug * len of values in one sweep
-        row['APP_V'] = V_array[ (row.drug_in - 1)*len(V_df.index) : (row.drug_out)*len(V_df.index)]
-        row['WASH_V'] = V_array[(row.drug_out)*len(V_df.index):]
+        #make points list for PRE , AP and WASH voltages #THIS IS TOO BIG EXTRACT RELEVANT DATA i.e. SD and add 
+        #saving full points list is too long! #to float 16 instead of 32 
+        #FIX ME 
+        # varray[ rows to take   : cols to take ]
+        # varray[:, :row.drug_in] #take all rows up to drug_in
+
+        # row['PRE_V'] = V_array[:, :row.drug_in] 
+        # row['APP_V'] = V_array[:, row.drug_in:row.drug_out]
+        # row['WASH_V'] = V_array[:, row.drug_out:]
         pass
     
     elif row.data_type == "pAD":
