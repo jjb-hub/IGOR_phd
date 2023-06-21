@@ -105,7 +105,7 @@ def _handleFile(row):
             row['APP_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
             row['WASH_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
 
-        #make points list for PRE , AP and WASH voltages #THIS IS TOO BIG EXTRACT RELEVANT DATA i.e. SD and add 
+        #make points list for PRE , APP and WASH voltages #THIS IS TOO BIG EXTRACT RELEVANT DATA i.e. SD and add 
         #saving full points list is too long! #to float 16 instead of 32 
         #FIX ME 
         # varray[ rows to take   : cols to take ]
