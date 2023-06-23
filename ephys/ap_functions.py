@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter1d
 import scipy.signal as sg
 from scipy import stats
 from collections import namedtuple
-from utils import igor_utils 
+from utils.base_utils import *
 from scipy.optimize import curve_fit
 import sys
 
@@ -162,8 +162,8 @@ def extract_FI_x_y (path_I, path_V):
     v_rest : int - V when ni I injected
 
     '''
-    _, df_V = igor_utils.igor_exporter(path_V) # _ will be the continious wave which is no use here
-    _, df_I = igor_utils.igor_exporter(path_I)
+    _, df_V = igor_exporter(path_V) # _ will be the continious wave which is no use here
+    _, df_I = igor_exporter(path_I)
     
     # setting df_V and df_I to be the same dimentions
     df_I_test = df_I.iloc[:, 0:df_V.shape[1]]
@@ -878,8 +878,9 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
 
 
-
-def pAD_detection(V_dataframe, pca_plotting = False , kmeans_plotting = False , histogram_plotting=False):
+#DJ: this is here so we do not lose your plotting settings for pca, kmeans and his even tho they wont run for me - each needs to be its own simple func like buildMeanAPFig()
+#and they should be in plotters
+def pAD_detection_old(V_dataframe, pca_plotting = False , kmeans_plotting = False , histogram_plotting=False):
 
     '''
     Input : 
@@ -961,12 +962,78 @@ def pAD_detection(V_dataframe, pca_plotting = False , kmeans_plotting = False , 
     else : 
         pass
         
+def pAD_detection(V_dataframe):
+    '''
+    Input : 
+            V_dataframe   : np.array : Voltage dataframe as  np array
+            
+    Output : 
+            ap_slopes     : list of lists containing action_potential slopes (num 0f spikes x sweeps analysed)
+            ap_thresholds : list of lists containing ap_thresholds or turning points of the spike (num 0f spikes x sweeps analysed)
+            ap_width      :  
+            ap_height     :
+    '''
+
+    peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_dataframe, all_sweeps =True)
     
+    # Create Dataframe and append values
+    pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold', 'AP_height' , 'AP_latency'])
     
+    non_nan_locs =  np.where(np.isnan(v_thresholds_all_) == False)[0] 
+    
+    if len (non_nan_locs) == 0 : 
+        pAD_df["AP_loc"] = peak_locs_corr_ 
+        pAD_df["AP_threshold"] =  v_thresholds_all_
+        pAD_df["AP_slope"] = peak_slope_all_
+        pAD_df["AP_latency"] = peak_latencies_all_
+        pAD_df["AP_height"] =  peak_heights_all_ 
+        pAD_df['AP_sweep_num'] = sweep_indices_all_
+        pAD_df["pAD"] = ""
+        pAD_df["pAD_count"] = np.nan 
+        
+        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  peak_heights_all_ , pAD_df
+        
+
+    peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
+    v_thresholds_all   = np.array(v_thresholds_all_ )[non_nan_locs]
+    peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
+    peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
+    upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
+    peak_heights_all   = np.array(peak_heights_all_)[non_nan_locs]
+    peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
+    peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
+    sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
+    
+    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) == len(peak_heights_all) == len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) 
+    
+    pAD_df["AP_loc"] = peak_locs_corr 
+    pAD_df["AP_threshold"] =  v_thresholds_all 
+    pAD_df["AP_slope"] = peak_slope_all 
+    pAD_df["AP_latency"] = peak_latencies_all
+    pAD_df["AP_height"] =  peak_heights_all 
+    pAD_df['AP_sweep_num'] = sweep_indices_all
+    pAD_class_labels = np.array(["pAD" , "Somatic"] )
+    
+    if len (peak_locs_corr) == 0 :
+        print("No APs found in trace")
+        pAD_df["pAD"] = ""
+        pAD_df["pAD_count"] = np.nan 
+        
+        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df
+    elif len (peak_locs_corr) == 1 : 
+        if v_thresholds_all[0]  < -65.0 :
+            # pAD 
+            pAD_df["pAD"] = "pAD"
+            pAD_df["pAD_count"] = 1 
+        else: 
+            pAD_df["pAD"]       = "Somatic"
+            pAD_df["pAD_count"] = 0 
+        return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df
+    else : 
+        pass
     
     # Data for fitting procedure
     X = pAD_df[["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
-    
     
     # Check if 2 clusters are better than 1 
     
@@ -976,13 +1043,9 @@ def pAD_detection(V_dataframe, pca_plotting = False , kmeans_plotting = False , 
     wcss_1 = kmeans_1.inertia_
     wcss_2 = kmeans_2.inertia_
     
-    
     #print(type(kmeans_2.labels_))
-    
     #print(wcss_1, wcss_2)
-    
-    
-    
+
     if wcss_2 < wcss_1 :
         # 2 CLUSTERS  are a better fit than 1  
         # Append label column to type 
@@ -992,15 +1055,13 @@ def pAD_detection(V_dataframe, pca_plotting = False , kmeans_plotting = False , 
         #print(np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ))
         #print(np.nanmean( peak_slope_all  [kmeans_2.labels_ == 0] ) , np.nanmean( peak_slope_all  [kmeans_2.labels_ == 1] ))
         
-        
         if np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 0] )  < np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ):
             pAD_df["pAD"] = pAD_class_labels[np.array(kmeans_2.labels_)]
             pAD_df["pAD_count"] = np.sum(kmeans_2.labels_)
         else:
             pAD_df["pAD"] = pAD_class_labels[np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  )]
             pAD_df["pAD_count"] = np.sum(np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  ))
-            
-        
+              
         pAD_df["num_ap_clusters"] = 2 
         
     else :
@@ -1013,159 +1074,5 @@ def pAD_detection(V_dataframe, pca_plotting = False , kmeans_plotting = False , 
           pAD_df["pAD"] = "Somatic"
          pAD_df["num_ap_clusters"] = 1
          pAD_df["pAD_count"] = 0 
-         
     
-    ##########  Perform PCA  #################
-    
-    y = pAD_df['pAD'] 
-    
-    # Standardize the features
-    scaler = StandardScaler()
-    X_std = scaler.fit_transform(X)
-    
-    # Perform PCA with 2 components
-    pca = PCA(n_components=2)
-    X_pca = pca.fit_transform(X_std)
-    
-    if pca_plotting: 
-        # Plot the PCA results with different colors for each AP_type label
-        plt.scatter(X_pca[:, 0], X_pca[:, 1], c= list(y.map({0: '#CDC0B0', 1: '#7FFFD4'})))
-        plt.xlabel('Principal Component 1')
-        plt.ylabel('Principal Component 2')
-        plt.title('PCA of AP feature data')
-        plt.legend()
-        plt.show()
-    
-    
-    ####### K-means Plottinfg #################
-    
-    if kmeans_plotting: 
-    
-        fig = plt.figure(figsize=(8,8))
-        ax = fig.add_subplot(111, projection='3d')
-    
-        # Set the color of the scatter points according to their label
-        ax.scatter(X['AP_slope'],X['AP_height'] , X['AP_threshold'],  c=kmeans_2.labels_, cmap='viridis')
-    
-        # Set the labels for the axes and add a title
-        ax.set_xlabel('AP_slope')
-        ax.set_ylabel('AP_threshold')
-        ax.set_zlabel('AP_height')
-        ax.set_title('4D scatter plot with k-means labels')
-    
-    
-    ##### HISTOGRAM PLOTS #########
-    
-    if histogram_plotting: 
-    
-    
-        # Define colors 
-        colors = ['#CDC0B0', '#7FFFD4' ]
-        plot_labels = ['pAD' , 'Normal' ]
-    
-        fig, axs = plt.subplots(2, 2, figsize=(10, 8))
-    
-        # Add each subplot to the figure
-        
-        for idx in [0,1] : 
-            axs[0, 0].hist(pAD_df[pAD_df["AP_type"] == idx ]["AP_threshold"], bins=20, color= colors[idx], label =plot_labels[idx] )
-            axs[0, 1].hist(pAD_df[pAD_df["AP_type"] == idx ]["AP_slope"], bins=20, color= colors[idx], label =plot_labels[idx])
-            axs[1, 0].hist(pAD_df[pAD_df["AP_type"] == idx ]["AP_height"], bins=20, color= colors[idx], label =plot_labels[idx])
-            axs[1, 1].hist(pAD_df[pAD_df["AP_type"] == idx ]["AP_latency"], bins=20, color= colors[idx], label =plot_labels[idx])
-    
-        # Add x and y labels to each subplot
-        for ax in axs.flat:
-            ax.set(xlabel='x-label', ylabel='Counts')
-    
-        # Add a legend to each subplot
-        for ax in axs.flat:
-            ax.legend()
-    
-        # Add a title to each subplot
-        axs[0, 0].set_title('Voltage Thresholds')
-        axs[0, 1].set_title('AP Slopes')
-        axs[1, 0].set_title('AP Heights')
-        axs[1, 1].set_title('Peak Latency')
-        
-        fig.tight_layout()   
-        plt.show()
-    
-    
-    
-    return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, X_pca  
-        
-        
-def pAD_checker_and_plotter(pAD_dataframe, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100):
-    
-    # Rename vars: 
-    pAD_df = pAD_dataframe
-    V      = V_array  
-    plot_forwards_window        =  input_plot_forwards_window  
-    plot_backwards_window       =  input_plot_backwards_window
-    plot_window = plot_forwards_window + plot_backwards_window
-    sampling_rate               = 1e4 
-    sec_to_ms                   = 1e3
-    time_                       = sec_to_ms* np.arange(0,150) / sampling_rate  
-    # pAD subdataframe and indices
-  
-    # pAD subdataframe and indices
-    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
-    pAD_ap_indices = pAD_sub_df[["AP_loc", "AP_sweep_num"]].values
-
-    # Somatic subdataframe and indices
-
-    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
-    Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num"]].values
-    
-    
-    
-    
-
-    pAD_spike_array = np.zeros([len(pAD_ap_indices), plot_window  ])
-    Somatic_spike_array = np.zeros([len(Somatic_ap_indices), plot_window ])
-
-
-    # Plotter for pAD and Somatic Spikes 
-
-    # initialise empty line list 
-    fig, ax = plt.subplots()
-    lines  = []  
-
-    for idx in range(len(pAD_ap_indices)): 
-        pAD_spike_array[idx,:] = V[ pAD_ap_indices[:,0][idx] - plot_backwards_window :  pAD_ap_indices[:,0][idx] +  plot_forwards_window  ,  pAD_ap_indices[:,1][idx]    ]
-        line, = ax.plot(time_, pAD_spike_array[idx,:] , color = 'grey')
-        lines.append(line)
-        #plt.plot(pAD_spike_array[idx,:], color ='grey', label = 'pAD')
-
-    line, = ax.plot(time_, np.mean(pAD_spike_array , axis = 0)  , color = 'red')
-    lines.append(line)
-
-    for idx_ in range(len(Somatic_ap_indices)): 
-        Somatic_spike_array[idx_,:] = V[ Somatic_ap_indices[:,0][idx_] - plot_backwards_window :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_ap_indices[:,1][idx_]    ]
-        line, = ax.plot(time_,Somatic_spike_array[idx_,:] , color = 'green')
-        lines.append(line)
-
-
-    line, = ax.plot(time_, np.mean(Somatic_spike_array , axis = 0)  , c = '#E3CF57')
-    lines.append(line)
-
-    # Create the custom legend with the correct colors
-    legend_elements = [Line2D([0], [0], color='grey', lw=2, label='pAD Ensemble'),
-                       Line2D([0], [0], color='red', lw=2, label= 'pAD Mean'),
-                       Line2D([0], [0], color='green', lw=2, label='Somatic Ensemble'),
-                       Line2D([0], [0], color='#E3CF57', lw=2, label='Somatic Mean')]
-
-    # Set the legend with the custom elements
-    ax.legend(handles=legend_elements)
-
-        
-    #plt.plot(np.mean(Somatic_spike_array, axis = 0 ) , c = '#E3CF57', label = 'Somatic Mean')
-    plt.ylabel('Membrane Potential (mV)')
-    plt.xlabel('Time (ms)')
-    plt.show()    
-
-    
-    return None 
-    
-    
-    
+    return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  
