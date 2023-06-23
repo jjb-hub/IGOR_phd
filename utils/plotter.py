@@ -2,7 +2,7 @@
 """
 Created on Wed May 10 15:29:46 2023
 
-@author: GUEST1
+@author:  DJ, JJB
 """
 #myshit 
 
@@ -350,4 +350,230 @@ def plot_FI_AP_curves(feature_df, OUTPUT_DIR):
         print('Time: ', stop - start) 
         
     return 
+
+
+def buildPhasePlotFig(cell_id, pAD_dataframe, V_array) :
+    '''
+    Input pAD_dataframe corresponding to cell_id and V_array
+    '''
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    plot_forwards_window = 50 
+    voltage_max = 60.0 
+    voltage_min = -120.0
+    
+    # pAD subdataframe and indices
+    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+    pAD_upshoot_indices = pAD_sub_df[["upshoot_loc", "AP_sweep_num"]].values
+
+    # Somatic subdataframe and indices
+    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+    Somatic_upshoot_indices = Somatic_sub_df[["upshoot_loc", "AP_sweep_num"]].values
+    
+    # # Plotter for pAD and Somatic Spikes but separated into DRD, CTG, TLX celltypes
+    
+    fig, ax = plt.subplots()
+    lines  = []  # initialise empty line list 
+    
+    for idx in range(len(pAD_upshoot_indices)):
+        
+        
+        
+        v_temp = V[ pAD_upshoot_indices[:,0][idx] :  pAD_upshoot_indices[:,0][idx] +  plot_forwards_window  ,  pAD_upshoot_indices[:,1][idx]    ]
+        dv_temp = np.diff(v_temp) 
+        
+        if max(v_temp) > voltage_max or min(v_temp) < voltage_min:             # don't plot artifacts
+            pass
+        else:
+            line, = ax.plot(v_temp[:-1], dv_temp , color = 'salmon', alpha=0.05)        
+            lines.append(line)
+        
+    for idx_ in range(len(Somatic_upshoot_indices)): 
+        
+        
+        v_temp = V[ Somatic_upshoot_indices[:,0][idx_]  :  Somatic_upshoot_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_upshoot_indices[:,1][idx_]    ]
+        dv_temp = np.diff(v_temp) 
+        
+        if max(v_temp) > voltage_max or min(v_temp) < voltage_min:             # don't plot artifacts
+            pass
+        else:
+            line, = ax.plot(v_temp[:-1], dv_temp , color = 'cornflowerblue' , alpha=0.05)
+            lines.append(line)
+            
+        
+        # Create the custom legend with the correct colors
+        legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble'),
+                           Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble')]
+
+        # Set the legend with the custom elements
+        ax.legend(handles=legend_elements)
+    
+    plt.title(cell_id)
+    plt.ylabel(' dV (mV)')
+    plt.xlabel(' Membrane Potential (mV)')
+    plt.tight_layout
+    plt.show()    
+    return fig 
+
+def buildRateOfDepolFig(cell_id, pAD_dataframe, V_array):
+    
+    '''
+    Input pAD_dataframe corresponding to cell_id and V_array
+    '''
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    plot_forwards_window = 50 
+    voltage_max = 60.0 
+    voltage_min = -120.0
+    
+    # pAD subdataframe and indices
+    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+    pAD_upshoot_indices = pAD_sub_df[["upshoot_loc", "AP_sweep_num"]].values
+
+    # Somatic subdataframe and indices
+    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+    Somatic_upshoot_indices = Somatic_sub_df[["upshoot_loc", "AP_sweep_num"]].values
+    
+    # # Plotter for pAD and Somatic Spikes but separated into DRD, CTG, TLX celltypes
+    
+    fig, ax = plt.subplots()
+    lines  = []  # initialise empty line list 
+    
+    for idx in range(len(pAD_upshoot_indices)):
+        
+        
+        
+        v_temp = V[ pAD_upshoot_indices[:,0][idx] :  pAD_upshoot_indices[:,0][idx] +  plot_forwards_window  ,  pAD_upshoot_indices[:,1][idx]    ]
+        dv_temp = np.diff(v_temp) 
+        
+        if max(v_temp) > voltage_max or min(v_temp) < voltage_min:             # don't plot artifacts
+            pass
+        else:
+            
+            line, = ax.plot(v_temp[0], dv_temp[0] , 'o' ,  color = 'salmon', alpha=0.1)        
+            lines.append(line)
+        
+    for idx_ in range(len(Somatic_upshoot_indices)): 
+        
+        
+        v_temp = V[ Somatic_upshoot_indices[:,0][idx_]  :  Somatic_upshoot_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_upshoot_indices[:,1][idx_]    ]
+        dv_temp = np.diff(v_temp) 
+        
+        if max(v_temp) > voltage_max or min(v_temp) < voltage_min:             # don't plot artifacts
+            pass
+        else: 
+            line, = ax.plot(v_temp[0], dv_temp[0] , 'o' ,   color = 'cornflowerblue' , alpha=0.1)
+            lines.append(line)
+            
+        
+        # Create the custom legend with the correct colors
+        legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble'),
+                           Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble')]
+
+        # Set the legend with the custom elements
+        ax.legend(handles=legend_elements)
+    
+    plt.title(cell_id)
+    plt.ylabel(' dV (mV)')
+    plt.xlabel(' Membrane Potential (mV)')
+    plt.tight_layout
+    plt.show()    
+    return fig 
+
+def buildPCA(cell_id, pAD_dataframe, V_array):
+
+    '''
+    PCA plotter build on top of pAD labelling
+    '''
+    
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    
+    # pAD subdataframe and indices
+    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+    pAD_upshoot_indices = pAD_sub_df[["upshoot_loc", "AP_sweep_num"]].values
+
+    # Somatic subdataframe and indices
+    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+    Somatic_upshoot_indices = Somatic_sub_df[["upshoot_loc", "AP_sweep_num"]].values
+    
+    X = pAD_df[["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
+    
+    
+    y = pAD_df['pAD'] 
+    
+        
+    # Standardize the features
+    scaler = StandardScaler()
+    X_std = scaler.fit_transform(X)
+    
+    # Perform PCA with 2 components
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X_std)
+    
+    # Plot the PCA results with different colors for each AP_type label
+    
+    fig, ax = plt.subplots()
+    
+    
+    
+    
+    ax.scatter(X_pca[:, 0], X_pca[:, 1], c= list(y.map({"Somatic": 'cornflowerblue' , "pAD": 'salmon'})))
+    plt.xlabel('Principal Component 1')
+    plt.ylabel('Principal Component 2')
+    plt.title(cell_id)
+    
+    # Create the custom legend with the correct colors
+    legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble'),
+                       Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble')]
+
+    # Set the legend with the custom elements
+    ax.legend(handles=legend_elements)
+    plt.show()
+    
+    return fig 
+
+def buildpADHistogram(cell_id, pAD_dataframe, V_array):
+    
+    # Rename vars: 
+    pAD_df = pAD_dataframe
+    V      = V_array  
+    
+    # Define colors 
+    colors = ['salmon', 'cornflowerblue' ]
+    plot_labels = ['pAD' , 'Somatic' ]
+
+    fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+
+    # Add each subplot to the figure
+    
+    for idx in [0,1] : 
+        axs[0, 0].hist(pAD_df[pAD_df["pAD"] == plot_labels[idx] ]["AP_threshold"], bins=20, color= colors[idx], label =plot_labels[idx] )
+        axs[0, 1].hist(pAD_df[pAD_df["pAD"] == plot_labels[idx] ]["AP_slope"], bins=20, color= colors[idx], label =plot_labels[idx])
+        axs[1, 0].hist(pAD_df[pAD_df["pAD"] == plot_labels[idx] ]["AP_height"], bins=20, color= colors[idx], label =plot_labels[idx])
+        axs[1, 1].hist(pAD_df[pAD_df["pAD"] == plot_labels[idx] ]["AP_latency"], bins=20, color= colors[idx], label =plot_labels[idx])
+
+    # Add x and y labels to each subplot
+    for ax in axs.flat:
+        ax.set(xlabel='x-label', ylabel='Counts')
+
+    # Add a legend to each subplot
+    for ax in axs.flat:
+        ax.legend()
+
+    # Add a title to each subplot
+    axs[0, 0].set_title('Voltage Thresholds')
+    axs[0, 1].set_title('AP Slopes')
+    axs[1, 0].set_title('AP Heights')
+    axs[1, 1].set_title('Peak Latency')
+    
+    plt.title(cell_id)
+    fig.tight_layout()   
+    plt.show()
+    
+    return fig
+
 
