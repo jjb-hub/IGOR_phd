@@ -4,54 +4,50 @@ Created on Wed May 10 14:16:00 2023
 
 @author: Debapratim Jana, Jasmine Butler
 """
-from utils.igor_utils import igor_exporter
-from utils.helper_functions import loopCombinations, loopCombinations_stats #only works in this order for me DJ had lower idk how
+from utils.base_utils import *
+from utils.mettabuild_functions import loopCombinations, expandFeatureDF #only works in this order for me DJ had lower idk how
 from ephys import ap_functions
+
+import os, shutil, itertools, json, timeit, functools, pickle
 import openpyxl
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt 
-import os
+
    
 
 #%% LOAD FEATURE_DF + START INPUTS
-
-
-
 ROOT = os.getcwd() #This gives terminal location (terminal working dir)
 INPUT_DIR = f'{ROOT}/input'
 OUTPUT_DIR = f'{ROOT}/output'
+CACHE_DIR = f'{INPUT_DIR}/cache'
 
-feature_df = openpyxl.load_workbook (f'{INPUT_DIR}/feature_df_py.xlsx') 
-data = feature_df['Sheet1'].values
-feature_df = pd.DataFrame(data)
-header = feature_df.iloc[0]
-feature_df = feature_df[1:]
-
-feature_df_ex = feature_df.copy()
-
-#feature_df_expanded_raw = loopCombinations(feature_df_ex)
-#feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
-#feature_df_ex_tau = loopCombinations(feature_df_ex)
+if True:
+    feature_df = pd.read_excel (f'{INPUT_DIR}/feature_df_py.xlsx')
+    data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_folder)
+else:
+    feature_df = openpyxl.load_workbook (f'{INPUT_DIR}/feature_df_py.xlsx') 
+    data = feature_df['Sheet1'].values
+    feature_df = pd.DataFrame(data)
+    header = feature_df.iloc[0]
+    feature_df = feature_df[1:]
 
 
 #%%TEST PATHS / FUNCS
 
 # #FP tester paths 
-path_I =  f'{INPUT_DIR}/PatchData/JJB230509/t14Soma_outwave.ibw'
-path_V =  f'{INPUT_DIR}/PatchData/JJB230509/t14Soma.ibw'
+# path_I =  f'{INPUT_DIR}/PatchData/JJB230509/t14Soma_outwave.ibw'
+# path_V =  f'{INPUT_DIR}/PatchData/JJB230509/t14Soma.ibw'
 
 
-# #AP tester paths
-# path_I =  f'{INPUT_DIR}/PatchData/JJB230110/t6Soma_outwave.ibw'
-# path_V = f'{INPUT_DIR}/PatchData/JJB230110/t6Soma.ibw'
+#AP tester paths
+path_I =  f'{INPUT_DIR}/PatchData/JJB230110/t6Soma_outwave.ibw'
+path_V = f'{INPUT_DIR}/PatchData/JJB230110/t6Soma.ibw'
 
 
 #to plot I steps or V responce to steps all in 1 
-_, dfV = igor_exporter(path_V)
-_, dfI = igor_exporter(path_I)
-
-
+listV, dfV = igor_exporter(path_V)
+listI, dfI = igor_exporter(path_I)
 V = np.array(dfV)
 I = np.array(dfI)
 
@@ -151,4 +147,3 @@ def single_drug_aplication_visualisation(feature_df,  color_dict, cell = 'DRD230
     stop = timeit.default_timer()
     print('Time: ', stop - start)      
     return
-
