@@ -161,12 +161,23 @@ def saveFigure(fig, identifier, fig_type):
 def saveAplicationFig(fig, identifier):
     saveFigure(fig, identifier, 'DrugApplication')
 
-def saveHistogramFig(fig, identifier):
-    saveFigure(fig, identifier, 'Histogram')
+# def saveHistogramFig(fig, identifier):
+#     saveFigure(fig, identifier, 'Histogram')
 
 def saveMeanAPFig(fig, identifier):
-    saveFigure(fig, identifier, 'MeanAP')
+    saveFigure(fig, identifier, 'Mean_APs')
 
+def savePhasePlotFig(fig, identifier):
+    saveFigure(fig, identifier, 'PhasePlot_APs')
+
+def saveRateOfDepolFig(fig,identifier):
+    saveFigure(fig, identifier, 'RateOfDepol_APs')
+
+def savePCAFig(fig, identifier):
+    saveFigure(fig, identifier, 'PCA_APs')
+
+def saveHistogramAPFig(fig, identifier):
+    saveFigure(fig, identifier, 'Histogram_APs')
 
 ######## INIT ##########
 #Start by checking filesystem has all the folders necessary for read/write operations (cache) or create them otherwise
