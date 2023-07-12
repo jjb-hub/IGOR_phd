@@ -86,10 +86,28 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     fig = plt.figure(figsize = (12,9))
     ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
     ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
-    ax1.plot(x_V,array_V, c = color_dict[drug], lw=1) #voltage trace plot # "d", markevery=pAD_locs
+    ax1.plot(x_V, array_V, c = color_dict[drug], lw=1, alpha=0.5) #voltage trace plot # "d", markevery=pAD_locs
+    pAD_plot_pre_window = 50
+    pAD_plot_post_window = 50
     
-    if pAD_locs is not None: #FIX ME
-        print('plotting pAD')
+    if pAD_locs is None: 
+        # Get pAD_locs
+        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(df_V) 
+        
+        # pAD subdataframe and indices
+        pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+        pAD_ap_indices = pAD_sub_df[["upshoot_loc", "AP_sweep_num", "AP_loc"]].values
+
+        # Somatic subdataframe and indices
+        Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+        Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num", "AP_loc"]].values
+    
+    for pAD_spike_idx in range(len(pAD_ap_indices)):
+        pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
+        v_temp = np.array(array_V[sweep_num*df_V.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
+        time_temp = np.linspace((sweep_num*df_V.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
+        ax1.plot(time_temp, v_temp, c  = 'red', lw = 2 )
+        
     
     ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
     ax2.legend()
@@ -152,6 +170,28 @@ def getorbuildMeanAPFig(filename, cell_ID_or_cell_df, from_scratch=None):
             saveMeanAPFig(fig, cell_ID)
         else : fig = getCache(filename, cell_ID)
         fig.show()
+        
+def buildtraceAPFig(cell_id, pAD_dataframe, V_array, sweep_num = None):
+    
+    # Rename vars
+    pAD_df = pAD_dataframe 
+    V      = V_array
+    
+    
+    
+    
+    if sweep_num is None:
+        # We make all the plots over one another? or we can even specify by trace
+        for sweep_idx in range(V.shape[-1]): 
+            plt.plot()
+    else: 
+        sweep_idx =  sweep_num 
+        
+            
+    
+    
+    
+    return fig 
 
 def buildMeanAPFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100):
 
@@ -575,6 +615,5 @@ def buildpADHistogram(cell_id, pAD_dataframe, V_array):
     plt.show()
     
     return fig
-
 
 
