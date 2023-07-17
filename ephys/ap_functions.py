@@ -708,6 +708,8 @@ def calculate_max_firing(voltage_array, input_sampling_rate=1e4):
 
 
 
+
+
 def tau_analyser(voltage_array, current_array, input_step_current_values, plotting_viz = False, verbose = False , analysis_mode  = 'max' ,input_sampling_rate = 1e4): 
 
     '''
@@ -766,6 +768,9 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
         # check first how noisy the signal is : 
         current_noise = np.std(voltage_array[ current_inj_first_point:current_inj_last_point,tau_idx] )
         
+        # Calculate v resting potential 
+        v_resting_membrane = np.mean(voltage_array[ 0 : current_inj_first_point, tau_idx]) 
+        
         if abs(current_noise + thresh_current_asym - asym_current) <= 0.5 :          # we use asymtotic current for noise characterisation rather than max current 
             if verbose: 
                 print('Too noisy, skipping current current step...')
@@ -806,7 +811,7 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
                 tau = sec_to_ms*(time_frames_[0] - current_inj_first_point) / sampling_rate
 
                 # tau_temp = tau_tuple(val = tau , steady_state = asym_current, current_inj=step_current_val)
-                tau_temp = [tau, asym_current, step_current_val]
+                tau_temp = [tau, asym_current, step_current_val, v_resting_membrane]
 
                 tau_array.append(tau_temp)
         
@@ -814,7 +819,7 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
 
     if num_tau_analysed_counter == 0 : 
         # return tau_tuple(val = np.nan , steady_state = np.nan, current_inj=np.nan)
-        return [np.nan, np.nan, np.nan]
+        return [np.nan, np.nan, np.nan, np.nan]
     return tau_array
 
 
@@ -852,6 +857,11 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
             step_current_dur = last_min_current_point - first_min_current_point
             step_current_avg_window = int(current_avging_window*step_current_dur)
+            
+            # Calculate v resting potential 
+            v_resting_membrane = np.mean(voltage_array[ 0 : first_min_current_point , sag_idx]) 
+            
+            
         
 
             asym_sag_current = np.mean(voltage_array[  last_min_current_point - step_current_avg_window: last_min_current_point, sag_idx])
@@ -864,12 +874,12 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
             
 
             # sag_current_temp = sag_tuple(val=sag_current, steady_state=asym_current , current_inj=input_step_current_values[sag_idx])
-            sag_current_temp = [sag_current, asym_current, input_step_current_values[sag_idx]] 
+            sag_current_temp = [sag_current, asym_current, input_step_current_values[sag_idx], v_resting_membrane] 
 
         elif num_peaks > 0: 
             print('Spike found in Sag analysis, skipping')
             # sag_current_temp = sag_tuple(val= np.nan, steady_state=np.nan, current_inj = np.nan)
-            sag_current_temp = [np.nan, np.nan, np.nan] 
+            sag_current_temp = [np.nan, np.nan, np.nan, np.nan] 
         
         # Append Value to existing named tuple
         sag_current_all.append(sag_current_temp) 
@@ -1076,4 +1086,3 @@ def pAD_detection(V_dataframe):
          pAD_df["pAD_count"] = 0 
     
     return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  
-        
