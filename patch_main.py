@@ -6,7 +6,7 @@ Created on Wed May 10 13:58:27 2023
 """
 #%%
 
-from utils.mettabuild_functions import expandFeatureDF, loopCombinations_stats
+from utils.metabuild_functions import expandFeatureDF, loopCombinations_stats
 from utils.plotter import drug_aplication_visualisation, plot_all_FI_curves, plot_FI_AP_curves
 from utils import base_utils 
 from ephys import ap_functions

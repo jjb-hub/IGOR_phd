@@ -69,7 +69,7 @@ if __name__ == "__main__": #inbuilt test that will not be excuted unless run ins
 
 
 
-#CACHE SYSTEM
+#CACHE SYSTEM and SAVING 
 #Check filesystem is set up for write operations
 def saveColors(filename, color_dict):
     subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
@@ -155,13 +155,11 @@ def saveFigure(fig, identifier, fig_type):
     print(f'SAVED {output_subdir}/{identifier}.svg') 
     fig.savefig(f"{output_subdir}/{identifier}.png")
     print(f'SAVED {output_subdir}/{identifier}.png')
-    
 
+# def saveHistogramFig(fig, identifier): #example structure of save function
+#     saveFigure(fig, identifier, 'Histogram')
 def saveAplicationFig(fig, identifier):
     saveFigure(fig, identifier, 'DrugApplication')
-
-# def saveHistogramFig(fig, identifier):
-#     saveFigure(fig, identifier, 'Histogram')
 
 def saveMeanAPFig(fig, identifier):
     saveFigure(fig, identifier, 'Mean_APs')

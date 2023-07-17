@@ -6,9 +6,9 @@ Created on Wed May 10 15:29:46 2023
 """
 #myshit 
 
-from utils.mettabuild_functions import expandFeatureDF, loopCombinations_stats
+from utils.metabuild_functions import expandFeatureDF, loopCombinations_stats
 from utils.base_utils import *
-from utils.mettabuild_functions import extract_FI_x_y
+from utils.metabuild_functions import extract_FI_x_y
 from ephys.ap_functions import pAD_detection
 #shitshit
 from matplotlib import pyplot as plt
@@ -26,7 +26,7 @@ def hex_to_RGB(hex_str):
     #Pass 16 to the integer function for change of base
     return [int(hex_str[i:i+2], 16) for i in range(1,6,2)]
 
-### METTA LOOPERS ###
+### META LOOPERS ###
 
 def loopBuildAplicationFigs(filename):
     df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
@@ -41,7 +41,7 @@ def loopBuildAplicationFigs(filename):
         drug_in = row['drug_in']
         drug_out = row['drug_out']
         application_order = row['application_order']
-        pAD_locs = row['APP_pAD_AP_locs']
+        # pAD_locs = row['APP_pAD_AP_locs']
         buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
         plt.close()
     return
@@ -78,7 +78,7 @@ def getorBuildApplicationFig(filename, cell_ID_or_cell_df, from_scratch=None):
         application_order = cell_df['application_order'].values[0]
         pAD_locs = cell_df['APP_pAD_AP_locs'].values[0]  #FIX ME perhaps this should also be in try so can run without pAD! or add pAD == True in vairables
         
-        fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
+        fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
         saveAplicationFig(fig, cell_ID)
     else : fig = getCache(filename, cell_ID)
     fig.show()
@@ -107,7 +107,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     pAD_plot_pre_window = 50
     pAD_plot_post_window = 50
     
-    if pAD_locs is None: 
+    if pAD_locs is True: 
         # Get pAD_locs
         peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(df_V) 
         
@@ -119,12 +119,12 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
         Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
         Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num", "AP_loc"]].values
     
-    for pAD_spike_idx in range(len(pAD_ap_indices)):
-        pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
-        v_temp = np.array(array_V[sweep_num*df_V.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
-        time_temp = np.linspace((sweep_num*df_V.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
-        ax1.plot(time_temp, v_temp, c  = 'red', lw = 2 )
-        
+        for pAD_spike_idx in range(len(pAD_ap_indices)):
+            pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
+            v_temp = np.array(array_V[sweep_num*df_V.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
+            time_temp = np.linspace((sweep_num*df_V.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
+            ax1.plot(time_temp, v_temp, c  = 'red', lw = 2 )
+            
     
     ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
     ax2.legend()
@@ -266,86 +266,6 @@ def buildMeanAPFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window  
     
     
 
-# OLD SHIT BELLOW WILL DELETE ONCE metta looper works
-#%% PLOTTING FUNCS: AP, FI, FI_AP, pAD
-
-# https://www.google.com/search?q=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&rlz=1C5CHFA_enAU794AU794&sxsrf=APwXEdcAmrqZK5nDrVeiza4rtKgMqeIQKQ%3A1681904232199&ei=aNI_ZMvLC_KTxc8P7Z-a-A8&ved=0ahUKEwjLn7nC7bX-AhXySfEDHe2PBv8Q4dUDCA8&uact=5&oq=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&gs_lcp=Cgxnd3Mtd2l6LXNlcnAQAzoKCAAQRxDWBBCwAzoECCMQJzoHCCMQsAIQJzoFCAAQogRKBAhBGABQ_gRYuWpgwmtoBHABeACAAacBiAGiHZIBBDEuMjiYAQCgAQHIAQjAAQE&sclient=gws-wiz-serp#bsht=CgRmYnNtEgQIBDAB&kpvalbx=_oNI_ZJSCFPbOxc8Pwf-MkA8_30
-# add the I injected as a subplot to show the AP method #FIX ME 
-def drug_aplication_visualisation(feature_df,  OUTPUT_DIR, color_dict):
-    '''
-    Plots continuious points (sweeps combined, voltage data)
-    Generates 'drug_aplications_all_cells.pdf' with a single AP recording plot per page, drug aplication by bath shown in grey bar
-
-    Parameters
-    ----------
-    feature_df : df including all factors needed to distinguish data 
-    color_dict : dict with a colour for each drug to be plotted
-
-    Returns
-    -------
-    None.
-
-    '''
-  
-    start = timeit.default_timer()
-
-    # with PdfPages(f'{OUTPUT_DIR}/drug_aplications_all_cells.pdf') as pdf:
-        
-    aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
-    
-    for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
-        
-        path_V, path_I = make_path(row['folder_file'])
-        
-        array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
-        I_color = 'cornflowerblue'
-        try:
-            array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
-        except FileNotFoundError: #if no I file exists 
-            print(f"no I file found for {row['cell_ID']}, I setting used was: {row['I_set']}")
-            array_I = np.zeros(len(df_V)-1)
-            I_color='grey'
-            
-        x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
-        x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
-        x_I = np.arange(len(array_I))*0.0001
-        
-
-        plt.figure(figsize = (12,9))
-        # ax1 = plt.subplot2grid((20, 20), (0, 0), rowspan = 15, colspan =20) #(nrows, ncols)
-        # ax2 = plt.subplot2grid((20, 20), (17, 0), rowspan = 5, colspan=20)
-        
-        ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
-        ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
-        
-        ax1.plot(x_V,array_V, c = color_dict[row['drug']], lw=1) #voltage trace plot
-        ax2.plot(x_I, array_I, label = row['I_set'], color=I_color )#label=
-        ax2.legend()
-        
-        # ax2.axis('off')
-        ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
-        ax1.spines['right'].set_visible(False)
-        
-        ax2.spines['top'].set_visible(False)
-        ax2.spines['right'].set_visible(False)
-        # ax2.spines['left'].set_visible(False)
-        # ax2.spines['bottom'].set_visible(False)
-        
-        
-        ax1.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
-        ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15
-        ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
-        ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
-        ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
-        ax1.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 16) # , fontsize = 25
-        plt.tight_layout()
-        plt.savefig(f"{OUTPUT_DIR}/AP/{row['cell_ID']}.svg") #not run remi comented stuff bellow also didnt run : application memory
-            # pdf.savefig() #rewite as svg
-
-            # plt.close("all")
-    stop = timeit.default_timer()
-    print('Time: ', stop - start)  
-    return
 
 
 def getorbuildPhasePlotFig(filename, cell_ID_or_cell_df, from_scratch=None):
@@ -417,7 +337,7 @@ def getorbuildPCAFig(filename, cell_ID_or_cell_df, from_scratch=None):
         else : fig = getCache(filename, cell_ID)
         fig.show()
 
-def getorHistogramAPFig(filename, cell_ID_or_cell_df, from_scratch=None):
+def getorbuildHistogramAPFig(filename, cell_ID_or_cell_df, from_scratch=None):
         if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
             expanded_df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
             cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
@@ -442,45 +362,46 @@ def getorHistogramAPFig(filename, cell_ID_or_cell_df, from_scratch=None):
 
 ### BUILDERS ###
 
-def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, application_order=None, pAD_locs=None):
-    #load raw data
-    path_V, path_I = make_path(folder_file)
-    array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
-    try:
-        array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
-    except FileNotFoundError: #if no I file exists 
-        print(f"no I file found for {cell_ID}, I setting used was: {I_set}")
-        array_I = np.zeros(len(df_V)-1)
-    #scale data
-    x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
-    x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
-    x_I = np.arange(len(array_I))*0.00005 #20kHz igor 
-    #plot 
-    fig = plt.figure(figsize = (12,9))
-    ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
-    ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
-    ax1.plot(x_V,array_V, c = color_dict[drug], lw=1) #voltage trace plot # "d", markevery=pAD_locs
+#jas old without pAD but working 
+# def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, application_order=None, pAD_locs=None):
+#     #load raw data
+#     path_V, path_I = make_path(folder_file)
+#     array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+#     try:
+#         array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
+#     except FileNotFoundError: #if no I file exists 
+#         print(f"no I file found for {cell_ID}, I setting used was: {I_set}")
+#         array_I = np.zeros(len(df_V)-1)
+#     #scale data
+#     x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
+#     x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
+#     x_I = np.arange(len(array_I))*0.00005 #20kHz igor 
+#     #plot 
+#     fig = plt.figure(figsize = (12,9))
+#     ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
+#     ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
+#     ax1.plot(x_V,array_V, c = color_dict[drug], lw=1) #voltage trace plot # "d", markevery=pAD_locs
     
-    if pAD_locs is not None: #FIX ME
-        print('plotting pAD')
+#     if pAD_locs is not None: #FIX ME
+#         print('plotting pAD')
     
-    ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
-    ax2.legend()
-    # ax2.axis('off')
-    ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
-    ax1.spines['right'].set_visible(False)
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    # ax2.spines['left'].set_visible(False)
-    # ax2.spines['bottom'].set_visible(False)
-    ax1.axvspan((int((drug_in)* x_scaler_drug_bar) - x_scaler_drug_bar), (int(drug_out)* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
-    ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15
-    ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
-    ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
-    ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
-    ax1.set_title(cell_ID + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
-    plt.tight_layout()
-    return fig
+#     ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
+#     ax2.legend()
+#     # ax2.axis('off')
+#     ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
+#     ax1.spines['right'].set_visible(False)
+#     ax2.spines['top'].set_visible(False)
+#     ax2.spines['right'].set_visible(False)
+#     # ax2.spines['left'].set_visible(False)
+#     # ax2.spines['bottom'].set_visible(False)
+#     ax1.axvspan((int((drug_in)* x_scaler_drug_bar) - x_scaler_drug_bar), (int(drug_out)* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
+#     ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15
+#     ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
+#     ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
+#     ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
+#     ax1.set_title(cell_ID + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
+#     plt.tight_layout()
+#     return fig
 
 
 def buildMeanAPFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100):
@@ -604,7 +525,6 @@ def buildPhasePlotFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_windo
     return fig 
 
 def buildRateOfDepolFig(cell_id, pAD_dataframe, V_array):
-    
     '''
     Input pAD_dataframe corresponding to cell_id and V_array
     '''
@@ -668,7 +588,6 @@ def buildRateOfDepolFig(cell_id, pAD_dataframe, V_array):
     return fig 
 
 def buildPCAFig(cell_id, pAD_dataframe, V_array):
-
     '''
     PCA plotter build on top of pAD labelling
     '''
@@ -846,8 +765,6 @@ def buildRateOfDepolFig(cell_id, pAD_dataframe, V_array):
     
     for idx in range(len(pAD_upshoot_indices)):
         
-        
-        
         v_temp = V[ pAD_upshoot_indices[:,0][idx] :  pAD_upshoot_indices[:,0][idx] +  plot_forwards_window  ,  pAD_upshoot_indices[:,1][idx]    ]
         dv_temp = np.diff(v_temp) 
         
@@ -886,11 +803,9 @@ def buildRateOfDepolFig(cell_id, pAD_dataframe, V_array):
     return fig 
 
 def buildPCA(cell_id, pAD_dataframe, V_array):
-
     '''
     PCA plotter build on top of pAD labelling
     '''
-    
     # Rename vars: 
     pAD_df = pAD_dataframe
     V      = V_array  
@@ -904,10 +819,8 @@ def buildPCA(cell_id, pAD_dataframe, V_array):
     Somatic_upshoot_indices = Somatic_sub_df[["upshoot_loc", "AP_sweep_num"]].values
     
     X = pAD_df[["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
-    
-    
+
     y = pAD_df['pAD'] 
-    
         
     # Standardize the features
     scaler = StandardScaler()
@@ -918,12 +831,7 @@ def buildPCA(cell_id, pAD_dataframe, V_array):
     X_pca = pca.fit_transform(X_std)
     
     # Plot the PCA results with different colors for each AP_type label
-    
     fig, ax = plt.subplots()
-    
-    
-    
-    
     ax.scatter(X_pca[:, 0], X_pca[:, 1], c= list(y.map({"Somatic": 'cornflowerblue' , "pAD": 'salmon'})))
     plt.xlabel('Principal Component 1')
     plt.ylabel('Principal Component 2')
@@ -980,3 +888,84 @@ def buildpADHistogram(cell_id, pAD_dataframe, V_array):
     return fig
 
 
+
+# OLD SHIT BELLOW WILL DELETE ONCE meta looper works
+#%% PLOTTING FUNCS: AP, FI, FI_AP, pAD
+
+# https://www.google.com/search?q=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&rlz=1C5CHFA_enAU794AU794&sxsrf=APwXEdcAmrqZK5nDrVeiza4rtKgMqeIQKQ%3A1681904232199&ei=aNI_ZMvLC_KTxc8P7Z-a-A8&ved=0ahUKEwjLn7nC7bX-AhXySfEDHe2PBv8Q4dUDCA8&uact=5&oq=how+to+create+a+small+plot+inside+plot+in+python+ax.plot&gs_lcp=Cgxnd3Mtd2l6LXNlcnAQAzoKCAAQRxDWBBCwAzoECCMQJzoHCCMQsAIQJzoFCAAQogRKBAhBGABQ_gRYuWpgwmtoBHABeACAAacBiAGiHZIBBDEuMjiYAQCgAQHIAQjAAQE&sclient=gws-wiz-serp#bsht=CgRmYnNtEgQIBDAB&kpvalbx=_oNI_ZJSCFPbOxc8Pwf-MkA8_30
+# add the I injected as a subplot to show the AP method #FIX ME 
+def drug_aplication_visualisation(feature_df,  OUTPUT_DIR, color_dict):
+    '''
+    Plots continuious points (sweeps combined, voltage data)
+    Generates 'drug_aplications_all_cells.pdf' with a single AP recording plot per page, drug aplication by bath shown in grey bar
+
+    Parameters
+    ----------
+    feature_df : df including all factors needed to distinguish data 
+    color_dict : dict with a colour for each drug to be plotted
+
+    Returns
+    -------
+    None.
+
+    '''
+  
+    start = timeit.default_timer()
+
+    # with PdfPages(f'{OUTPUT_DIR}/drug_aplications_all_cells.pdf') as pdf:
+        
+    aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
+    
+    for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
+        
+        path_V, path_I = make_path(row['folder_file'])
+        
+        array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+        I_color = 'cornflowerblue'
+        try:
+            array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
+        except FileNotFoundError: #if no I file exists 
+            print(f"no I file found for {row['cell_ID']}, I setting used was: {row['I_set']}")
+            array_I = np.zeros(len(df_V)-1)
+            I_color='grey'
+            
+        x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
+        x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
+        x_I = np.arange(len(array_I))*0.0001
+        
+
+        plt.figure(figsize = (12,9))
+        # ax1 = plt.subplot2grid((20, 20), (0, 0), rowspan = 15, colspan =20) #(nrows, ncols)
+        # ax2 = plt.subplot2grid((20, 20), (17, 0), rowspan = 5, colspan=20)
+        
+        ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
+        ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
+        
+        ax1.plot(x_V,array_V, c = color_dict[row['drug']], lw=1) #voltage trace plot
+        ax2.plot(x_I, array_I, label = row['I_set'], color=I_color )#label=
+        ax2.legend()
+        
+        # ax2.axis('off')
+        ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
+        ax1.spines['right'].set_visible(False)
+        
+        ax2.spines['top'].set_visible(False)
+        ax2.spines['right'].set_visible(False)
+        # ax2.spines['left'].set_visible(False)
+        # ax2.spines['bottom'].set_visible(False)
+        
+        
+        ax1.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
+        ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15
+        ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
+        ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
+        ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
+        ax1.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 16) # , fontsize = 25
+        plt.tight_layout()
+        plt.savefig(f"{OUTPUT_DIR}/AP/{row['cell_ID']}.svg") #not run remi comented stuff bellow also didnt run : application memory
+            # pdf.savefig() #rewite as svg
+
+            # plt.close("all")
+    stop = timeit.default_timer()
+    print('Time: ', stop - start)  
+    return

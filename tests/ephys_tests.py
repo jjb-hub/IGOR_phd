@@ -5,8 +5,9 @@ Created on Wed May 10 14:16:00 2023
 @author: Debapratim Jana, Jasmine Butler
 """
 from utils.base_utils import *
-from utils.mettabuild_functions import loopCombinations, expandFeatureDF #only works in this order for me DJ had lower idk how
+from utils.metabuild_functions import loopCombinations, expandFeatureDF #only works in this order for me DJ had lower idk how
 from ephys import ap_functions
+from matplotlib.backends.backend_pdf import PdfPages
 
 import os, shutil, itertools, json, timeit, functools, pickle
 import openpyxl

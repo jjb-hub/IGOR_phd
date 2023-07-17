@@ -35,7 +35,7 @@ OUTPUT_DIR = f'{ROOT}/output'
 CACHE_DIR = f'{INPUT_DIR}/cache'
 
 n_minimum = 3 
-p_value_threshold=0.05 #FIX ME build these in with simple get or guild functions outside the metta loop also interrate with metta loop
+p_value_threshold=0.05 #FIX ME build these in with simple get or guild functions outside the meta loop also interrate with meta loop
 
 
 
@@ -282,7 +282,7 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
             fig, axs = plotSwarmHistogram(cell_type, data=df_to_plot_filtered, order=order, color_dict=color_dict, x='drug', y=col_name, 
                                         swarm_hue='first_drug_AP', x_label='Drug applied', y_label=name)
             put_significnce_stars(axs, student_t_df, data=df_to_plot, x='drug', y=col_name, order = order) #add stats from student t_test above
-            saveHistogramFig(fig, f'{cell_type}_{name}')
+            saveHistogramAPFig(fig, f'{cell_type}_{name}')
             plt.close('all')
     else:
         raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
@@ -306,7 +306,7 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
         fig, axs = plotSwarmHistogram(cell_type, data=pAD_df_to_plot, order=order, color_dict=color_dict, x='drug', y='count', 
                                         swarm_hue='AP', bar_hue='AP', x_label='', y_label='number of APs', marker = 'x',  swarm_dodge= True)
 
-        saveHistogramFig(fig, f'{cell_type}_pAD_vs_somatic_APs_{drug}')
+        saveHistogramAPFig(fig, f'{cell_type}_pAD_vs_somatic_APs_{drug}')
         plt.close('all')
         
     elif data_type == 'FP_AP': 
