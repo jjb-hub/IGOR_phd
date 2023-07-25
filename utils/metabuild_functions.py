@@ -164,7 +164,7 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
     elif data_type in ['FP', 'FP_AP']:
         df = df.copy()
         #AP Charecteristics i.e. mean/SD e.c.t. for a single file 
-        df['mean_voltage_threshold_file'] = df.voltage_threshold.apply(np.mean) 
+        df['mean_voltage_threshold_file'] = df.voltage_threshold.apply(np.mean)  #FIX ME: RuntimeWarning: Mean of empty slice.
         df['mean_AP_height_file'] = df.AP_height.apply(np.mean)
         df['mean_AP_slope_file'] = df.AP_slope.apply(np.mean)
         df['mean_AP_width_file'] = df.AP_width.apply(np.mean)
@@ -282,7 +282,7 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
             fig, axs = plotSwarmHistogram(cell_type, data=df_to_plot_filtered, order=order, color_dict=color_dict, x='drug', y=col_name, 
                                         swarm_hue='first_drug_AP', x_label='Drug applied', y_label=name)
             put_significnce_stars(axs, student_t_df, data=df_to_plot, x='drug', y=col_name, order = order) #add stats from student t_test above
-            saveHistogramAPFig(fig, f'{cell_type}_{name}')
+            saveFP_HistogramFig(fig, f'{cell_type}_{name}')
             plt.close('all')
     else:
         raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
@@ -294,7 +294,7 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
         pAD_df = df[['cell_ID','PRE_pAD_AP_locs', 'APP_pAD_AP_locs', 'WASH_pAD_AP_locs', 'PRE_Somatic_AP_locs', 'APP_Somatic_AP_locs', 'WASH_Somatic_AP_locs']]
         pAD_df = pAD_df.dropna() #removing traces with no APs at all
         if len(pAD_df['cell_ID'].unique()) <= n_minimum:
-            print(f'Insuficient data for {cell_type} with {drug} application ')
+            print(f'Insuficient data with APs for {cell_type} with {drug} application ')
             return df
         
         pAD_df_to_plot = pd.melt(pAD_df, id_vars=['cell_ID'], var_name='col_name', value_name='AP_locs'  )
@@ -305,8 +305,8 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
         
         fig, axs = plotSwarmHistogram(cell_type, data=pAD_df_to_plot, order=order, color_dict=color_dict, x='drug', y='count', 
                                         swarm_hue='AP', bar_hue='AP', x_label='', y_label='number of APs', marker = 'x',  swarm_dodge= True)
-
-        saveHistogramAPFig(fig, f'{cell_type}_pAD_vs_somatic_APs_{drug}')
+        axs.set_title( f'{cell_type}_pAD_vs_somatic_APs_{drug} (CI 95%)', fontsize = 30) 
+        saveFP_HistogramFig(fig, f'{cell_type}_pAD_vs_somatic_APs_{drug}')
         plt.close('all')
         
     elif data_type == 'FP_AP': 
@@ -321,11 +321,11 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
 
 
 def loopCombinations_stats(filename):
-    df = getorBuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
+    df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False) #load feature df
     color_dict = getColors(filename)
 
     #create a copy of file_folder column to use at end of looping to restore  origional row order !!! #FIX ME
-    # df_row_order = df['folder_file']
+    # df_row_order = df['folder_file'] / df_raw_col_order[]
     
     combinations = [
                     (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP),

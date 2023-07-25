@@ -68,7 +68,7 @@ def getorbuildApplicationFig(filename, cell_ID_or_cell_df, from_scratch=None):
         application_order = cell_df['application_order'].values[0]
         pAD_locs = cell_df['APP_pAD_AP_locs'].values[0]  #FIX ME perhaps this should also be in try so can run without pAD! or add pAD == True in vairables
         
-        fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
+        fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
         saveAplicationFig(fig, cell_ID)
     else : fig = getCache(filename, cell_ID)
     fig.show()
@@ -93,7 +93,7 @@ def getorbuildAP_MeanFig(filename, cell_ID_or_cell_df, from_scratch=None):
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_ID}')
             fig = buildAP_MeanFig(cell_ID, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
-            saveMeanAPFig(fig, cell_ID)
+            saveAP_MeanFig(fig, cell_ID)
         else : fig = getCache(filename, cell_ID)
         fig.show()
         
@@ -116,32 +116,10 @@ def getorbuildAP_PhasePlotFig(filename, cell_ID_or_cell_df, from_scratch=None):
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_ID}')
             fig =buildAP_PhasePlotFig(cell_ID, pAD_df, V_array)
-            savePhasePlotFig(fig, cell_ID)
+            saveAP_PhasePlotFig(fig, cell_ID)
         else : fig = getCache(filename, cell_ID)
         fig.show()
 
-# def getorbuildAP_RateOfDepolFig(filename, cell_ID_or_cell_df, from_scratch=None):
-#         if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
-#             expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
-#             cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
-#         else:
-#             cell_df = cell_ID_or_cell_df
-#         cell_ID = cell_df['cell_ID'].iloc[0]
-
-#         from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
-#         if from_scratch or not isCached(filename, cell_ID):
-#             print(f'BUILDING "{cell_ID} Rate of depolarisation Figure"') 
-#             folder_file = cell_df['folder_file'].values[0]
-#             path_V, path_I = make_path(folder_file)
-#             listV, dfV = igor_exporter(path_V)
-#             V_array = np.array(dfV)
-#             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
-#             if len(peak_heights_all) <=1:
-#                 return print(f'No APs in trace for {cell_ID}')
-#             fig =buildAP_RateOfDepolFig(cell_ID, pAD_df, V_array)
-#             saveRateOfDepolFig(fig, cell_ID)
-#         else : fig = getCache(filename, cell_ID)
-#         fig.show()
 
 def getorbuildAP_PCAFig(filename, cell_ID_or_cell_df, from_scratch=None):
         if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
@@ -162,7 +140,7 @@ def getorbuildAP_PCAFig(filename, cell_ID_or_cell_df, from_scratch=None):
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_ID}')
             fig =buildAP_PCAFig(cell_ID, pAD_df, V_array)
-            savePCAFig(fig, cell_ID)
+            saveAP_PCAFig(fig, cell_ID)
         else : fig = getCache(filename, cell_ID)
         fig.show()
 
@@ -185,7 +163,7 @@ def getorbuildAP_HistogramFig(filename, cell_ID_or_cell_df, from_scratch=None):
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_ID}')
             fig =buildAP_HistogramFig(cell_ID, pAD_df, V_array)
-            saveHistogramAPFig(fig, cell_ID)
+            saveAP_HistogramFig(fig, cell_ID)
         else : fig = getCache(filename, cell_ID)
         fig.show()
 
@@ -216,7 +194,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     pAD_plot_pre_window = 50
     pAD_plot_post_window = 50
     
-    if pAD_locs is None: 
+    if pAD_locs is True: 
         # Get pAD_locs
         peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(df_V) 
         
@@ -228,12 +206,12 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
         Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
         Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num", "AP_loc"]].values
     
-    for pAD_spike_idx in range(len(pAD_ap_indices)):
-        pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
-        v_temp = np.array(array_V[sweep_num*df_V.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
-        time_temp = np.linspace((sweep_num*df_V.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
-        ax1.plot(time_temp, v_temp, c  = 'red', lw = 2 )
-        
+        for pAD_spike_idx in range(len(pAD_ap_indices)):
+            pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
+            v_temp = np.array(array_V[sweep_num*df_V.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
+            time_temp = np.linspace((sweep_num*df_V.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
+            ax1.plot(time_temp, v_temp, c  = 'red', lw = 2, alpha=0.25 )
+            
     
     ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
     ax2.legend()
@@ -249,7 +227,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
     ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
     ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
-    #ax1.set_title(cell_ID + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
+    ax1.set_title(cell_ID + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
     plt.tight_layout()
     plt.show()
     return fig
