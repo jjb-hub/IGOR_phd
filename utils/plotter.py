@@ -49,9 +49,6 @@ def loopBuildAplicationFigs(filename):
 ### GETTERS ###
 
 
-
-
-
 # My Functions DJ merge from main 17.7.23
 
     
