@@ -47,14 +47,16 @@ def function_tester_all_files(feature_df, test_function = None):
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
             elif  test_function ==  'Mean_AP':
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
-                buildMeanAPFig(cell_ID, pAD_df, V_array)
+                buildAP_MeanFig(cell_ID, pAD_df, V_array)
     return None 
 
-function_tester_all_files(feature_df, 'Mean_AP')
+filename = "feature_df_py.xlsx"  # df of files and factors
+expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
+function_tester_all_files(expanded_df, 'Mean_AP')
 
 #  test buildMeanAPFig
 
-
+#### JJB TESTERS 
 def plot_single_df_I_or_V_by_col (df_to_plot, y_label = 'V (mV) or I injected (pA)'): 
     '''
     Opens a single figure and plots each column on top of eachother (nice for I FP data)
