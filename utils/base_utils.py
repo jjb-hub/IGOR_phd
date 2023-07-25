@@ -138,7 +138,7 @@ def getCellDF(df, cell_id, data_type = None):
         cell_df = cell_df[cell_df['data_type']== data_type]
     return cell_df
 
-def getorBuildExpandedDF(filename, identifier, builder_cb, from_scratch=None):
+def getorbuildExpandedDF(filename, identifier, builder_cb, from_scratch=None):
     filename_no_extension = filename.split(".")[0]
     from_scratch = from_scratch if from_scratch is not None else input("Recalculate DF even if previous version exists? (y/n)") == 'y'
     if from_scratch or not isCached(filename, identifier):
@@ -161,19 +161,19 @@ def saveFigure(fig, identifier, fig_type):
 def saveAplicationFig(fig, identifier):
     saveFigure(fig, identifier, 'DrugApplication')
 
-def saveMeanAPFig(fig, identifier):
+def saveAP_MeanFig(fig, identifier):
     saveFigure(fig, identifier, 'Mean_APs')
 
-def savePhasePlotFig(fig, identifier):
+def saveAP_PhasePlotFig(fig, identifier):
     saveFigure(fig, identifier, 'PhasePlot_APs')
 
-def saveRateOfDepolFig(fig,identifier):
-    saveFigure(fig, identifier, 'RateOfDepol_APs')
+def saveFP_HistogramFig(fig, identifier):
+    saveFigure(fig, identifier, 'FP_Histograms')
 
-def savePCAFig(fig, identifier):
+def saveAP_PCAFig(fig, identifier):
     saveFigure(fig, identifier, 'PCA_APs')
 
-def saveHistogramAPFig(fig, identifier):
+def saveAP_HistogramFig(fig, identifier):
     saveFigure(fig, identifier, 'Histogram_APs')
 
 ######## INIT ##########
