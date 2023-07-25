@@ -13,6 +13,8 @@ from ephys.ap_functions import pAD_detection
 #shitshit
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from matplotlib.lines import Line2D 
 import numpy as np
 
