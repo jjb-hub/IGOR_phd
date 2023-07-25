@@ -6,9 +6,9 @@ Created on Wed May 10 15:29:46 2023
 """
 #myshit 
 
-from utils.mettabuild_functions import expandFeatureDF, loopCombinations_stats
+from utils.metabuild_functions import expandFeatureDF, loopCombinations_stats
 from utils.base_utils import *
-from utils.mettabuild_functions import extract_FI_x_y
+from utils.metabuild_functions import extract_FI_x_y
 from ephys.ap_functions import pAD_detection
 #shitshit
 from matplotlib import pyplot as plt
