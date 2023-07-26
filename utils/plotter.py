@@ -190,7 +190,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     fig = plt.figure(figsize = (12,9))
     ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
     ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
-    ax1.plot(x_V, array_V, c = plot_color, lw=1, alpha=0.5) #voltage trace plot # "d", markevery=pAD_locs
+    ax1.plot(x_V, array_V, c = plot_color, lw=1, alpha=0.8) #voltage trace plot # "d", markevery=pAD_locs
     pAD_plot_pre_window = 50
     pAD_plot_post_window = 50
     
@@ -210,7 +210,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
             pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
             v_temp = np.array(array_V[sweep_num*df_V.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
             time_temp = np.linspace((sweep_num*df_V.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
-            ax1.plot(time_temp, v_temp, c  = 'red', lw = 2, alpha=0.25 )
+            ax1.plot(time_temp, v_temp, c  = 'red', lw = 2, alpha=0.5 )
             
     
     ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
