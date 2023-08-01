@@ -242,21 +242,17 @@ def buildAP_MeanFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window 
     plot_window = plot_forwards_window + plot_backwards_window
     sampling_rate               = 1e4 
     sec_to_ms                   = 1e3
-    time_                       = sec_to_ms* np.arange(0,150) / sampling_rate  
+    
     # pAD subdataframe and indices
     pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
-    pAD_ap_indices = pAD_sub_df[["AP_loc", "AP_sweep_num"]].values
+    pAD_ap_indices = pAD_sub_df[["upshoot_loc" , "AP_loc", "AP_sweep_num"]].values
 
     # Somatic subdataframe and indices
     Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
-    Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num"]].values
+    Somatic_ap_indices = Somatic_sub_df[["upshoot_loc" , "AP_loc", "AP_sweep_num"]].values
 
     pAD_spike_array = np.zeros([len(pAD_ap_indices), plot_window  ])
     Somatic_spike_array = np.zeros([len(Somatic_ap_indices), plot_window ])
-    
-    
-    print(Somatic_ap_indices.shape, pAD_ap_indices.shape)
-    print(Somatic_spike_array.shape, pAD_spike_array.shape) 
     
     # Plotter for pAD and Somatic Spikes 
     fig, ax = plt.subplots()
@@ -265,34 +261,43 @@ def buildAP_MeanFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window 
     for idx in range(len(pAD_ap_indices)): 
         if plot_backwards_window >=   pAD_ap_indices[:,0][idx]:
             plot_backwards_window_ = 0
+            plot_forwards_window_  = plot_forwards_window + plot_backwards_window  
         else: 
             plot_backwards_window_ = plot_backwards_window
-            
-        pAD_spike_array[idx,:] = V[ pAD_ap_indices[:,0][idx] - plot_backwards_window_ :  pAD_ap_indices[:,0][idx] +  plot_forwards_window  ,  pAD_ap_indices[:,1][idx]    ]
+            plot_forwards_window_  = plot_forwards_window
+        
+        
+        pAD_spike_array[idx,:] = V[ pAD_ap_indices[:,0][idx] - plot_backwards_window_ :  pAD_ap_indices[:,0][idx] +  plot_forwards_window_  ,  pAD_ap_indices[:,-1][idx]    ]
+        time_                       = sec_to_ms* np.arange(0, len(pAD_spike_array[idx,:])) / sampling_rate  
         line, = ax.plot(time_, pAD_spike_array[idx,:] , color = 'salmon', alpha=0.05)
         lines.append(line)
         #plt.plot(pAD_spike_array[idx,:], color ='grey', label = 'pAD')
-
-    line, = ax.plot(time_, np.mean(pAD_spike_array , axis = 0)  , color = 'red')
-    lines.append(line)
+    
+    if pAD_spike_array.shape[0] > 0 :
+        line, = ax.plot(time_, np.mean(pAD_spike_array , axis = 0)  , color = 'red')
+        lines.append(line)
+    else : # no spikes to plot
+        pass
 
     
     for idx_ in range(len(Somatic_ap_indices)): 
         
         if plot_backwards_window >=   Somatic_ap_indices[:,0][idx_]:
             plot_backwards_window_ = 0
+            plot_forwards_window_  = plot_forwards_window + plot_backwards_window  
         else: 
             plot_backwards_window_ = plot_backwards_window
-        print("debugging somatic AP index %s " % idx_)
-        
-        print(Somatic_ap_indices[:,0][idx_] - plot_backwards_window , plot_backwards_window, Somatic_ap_indices[:,0][idx_] +  plot_forwards_window   ,  Somatic_ap_indices[:,1][idx_]  )
-        
-        Somatic_spike_array[idx_,:] = V[ Somatic_ap_indices[:,0][idx_] - plot_backwards_window_ :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_ap_indices[:,1][idx_]    ]
+            plot_forwards_window_  = plot_forwards_window
+            
+        Somatic_spike_array[idx_,:] = V[ Somatic_ap_indices[:,0][idx_] - plot_backwards_window_ :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window_   ,  Somatic_ap_indices[:,-1][idx_]    ]
+        time_                       = sec_to_ms* np.arange(0, len(Somatic_spike_array[idx_,:])) / sampling_rate  
         line, = ax.plot(time_,Somatic_spike_array[idx_,:] , color = 'cornflowerblue', alpha=0.05)
         lines.append(line)
-
-    line, = ax.plot(time_, np.mean(Somatic_spike_array , axis = 0)  , c = 'blue')
-    lines.append(line)
+    if pAD_spike_array.shape[0] > 0 :
+        line, = ax.plot(time_, np.mean(Somatic_spike_array , axis = 0)  , c = 'blue')
+        lines.append(line)
+    else : # no spikes to plot
+        pass
 
     # Create the custom legend with the correct colors
     legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble', alpha=0.2),
@@ -453,8 +458,8 @@ def buildAP_HistogramFig(cell_id, pAD_dataframe, V_array):
     for ax in axs.flat:
         ax.set(ylabel='Counts')
     axs[0,0].set_xlabel('Membrane Potential (mV)')
-    axs[0,1].set_xlabel('Potential Difference (mV)')
-    axs[1,0].set_xlabel('Volts/sec')
+    axs[0,1].set_xlabel('Volts/sec')
+    axs[1,0].set_xlabel('Potential Difference (mV)')
     axs[1,1].set_xlabel('Latency (ms)')
 
     # Add a legend to each subplot
