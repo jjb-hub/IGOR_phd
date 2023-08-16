@@ -886,92 +886,7 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
     return sag_current_all
 
-
-
-#DJ: this is here so we do not lose your plotting settings for pca, kmeans and his even tho they wont run for me - each needs to be its own simple func like buildMeanAPFig()
-#and they should be in plotters
-def pAD_detection_old(V_dataframe, pca_plotting = False , kmeans_plotting = False , histogram_plotting=False):
-
-    '''
-    Input : 
-            V_dataframe   : np.array : Voltage dataframe as  np array
-            
-    Output : 
-            ap_slopes     : list of lists containing action_potential slopes (num 0f spikes x sweeps analysed)
-            ap_thresholds : list of lists containing ap_thresholds or turning points of the spike (num 0f spikes x sweeps analysed)
-            ap_width      :  
-            ap_height     :
-    '''
-
-    peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_dataframe, all_sweeps =True)
-    
-    # Create Dataframe and append values
-    
-    pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold', 'AP_height' , 'AP_latency'])
-    
-    
-    non_nan_locs =  np.where(np.isnan(v_thresholds_all_) == False)[0] 
-    
-    if len (non_nan_locs) == 0 : 
-        pAD_df["AP_loc"] = peak_locs_corr_ 
-        pAD_df["AP_threshold"] =  v_thresholds_all_
-        pAD_df["AP_slope"] = peak_slope_all_
-        pAD_df["AP_latency"] = peak_latencies_all_
-        pAD_df["AP_height"] =  peak_heights_all_ 
-        pAD_df['AP_sweep_num'] = sweep_indices_all_
-        pAD_df["pAD"] = ""
-        pAD_df["pAD_count"] = np.nan 
-        
-        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  peak_heights_all_ , pAD_df, None
-        
-        
-    
-    
-    peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
-    v_thresholds_all   = np.array(v_thresholds_all_ )[non_nan_locs]
-    peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
-    peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
-    upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
-    peak_heights_all   = np.array(peak_heights_all_)[non_nan_locs]
-    peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
-    peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
-    sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
-    
-    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) == len(peak_heights_all) == len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) 
-    
-    
-        
-        
-    
-    
-    pAD_df["AP_loc"] = peak_locs_corr 
-    pAD_df["AP_threshold"] =  v_thresholds_all 
-    pAD_df["AP_slope"] = peak_slope_all 
-    pAD_df["AP_latency"] = peak_latencies_all
-    pAD_df["AP_height"] =  peak_heights_all 
-    pAD_df['AP_sweep_num'] = sweep_indices_all
-    pAD_class_labels = np.array(["pAD" , "Somatic"] )
-    
-    
-    
-    if len (peak_locs_corr) == 0 :
-        print("No APs found in trace")
-        pAD_df["pAD"] = ""
-        pAD_df["pAD_count"] = np.nan 
-        
-        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, None 
-    elif len (peak_locs_corr) == 1 : 
-        if v_thresholds_all[0]  < -65.0 :
-            # pAD 
-            pAD_df["pAD"] = "pAD"
-            pAD_df["pAD_count"] = 1 
-        else: 
-            pAD_df["pAD"]       = "Somatic"
-            pAD_df["pAD_count"] = 0 
-        return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, None
-    else : 
-        pass
-        
+       
 def pAD_detection(V_dataframe):
     '''
     Input : 
@@ -1091,30 +1006,6 @@ def pAD_detection(V_dataframe):
 
 
 def array_peak_cleaner(array, prominence = 10 , threshold = -55 ,  peak_pre_window = 5 ):
-    
-    
-    
-    # #array_smooth = gaussian_filter1d(array , 10)
-    # peaks, _ = sg.find_peaks(array, height = 10 + np.average(array) , 
-    #                                 prominence = [20,150])
-    
-    
-                             
-    
-    # #peaks, _     = find_peaks(array,   prominence = 10 , threshold = -55 )
-    # peak_isi_min = int(min(np.diff(peaks)) ) 
-    # peak_window = peak_pre_window + peak_isi_min
-    
-    # array_cleaned = array
-    # array_peaks   = np.zeros([ len(peaks) , peak_window ])  
-    
-    # for peak_idx  in range(len(peaks)):
-    #     peak_loc = peaks[peak_idx]
-        
-    #     array_peaks[peak_idx,:] += array[peak_loc - peak_pre_window :   peak_loc + peak_isi_min ].reshape(-1,)
-    #     array_cleaned[peak_loc - peak_pre_window :   peak_loc + peak_isi_min] = np.nan
-    
-    # # clean nans
     
     array_cleaned  = array.copy() 
     
