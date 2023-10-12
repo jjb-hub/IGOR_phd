@@ -58,20 +58,21 @@ def getorbuildApplicationFig(filename, cell_ID_or_cell_df, from_scratch=None):
 
     from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
     if from_scratch or not isCached(filename, cell_ID):
-        print(f'BUILDING "{cell_ID} Application Figure"')    #Build useing callback otherwise and cache result
+        for index, row in cell_df.iterrows(): #loops rows from multiple applications
         #inputs to builder if not cached:
-        folder_file = cell_df['folder_file'].values[0]
-        I_set = cell_df['I_set'].values[0]
-        drug = cell_df['drug'].values[0]
-        drug_in = cell_df['drug_in'].values[0]
-        drug_out = cell_df['drug_out'].values[0]
-        application_order = cell_df['application_order'].values[0]
-        pAD_locs = cell_df['APP_pAD_AP_locs'].values[0]  #FIX ME perhaps this should also be in try so can run without pAD! or add pAD == True in vairables
-        
-        fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
-        saveAplicationFig(fig, cell_ID)
+            folder_file = row['folder_file']
+            I_set = row['I_set']
+            drug = row['drug']
+            drug_in = row['drug_in']
+            drug_out = row['drug_out']
+            application_order = row['application_order']
+            print(f'BUILDING "{cell_ID} Application {application_order} Figure"') #Build useing callback otherwise and cache result
+            fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
+            saveAplicationFig(fig, f'{cell_ID}_application_{application_order}')
+            plt.close(fig)
+            # fig.show()
     else : fig = getCache(filename, cell_ID)
-    fig.show()
+    # fig.show()
     
 
 def getorbuildAP_MeanFig(filename, cell_ID_or_cell_df, from_scratch=None):
