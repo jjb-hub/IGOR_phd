@@ -42,6 +42,29 @@ p_value_threshold=0.05 #FIX ME build these in with simple get or guild functions
 #EXPAND FEATURE_DF
 #takes a row of the df (a single file) and extractes values based on the data type  FP or AP then appends values to df
 
+## New function DJ : 
+    
+def generate_V_pAD_df(folder_file): 
+    '''
+    Generates pAD_df, V_array  
+    
+    Input : 
+           folder_file : str 
+    
+    Ouput : 
+           pAD_df  : pAD dataframe built from pAD_detection
+           V_array : v array 
+           
+           
+    '''
+    path_V, path_I = make_path(folder_file)
+    V_list, V_df = igor_exporter(path_V)
+    V_array      = np.array(V_df) 
+    
+    peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
+    
+    return pAD_df , V_array
+
 def _handleFile(row): 
     row = row.copy()
     # Dataframe extraction 

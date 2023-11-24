@@ -22,6 +22,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans 
 from sklearn.mixture import GaussianMixture
 
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import silhouette_score
+from sklearn.preprocessing import StandardScaler 
+
+
 
 from scipy.signal import find_peaks
 
@@ -971,8 +976,8 @@ def pAD_detection_old(V_dataframe, pca_plotting = False , kmeans_plotting = Fals
         return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, None
     else : 
         pass
-        
-def pAD_detection(V_dataframe):
+
+def beta_pAD_detection(V_dataframe):
     '''
     Input : 
             V_dataframe   : np.array : Voltage dataframe as  np array
@@ -983,7 +988,12 @@ def pAD_detection(V_dataframe):
             ap_width      :  
             ap_height     :
     '''
-
+    
+    #  ESTABLISHED CONVENTION:  !!! pAD label == 1   !!!    
+    
+    
+    ### STEP 1 :  Get the action potential (AP) values and create pAD dataframe with columns and values 
+        
     peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_dataframe, all_sweeps =True)
     
     # Create Dataframe and append values
@@ -1044,7 +1054,198 @@ def pAD_detection(V_dataframe):
     else : 
         pass
     
+    
+    
+    # STEP 2 : Make all labels for upshoot potential < -65 mV   = pAD  
+    
+    pAD_df_pAD_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  < -65.0 ]
+    pAD_df_uncertain_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  > -65.0 ]
+    
+    pAD_df_mod = pd.concat([ pAD_df_pAD_via_threshold , pAD_df_uncertain_via_threshold] , axis = 0) 
+    
+    
+    
+    #pAD_df["AP_loc"][np.where(pAD_df["AP_threshold"] < - 65)[0]]
+    
+    
+    
     # Data for fitting procedure
+    
+    X = pAD_df_mod[["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
+    
+    # Check if 2 clusters are better than 1 
+    
+    kmeans_1 = KMeans(n_clusters=1, n_init = 1).fit(X)
+    kmeans_2 = KMeans(n_clusters=2, n_init = 1 ).fit(X)
+    
+    wcss_1 = kmeans_1.inertia_
+    wcss_2 = kmeans_2.inertia_
+    
+    
+    true_labels_combined = None 
+    
+    #print(type(kmeans_2.labels_))
+    #print(wcss_1, wcss_2)
+
+    if wcss_2 < wcss_1 :
+        true_labels_combined = kmeans_2.labels_
+        # 2 CLUSTERS  are a better fit than 1  
+        # Append label column to type 
+        #print("Mean Voltage Threshold of Cluster 1")
+        #print(np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 0] ))
+        #print("Mean Voltage Threshold of Cluster 2")
+        #print(np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ))
+        #print(np.nanmean( peak_slope_all  [kmeans_2.labels_ == 0] ) , np.nanmean( peak_slope_all  [kmeans_2.labels_ == 1] ))
+        
+        if np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 0] )  < np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ):
+            pAD_df["pAD"] = pAD_class_labels[np.array(kmeans_2.labels_)]
+            pAD_df["pAD_count"] = np.sum(kmeans_2.labels_)
+        else:
+            pAD_df["pAD"] = pAD_class_labels[np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  )]
+            pAD_df["pAD_count"] = np.sum(np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  ))
+              
+        pAD_df["num_ap_clusters"] = 2 
+        
+    else :
+         true_labels_combined = kmeans_1.labels_
+         # JUST 1 CLUSTER
+         if np.nanmean(v_thresholds_all )  <= -65.0 : 
+             print("check file all APs seems pAD")
+             pAD_df["pAD"] = "pAD"
+             pAD_df["pAD_count"] = len(v_thresholds_all)
+         else : 
+          pAD_df["pAD"] = "Somatic"
+         pAD_df["num_ap_clusters"] = 1
+         pAD_df["pAD_count"] = 0 
+         
+    
+    
+    # Do the same but for the uncertain bit 
+         
+    X = pAD_df_uncertain_via_threshold [["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
+    
+    # Check if 2 clusters are better than 1 
+    
+    kmeans_1 = KMeans(n_clusters=1, n_init = 1).fit(X)
+    kmeans_2 = KMeans(n_clusters=2, n_init = 1 ).fit(X)
+    
+    wcss_1 = kmeans_1.inertia_
+    wcss_2 = kmeans_2.inertia_
+    
+    
+    true_labels_split = None 
+    
+    #print(type(kmeans_2.labels_))
+    #print(wcss_1, wcss_2)
+
+    if wcss_2 < wcss_1 :
+        true_labels_split  = kmeans_2.labels_
+        
+    else :
+         true_labels_split = kmeans_1.labels_
+        
+    # Print % overlap 
+    flip = False 
+    
+    if pAD_df_pAD_via_threshold.shape[0] > 0 : 
+        if true_labels_combined[0] == 1 :
+            pass
+        else: 
+            flip = True 
+    
+    true_labels_ = np.hstack((np.ones(pAD_df_pAD_via_threshold.shape[0])  ,  true_labels_split  ) )
+    
+    if flip :
+        true_labels_combined = 1 - true_labels_combined
+    
+    
+    
+    print(sum( true_labels_  == true_labels_combined  )  / len(  true_labels_combined   )   , pAD_df_pAD_via_threshold.shape[0] /  pAD_df.shape[0]  )
+    
+    
+    return true_labels_, true_labels_split, true_labels_combined 
+
+    
+
+
+def pAD_detection(V_dataframe):
+    '''
+    Input : 
+            V_dataframe   : np.array : Voltage dataframe as  np array
+            
+    Output : 
+            ap_slopes     : list of lists containing action_potential slopes (num 0f spikes x sweeps analysed)
+            ap_thresholds : list of lists containing ap_thresholds or turning points of the spike (num 0f spikes x sweeps analysed)
+            ap_width      :  
+            ap_height     :
+    '''
+    
+    ### STEP 1 :  Get the action potential (AP) values and create pAD dataframe with columns and values 
+        
+    peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_dataframe, all_sweeps =True)
+    
+    # Create Dataframe and append values
+    pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold', 'AP_height' , 'AP_latency'])
+    
+    non_nan_locs =  np.where(np.isnan(v_thresholds_all_) == False)[0] 
+    
+    if len (non_nan_locs) == 0 : 
+        pAD_df["AP_loc"] = peak_locs_corr_ 
+        pAD_df["AP_threshold"] =  v_thresholds_all_
+        pAD_df["AP_slope"] = peak_slope_all_
+        pAD_df["AP_latency"] = peak_latencies_all_
+        pAD_df["AP_height"] =  peak_heights_all_ 
+        pAD_df['AP_sweep_num'] = sweep_indices_all_
+        pAD_df['upshoot_loc']  = upshoot_locs_all_ 
+        pAD_df["pAD"] = ""
+        pAD_df["pAD_count"] = np.nan 
+        
+        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  peak_heights_all_ , pAD_df
+        
+
+    peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
+    v_thresholds_all   = np.array(v_thresholds_all_ )[non_nan_locs]
+    peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
+    peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
+    upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
+    peak_heights_all   = np.array(peak_heights_all_)[non_nan_locs]
+    peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
+    peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
+    sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
+    
+    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) == len(peak_heights_all) == len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) 
+    
+    pAD_df["AP_loc"] = peak_locs_corr 
+    pAD_df["upshoot_loc"] =  upshoot_locs_all   
+    pAD_df["AP_threshold"] =  v_thresholds_all 
+    pAD_df["AP_slope"] = peak_slope_all 
+    pAD_df["AP_latency"] = peak_latencies_all
+    pAD_df["AP_height"] =  peak_heights_all 
+    pAD_df['AP_sweep_num'] = sweep_indices_all
+    pAD_class_labels = np.array(["pAD" , "Somatic"] )
+    
+    if len (peak_locs_corr) == 0 :
+        print("No APs found in trace")
+        pAD_df["pAD"] = ""
+        pAD_df["pAD_count"] = np.nan 
+        
+        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df
+    elif len (peak_locs_corr) == 1 : 
+        if v_thresholds_all[0]  < -65.0 :
+            # pAD 
+            pAD_df["pAD"] = "pAD"
+            pAD_df["pAD_count"] = 1 
+        else: 
+            pAD_df["pAD"]       = "Somatic"
+            pAD_df["pAD_count"] = 0 
+        return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df
+    else : 
+        pass
+    
+    
+    
+    # Data for fitting procedure
+    
     X = pAD_df[["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
     
     # Check if 2 clusters are better than 1 
@@ -1090,232 +1291,25 @@ def pAD_detection(V_dataframe):
     return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  
 
 
-def array_peak_cleaner(array, prominence = 10 , threshold = -55 ,  peak_pre_window = 5 ):
+def array_peak_cleaner(input_array, prominence = 10 , threshold = -55 ,  peak_pre_window = 5 ):
     
+   
+    array_cleaned = input_array.copy()
     
+    array_diff_abs = np.diff(input_array) 
+    array_diff_abs = np.hstack([array_diff_abs , np.mean(array_diff_abs)   ])
     
-    # #array_smooth = gaussian_filter1d(array , 10)
-    # peaks, _ = sg.find_peaks(array, height = 10 + np.average(array) , 
-    #                                 prominence = [20,150])
+   
     
-    
-                             
-    
-    # #peaks, _     = find_peaks(array,   prominence = 10 , threshold = -55 )
-    # peak_isi_min = int(min(np.diff(peaks)) ) 
-    # peak_window = peak_pre_window + peak_isi_min
-    
-    # array_cleaned = array
-    # array_peaks   = np.zeros([ len(peaks) , peak_window ])  
-    
-    # for peak_idx  in range(len(peaks)):
-    #     peak_loc = peaks[peak_idx]
-        
-    #     array_peaks[peak_idx,:] += array[peak_loc - peak_pre_window :   peak_loc + peak_isi_min ].reshape(-1,)
-    #     array_cleaned[peak_loc - peak_pre_window :   peak_loc + peak_isi_min] = np.nan
-    
-    # # clean nans
-    
-    array_cleaned  = array.copy() 
-    
-    array_cleaned[array_cleaned > np.mean(array_cleaned) + 10] = np.nan
+    array_cleaned[array_diff_abs  > np.mean(array_diff_abs) + 2*np.std(array_diff_abs) ] = np.nan
     array_cleaned = array_cleaned[~np.isnan(array_cleaned) ] 
      
-    # fig,  ax = plt.subplots(1,1)
-    # ax.plot(np.arange(len(array)) , array)
-    # ax.plot(peaks, array[peaks] , '*')
-    # plt.show()
-    
-    
     
     return array_cleaned, None 
 
 
         
-def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, I_setting = 'short step',  application_order=None, pAD_locs=None):
-    
-    path_V, path_I = make_path(folder_file)
-    array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
-    df_V = np.array(df_V)
-    
-    try:
-        array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
-    except FileNotFoundError: #if no I file exists 
-        print(f"no I file found for {cell_ID}, I setting used was: {I_set}")
-        array_I = np.zeros(len(df_V)-1)
-    #scale data
-    
-    x_scaler_drug_bar = df_V.shape[0] * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
-    x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
-    x_I = np.arange(len(array_I))*0.00005 #20kHz igor 
-    
-    num_sweeps  =  int( x_V[-1] / x_I[-1] ) 
-    num_sweeps_ = df_V.shape[-1]
-    
-    print(num_sweeps,num_sweeps_, df_V.shape)
-    
-    drug_in_time  =  int( drug_in* x_scaler_drug_bar  - x_scaler_drug_bar) 
-    drug_out_time =  int(drug_out* x_scaler_drug_bar) 
-    
-    print("printing drug in drug out sweep nums")
-    
-    print(drug_in, drug_out)
-    
-    
-    ######## PARAMETERS #################
-    
-    
-    V_array = np.array(array_V)
-    
-    V_pre =  V_array[0:drug_in_time]
-    V_drug =  V_array[drug_in_time:drug_out_time]
-    V_post =  V_array[drug_out_time:]
-    
-    plt.plot(x_I, np.array(array_I))
-    plt.show()
-    
-    
-    print("Lengths before clamping")
-    
-    print(V_pre.shape,V_drug.shape, V_post.shape )
-    
-    
-    V_pre[ V_pre > np.mean(V_pre) + 3*np.std(V_pre) ]     =  np.nan
-    V_drug[V_drug >= np.mean(V_drug) + 3*np.std(V_drug) ] = np.nan
-    V_post[V_post >= np.mean(V_post) + 3*np.std(V_post) ] = np.nan
-    
-    V_pre = V_pre[~np.isnan(V_pre)]
-    V_drug = V_drug[~np.isnan(V_drug)]
-    V_post = V_post[~np.isnan(V_post)]
-    
-    
-        
-    print("Lengths after clamping")
-    print(V_pre.shape,V_drug.shape, V_post.shape )
-    
-    
-    x_pre = np.arange(len(V_pre))*1e-4
-    x_drug = np.arange(len(V_drug))*1e-4
-    x_post = np.arange(len(V_post))*1e-4
-    
-    
-    I_abs = np.abs(array_I)
-    
-    
-    first_step_current_point = np.where(I_abs == max(I_abs))[0][0]
-    last_step_current_point = np.where(I_abs == max(I_abs))[0][-1]
-    
-    
-    # pre 
-    v_array_pre  = [] 
-    v_steps_pre  = np.zeros([ int(last_step_current_point - first_step_current_point) , drug_in])
-    
-    for pre_sweep_idx in range(drug_in):
-        v_temp = df_V[:,pre_sweep_idx]
-        v_steps_pre[:, pre_sweep_idx] = v_temp[first_step_current_point:last_step_current_point]
-        v_array_pre += v_temp[0:first_step_current_point].tolist()
-        v_array_pre += v_temp[last_step_current_point + 1_0000: ].tolist()        
-        
-    # drug : drug_in to drug_out 
-    
-    v_array_drug  = [] 
-    v_steps_drug  = np.zeros([ int(last_step_current_point - first_step_current_point) , drug_out - drug_in ])
-    
-    for drug_sweep_idx in range(drug_in,drug_out):
-        v_temp = df_V[:,drug_sweep_idx]
-        v_steps_drug[:, drug_sweep_idx - drug_in] = v_temp[first_step_current_point:last_step_current_point]
-        v_array_drug += v_temp[0:first_step_current_point].tolist()
-        v_array_drug += v_temp[last_step_current_point + 1_0000 : ].tolist() 
-        
-        
-    # post : drug_out  till end 
-    
-    v_array_post = [] 
-    v_steps_post = np.zeros([ int(last_step_current_point - first_step_current_point) , df_V.shape[-1] -  drug_out ])
-    
-    for post_sweep_idx in range(drug_out,df_V.shape[-1]):
-        v_temp = df_V[:,drug_sweep_idx]
-        v_steps_post[:, post_sweep_idx - drug_out] = v_temp[first_step_current_point:last_step_current_point]
-        v_array_post += v_temp[0:first_step_current_point].tolist()
-        v_array_post += v_temp[last_step_current_point + 1_0000 : ].tolist() 
-    
-    
-    
-    # clean up spikes: 
-        
-    
-    v_array_drug = np.array(v_array_drug)
-    v_drug_diff  = np.diff(v_array_drug)
-       
-    
-    v_drug_filtered = v_array_drug[np.concatenate(  (   v_drug_diff - np.mean(v_drug_diff)   <= 2*np.std(v_drug_diff)    , [True] ) )]
-    
-    
-    v_drug_cleaned, v_drug_peaks  =  array_peak_cleaner(v_array_drug)
-    
-    fig, axs = plt.subplots(1,1)
-    axs.plot(v_array_pre, label = 'pre')
-    axs.plot(v_array_drug, label  = 'drug', alpha = 0.5)
-    #axs.plot(v_drug_filtered, label  = 'drug clean', alpha = 0.5)
-    axs.plot(v_drug_cleaned, label  = 'drug clean', alpha = 0.5)
-    
-    
-    #axs.plot(v_array_post, label = 'post')
-    plt.legend()
-    plt.show()
-    
-    
-    print(np.mean(v_array_pre), np.mean(v_array_drug), np.mean(v_array_post))
-        
-               
-    
-    fig, axs = plt.subplots(2,1)
-    
-    
-    
-    
-    for idx in range(df_V.shape[-1]):
-        axs[0].plot(df_V[:,idx], c=  'grey', alpha = 0.6)
-    axs[0].plot(np.nanmean( df_V  , axis  = 1 ), c = 'k', label = 'Mean')
-    
-    axs[1].plot(np.array(array_I))
-    plt.legend(loc = 'best')
-    plt.show()
 
-    
-    
-    # fig, ax = plt.subplots()
-
-    
-    # plt.plot(x_pre , V_pre , alpha = 1   , label = 'pre')
-    # plt.legend()
-    # plt.show()
-    # plt.plot(x_drug + x_pre[-1], V_drug, c = 'r', alpha = 0.9 , label = 'drug')
-    # plt.legend()
-    # plt.show()
-    # plt.plot(x_post + x_pre[-1] + x_drug[-1], V_post, c = 'b', alpha = 0.9 , label = 'post')
-    # plt.legend()
-    # plt.show()
-    # ax.axhline(y = np.mean(V_pre) + np.std(V_pre), c = 'k' , label = 'Pre Thresh')
-    # ax.axhline(y = np.mean(V_drug) + np.std(V_drug), c = 'm' ,  label = 'Drug Thresh')
-    # ax.axhline(y = np.mean(V_post) + np.std(V_post) , c = 'r' , label = 'Post Thresh')
-    # plt.legend()
-    # plt.show()
-    
-    
-    # fig, axs = plt.subplots(1,2)
-    # axs[0].hist(V_pre, bins = 20, color = 'cornflowerblue', alpha = 0.5)
-    # axs[1].hist(V_drug, bins = 20, color = 'salmon', alpha = 0.5)
-    # plt.show()
-    
-    print("depol is : ")
-    print(np.mean(V_drug)   -  np.mean(V_pre) + 2*np.std(V_pre) ) 
-        
-    
-    
-    
-    
-    return x_pre, x_drug, x_post, V_array , df_V, df_I , v_drug_filtered
 
 
 
