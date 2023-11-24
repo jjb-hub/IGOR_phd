@@ -58,20 +58,22 @@ def getorbuildApplicationFig(filename, cell_ID_or_cell_df, from_scratch=None):
 
     from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
     if from_scratch or not isCached(filename, cell_ID):
-        print(f'BUILDING "{cell_ID} Application Figure"')    #Build useing callback otherwise and cache result
-        #inputs to builder if not cached:
-        folder_file = cell_df['folder_file'].values[0]
-        I_set = cell_df['I_set'].values[0]
-        drug = cell_df['drug'].values[0]
-        drug_in = cell_df['drug_in'].values[0]
-        drug_out = cell_df['drug_out'].values[0]
-        application_order = cell_df['application_order'].values[0]
-        pAD_locs = cell_df['APP_pAD_AP_locs'].values[0]  #FIX ME perhaps this should also be in try so can run without pAD! or add pAD == True in vairables
-        
-        fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
-        saveAplicationFig(fig, cell_ID)
-    else : fig = getCache(filename, cell_ID)
-    fig.show()
+        for index, row in cell_df.iterrows(): #loops rows from multiple applications
+            #inputs to builder if not cached:
+            folder_file = row['folder_file']
+            I_set = row['I_set']
+            drug = row['drug']
+            drug_in = row['drug_in']
+            drug_out = row['drug_out']
+            application_order = row['application_order']
+            print(f'BUILDING "{cell_ID} Application {application_order} Figure"') #Build useing callback otherwise and cache result
+            fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
+            saveAplicationFig(fig, f'{cell_ID}_application_{application_order}')
+            plt.close(fig)
+            
+    else : 
+        fig = getCache(filename, cell_ID)
+    # fig.show()
     
 
 def getorbuildAP_MeanFig(filename, cell_ID_or_cell_df, from_scratch=None):
@@ -190,7 +192,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     fig = plt.figure(figsize = (12,9))
     ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
     ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
-    ax1.plot(x_V, array_V, c = plot_color, lw=1, alpha=0.5) #voltage trace plot # "d", markevery=pAD_locs
+    ax1.plot(x_V, array_V, c = plot_color, lw=1, alpha=0.8) #voltage trace plot # "d", markevery=pAD_locs
     pAD_plot_pre_window = 50
     pAD_plot_post_window = 50
     
@@ -210,7 +212,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
             pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
             v_temp = np.array(array_V[sweep_num*df_V.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
             time_temp = np.linspace((sweep_num*df_V.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
-            ax1.plot(time_temp, v_temp, c  = 'red', lw = 2, alpha=0.25 )
+            ax1.plot(time_temp, v_temp, c  = 'red', lw = 2, alpha=0.5 )
             
     
     ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
