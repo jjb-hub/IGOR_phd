@@ -5,7 +5,7 @@ Created on Wed May 10 14:16:00 2023
 @author: Debapratim Jana, Jasmine Butler
 """
 from utils.base_utils import *
-from utils.mettabuild_functions import  expandFeatureDF , generate_V_pAD_df #only works in this order for me DJ had lower idk how
+from utils.metabuild_functions import  expandFeatureDF , generate_V_pAD_df #only works in this order for me DJ had lower idk how
 from ephys import ap_functions
 from utils.plotter import buildApplicationFig, buildMeanAPFig 
 import os, shutil, itertools, json, timeit, functools, pickle
@@ -36,7 +36,7 @@ def function_tester_all_files(feature_df, test_function = None):
             if test_function == 'depol': 
                 if  type(drug_in) is int :
                     pAD_df, V_array = generate_V_pAD_df(folder_file) 
-                    depol_val = ap_functions.cell_membrane_polarisation_detector_new(folder_file =  folder_file, cell_ID = cell_ID,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
+                    depol_val = ap_functions.cell_membrane_polarisation_detector(folder_file =  folder_file, cell_ID = cell_ID,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
                     
             
             if test_function == 'AP_figure': 
