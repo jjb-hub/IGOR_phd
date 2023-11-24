@@ -5,9 +5,9 @@ Created on Wed May 10 14:16:00 2023
 @author: Debapratim Jana, Jasmine Butler
 """
 from utils.base_utils import *
-from utils.metabuild_functions import  expandFeatureDF , generate_V_pAD_df #only works in this order for me DJ had lower idk how
+from utils.mettabuild_functions import  expandFeatureDF , generate_V_pAD_df #only works in this order for me DJ had lower idk how
 from ephys import ap_functions
-from utils.plotter import buildApplicationFig, buildAP_MeanFig 
+from utils.plotter import buildApplicationFig, buildMeanAPFig 
 import os, shutil, itertools, json, timeit, functools, pickle
 import openpyxl
 import pandas as pd
@@ -15,9 +15,6 @@ import numpy as np
 import matplotlib.pyplot as plt 
 import utils
 
-#%% TESTING FUNCTIONS
-# single_drug_aplication_visualisation(feature_df,  color_dict, cell = 'DRD230104b', drug = 'TCB2')
-# plot_single_df_I_or_V_by_col (df_to_plot, y_label = 'V (mV) or I injected (pA)')
 
 def function_tester_all_files(feature_df, test_function = None):
     
@@ -29,12 +26,18 @@ def function_tester_all_files(feature_df, test_function = None):
     
     for nrow in range(feature_df.shape[0]):
         
-        folder_file	 , cell_ID	, data_type	  , drug 	 , replication_no	,aplication_order	, drug_in	,drug_out	, I_setting ,	R_series_Mohm , _  = feature_df.loc[nrow + 1]
+        folder_file	 , cell_ID	, data_type	  , drug 	 , replication_no	,application_order	, drug_in	,drug_out	, I_setting ,	R_series_Mohm , _  = feature_df.loc[nrow + 1]
         
         # most test functions look at AP files?? 
         
         if data_type == 'AP':
             print("Analysing %s " % folder_file)
+            
+            if test_function == 'depol': 
+                if  type(drug_in) is int :
+                    pAD_df, V_array = generate_V_pAD_df(folder_file) 
+                    depol_val = ap_functions.cell_membrane_polarisation_detector_new(folder_file =  folder_file, cell_ID = cell_ID,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
+                    
             
             if test_function == 'AP_figure': 
             
@@ -47,16 +50,50 @@ def function_tester_all_files(feature_df, test_function = None):
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
             elif  test_function ==  'Mean_AP':
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
-                buildAP_MeanFig(cell_ID, pAD_df, V_array)
+                buildMeanAPFig(cell_ID, pAD_df, V_array)
+            elif test_function == 'beta_pAD': 
+                pAD_df, V_array = generate_V_pAD_df(folder_file)
+                ap_functions.beta_pAD_detection(V_array)
+                
     return None 
 
-filename = "feature_df_py.xlsx"  # df of files and factors
-expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
-function_tester_all_files(expanded_df, 'Mean_AP')
+def function_tester_single_file(folder_file, cell_ID, test_function = None):
+    if test_function is None: 
+        raise Exception("Test function not chosen")
+        sys.exit(1)
+    
+    
+    # most test functions look at AP files?? 
+    
+    # if data_type == 'AP':
+    #     print("Analysing %s " % folder_file)
+        
+    if test_function == 'AP_figure': 
+    
+        buildApplicationFig(color_dict, cell_ID = cell_ID , folder_file = folder_file	 , drug_in = drug_in, drug_out= drug_out ,I_set = I_setting )
+    elif  test_function ==  'PCA' : 
+        pAD_df, V_array = generate_V_pAD_df(folder_file)
+    elif  test_function == 'Phase':
+        pAD_df, V_array = generate_V_pAD_df(folder_file)
+    elif  test_function == 'Histogram':
+        pAD_df, V_array = generate_V_pAD_df(folder_file)
+    elif  test_function ==  'Mean_AP':
+        pAD_df, V_array = generate_V_pAD_df(folder_file)
+        buildMeanAPFig(cell_ID, pAD_df, V_array)
+    
+    return None 
+        
+    
+def quick_debugger(folder_file): 
+    pAD_df, V_array = generate_V_pAD_df(folder_file)
+    for idx in range(V_array.shape[-1]):
+        plt.plot(V_array[:, idx])
+    plt.show()
+    print('Number of APs are %s' % ap_functions.num_ap_finder(V_array))
+    return None 
 
-#  test buildMeanAPFig
 
-#### JJB TESTERS 
+
 def plot_single_df_I_or_V_by_col (df_to_plot, y_label = 'V (mV) or I injected (pA)'): 
     '''
     Opens a single figure and plots each column on top of eachother (nice for I FP data)
@@ -133,67 +170,31 @@ def single_drug_aplication_visualisation(feature_df,  color_dict, cell = 'DRD230
     print('Time: ', stop - start)      
     return
 
-#%% LOAD FEATURE_DF + START INPUTS
-ROOT = os.getcwd() #This gives terminal location (terminal working dir)
-INPUT_DIR = f'{ROOT}/input'
-OUTPUT_DIR = f'{ROOT}/output'
-CACHE_DIR = f'{INPUT_DIR}/cache'
 
-color_dict = {"pAD":"orange","Somatic":"blue","WASH":"lightsteelblue", "PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue', 'I_display':'cornflowerblue'} 
 
+def path_to_array_wrapper(input_directory, filename_trace):
+    '''
+    
+    Parameters
+    ----------
+    input_directory : TYPE
+        DESCRIPTION.
+    filename_trace : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    V : TYPE
+        DESCRIPTION.
+    I : TYPE
+        DESCRIPTION.
+
+    '''
+    path_V, path_I  =  f'{INPUT_DIR}/PatchData/' + filename_trace + 'Soma.ibw' ,   f'{INPUT_DIR}/PatchData/' + filename_trace  + 'Soma_outwave.ibw'
+    listV, dfV = igor_exporter(path_V)
+    listI, dfI = igor_exporter(path_I)
+    V = np.array(dfV)
+    I = np.array(dfI)
+    
+    return V, I 
  
- 
-
-dj_xlsx = False
-
-if dj_xlsx:
-    feature_df = pd.read_excel (f'{INPUT_DIR}/feature_df_py.xlsx')
-    data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_folder)
-else:
-    feature_df = openpyxl.load_workbook (f'{INPUT_DIR}/feature_df_py.xlsx') 
-    data = feature_df['Sheet1'].values
-    feature_df = pd.DataFrame(data)
-    header = feature_df.iloc[0]
-    feature_df = feature_df[1:]
-
-
-#%%TEST PATHS / FUNCS
-
-# #FP tester paths 
-# path_I =  f'{INPUT_DIR}/PatchData/JJB230509/t14Soma_outwave.ibw'
-# path_V =  f'{INPUT_DIR}/PatchData/JJB230509/t14Soma.ibw'
-
-
-#AP tester paths
-path_I =  f'{INPUT_DIR}/PatchData/JJB230411/t10Soma_outwave.ibw'
-path_V = f'{INPUT_DIR}/PatchData/JJB230411/t10Soma.ibw'
-
-
-#to plot I steps or V responce to steps all in 1 
-listV, dfV = igor_exporter(path_V)
-listI, dfI = igor_exporter(path_I)
-V = np.array(dfV)
-I = np.array(dfI)
-
-peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df   = ap_functions.pAD_detection(V)
-
-utils.plotter.buildPhasePlotFig('TLX230411a', pAD_df, V)
-utils.plotter.buildpADHistogram('TLX230411a', pAD_df, V)
-
-
-
-# #ap_functions.ap_characteristics_extractor_main(V, 0)
-# for idx in range(V.shape[-1]):
-#     print("sweep %s " % idx)
-#     ap_functions.ap_characteristics_extractor_subroutine_derivative(V, idx)
-
-# idx = 38
-# ap_functions.ap_characteristics_extractor_subroutine_derivative(V, idx)
-# plt.plot(V[:,idx])
-# plt.show()
-
-x, y, v_rest = ap_functions.extract_FI_x_y (path_I, path_V)
-
-
-
-
