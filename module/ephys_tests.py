@@ -6,7 +6,7 @@ Created on Wed May 10 14:16:00 2023
 """
 from utils.base_utils import *
 from utils.metabuild_functions import  expandFeatureDF , generate_V_pAD_df #only works in this order for me DJ had lower idk how
-from ephys import ap_functions
+from module import action_potential_functions
 from utils.plotter import buildApplicationFig, buildMeanAPFig 
 import os, shutil, itertools, json, timeit, functools, pickle
 import openpyxl
@@ -36,7 +36,7 @@ def function_tester_all_files(feature_df, test_function = None):
             if test_function == 'depol': 
                 if  type(drug_in) is int :
                     pAD_df, V_array = generate_V_pAD_df(folder_file) 
-                    depol_val = ap_functions.cell_membrane_polarisation_detector(folder_file =  folder_file, cell_ID = cell_ID,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
+                    depol_val = action_potential_functions.cell_membrane_polarisation_detector(folder_file =  folder_file, cell_ID = cell_ID,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
                     
             
             if test_function == 'AP_figure': 
@@ -53,7 +53,7 @@ def function_tester_all_files(feature_df, test_function = None):
                 buildMeanAPFig(cell_ID, pAD_df, V_array)
             elif test_function == 'beta_pAD': 
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
-                ap_functions.beta_pAD_detection(V_array)
+                action_potential_functions.beta_pAD_detection(V_array)
                 
     return None 
 
@@ -89,7 +89,7 @@ def quick_debugger(folder_file):
     for idx in range(V_array.shape[-1]):
         plt.plot(V_array[:, idx])
     plt.show()
-    print('Number of APs are %s' % ap_functions.num_ap_finder(V_array))
+    print('Number of APs are %s' % action_potential_functions.num_ap_finder(V_array))
     return None 
 
 
