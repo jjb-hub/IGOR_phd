@@ -6,9 +6,9 @@ Created on Wed May 10 10:43:53 2023
 """
 
 #my modular imports
-from utils.base_utils import *
-from ephys.ap_functions import calculate_max_firing, extract_FI_x_y, extract_FI_slope_and_rheobased_threshold
-from ephys.ap_functions import ap_characteristics_extractor_main, tau_analyser, sag_current_analyser , pAD_detection
+from module.base_utils import *
+from module.action_potential_functions import calculate_max_firing, extract_FI_x_y, extract_FI_slope_and_rheobased_threshold
+from module.action_potential_functions import ap_characteristics_extractor_main, tau_analyser, sag_current_analyser , pAD_detection
 
 #generic imports
 import os, shutil, itertools, json, time, functools, pickle

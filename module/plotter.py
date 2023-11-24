@@ -6,10 +6,10 @@ Created on Wed May 10 15:29:46 2023
 """
 #myshit 
 
-from utils.metabuild_functions import expandFeatureDF, loopCombinations_stats
-from utils.base_utils import *
-from utils.metabuild_functions import extract_FI_x_y
-from ephys.ap_functions import pAD_detection
+from module.metabuild_functions import expandFeatureDF, loopCombinations_stats
+from module.base_utils import *
+from module.metabuild_functions import extract_FI_x_y
+from module.action_potential_functions import pAD_detection
 #shitshit
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
