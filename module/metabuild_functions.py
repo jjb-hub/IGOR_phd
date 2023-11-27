@@ -29,33 +29,26 @@ from statannotations.Annotator import Annotator
 
 
 #CONSTANTS   
-ROOT = os.getcwd() #This gives terminal location (terminal working dir)
-INPUT_DIR = f'{ROOT}/input'
-OUTPUT_DIR = f'{ROOT}/output'
-CACHE_DIR = f'{INPUT_DIR}/cache'
+from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR 
 
+
+
+#FIX ME build these in with simple get or guild functions outside the meta loop also interrate with meta loop
 n_minimum = 3 
-p_value_threshold=0.05 #FIX ME build these in with simple get or guild functions outside the meta loop also interrate with meta loop
+p_value_threshold=0.05
 
 
-
-#EXPAND FEATURE_DF
-#takes a row of the df (a single file) and extractes values based on the data type  FP or AP then appends values to df
-
+#FIX ME POU IN RIGHT PLACE
 ## New function DJ : 
-    
 def generate_V_pAD_df(folder_file): 
     '''
     Generates pAD_df, V_array  
-    
     Input : 
            folder_file : str 
     
     Ouput : 
            pAD_df  : pAD dataframe built from pAD_detection
-           V_array : v array 
-           
-           
+           V_array : v array     
     '''
     path_V, path_I = make_path(folder_file)
     V_list, V_df = igor_exporter(path_V)
@@ -65,13 +58,17 @@ def generate_V_pAD_df(folder_file):
     
     return pAD_df , V_array
 
-def _handleFile(row): 
-    row = row.copy()
+
+##### EXPAND FEATURE_DF ######
+#takes a row of the df (a single file) and extractes values based on the data type  FP or AP then appends values to df
+
+def _handleFile(row): #THIS FUNCTION IS TOO BIG AND TOO SLOW TODO 
+    row = row.copy() #isnt this redundant? JJB
+
     # Dataframe extraction 
     path_V, path_I = make_path(row.folder_file)
     V_list, V_df = igor_exporter(path_V)
     V_array      = np.array(V_df) 
-    
     # handel missing I traces (Soma_outwave)
     try:
         I_list, I_df = igor_exporter(path_I)
@@ -80,10 +77,10 @@ def _handleFile(row):
         print('I file not found, path:', path_I)
 
 
-    if row.data_type in ["FP", "FP_AP"]:
+    if row.data_type in ["FP", "FP_AP"]: 
         # pass 
-        # print("FP type file")
-        # print(row.folder_file)
+        print("FP type file")
+        print(row.folder_file)
 
         #data files to be fed into extraction funcs feature_df_extended
         row["max_firing"] = calculate_max_firing(V_array)
@@ -112,6 +109,7 @@ def _handleFile(row):
         
         # pAD classification
         peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
+        print('pAD detection complete .... ')
 
         if len(pAD_df["pAD_count"]) == 0:  #if there are no APs of any kind detected
             row["pAD_count"] =  np.nan
@@ -147,8 +145,13 @@ def _handleFile(row):
     return row
 
 
-def expandFeatureDF(filename):
-    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
+def expandFeatureDF(filename_or_df): #if passed in get or build will be filename therefor cant subset to try #modularising now
+    if not isinstance(filename_or_df, pd.DataFrame):
+        print('fetchig raw df')
+        df = getRawDF(filename_or_df)
+    else:
+        df=filename_or_df
+
     og_columns = df.columns.copy() #origional columns #for ordering columns
     df['mouseline'] = df.cell_ID.str[:3]
     df = df.apply(_handleFile, axis=1) #Apply a function along an axis (rows = 1) of the DataFrame
@@ -163,8 +166,9 @@ def expandFeatureDF(filename):
     return df_reordered
 
 
-# GENERATE STATS AND PLOT EXPANDED_DF  
 
+
+# GENERATE STATS AND PLOT EXPANDED_DF  
 def apply_group_by_funcs(df, groupby_cols, handleFn, color_dict): #creating a list of new values and adding them to the existign df
     res_dfs_li = [] #list of dfs
     for group_info, group_df in df.groupby(groupby_cols):

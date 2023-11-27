@@ -1,16 +1,9 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed May 10 15:29:46 2023
-
-@author:  DJ, JJB
-"""
-#myshit 
-
+# module
 from module.metabuild_functions import expandFeatureDF, loopCombinations_stats
 from module.base_utils import *
 from module.metabuild_functions import extract_FI_x_y
 from module.action_potential_functions import pAD_detection
-#shitshit
+#external
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.decomposition import PCA
@@ -21,9 +14,41 @@ import numpy as np
 import timeit
 
 
+#BASE PLOTTERS
+# just plots any waveform
+
+def quick_plot_file(filename, folder_file):
+    df=getRawDF(filename)
+    path_V, path_I = make_path(folder_file)
+    listV, dfV = igor_exporter(path_V)
+    V_array = np.array(dfV)
+    try:
+        listI, dfI = igor_exporter(path_I)
+        I_array = np.array(dfI)
+    except:
+        print('no I file found', path_I)
+
+    #incase you want to output the data_type for instance
+    row = df[df['folder_file']==folder_file]
+    print (row)
+
+    quick_line_plot(listV, f'Voltage trace for {folder_file}')
+    quick_line_plot(listI, f'Current (I) trace for {folder_file}')
+
+def quick_line_plot(plotlist, plottitle):
+    plt.plot( range(len(plotlist)), plotlist, marker='o', linestyle='-')
+    plt.title(plottitle)
+    plt.show()
 
 
-## LOOPERS ##
+
+    
+
+
+
+
+## LOOPERS ## 
+# #right now need expanded df to make ap figuures not ideal
 
 def loopbuildAplicationFigs(filename):
     df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)

@@ -156,7 +156,6 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 
 def extract_FI_x_y (path_I, path_V):
     '''
-
     Parameters
     ----------
     path_I : string - path to I data 
@@ -167,7 +166,6 @@ def extract_FI_x_y (path_I, path_V):
     x : list - I injectionin pA
     y : list - AP number  ### currently per sweep but needs to be p in Hz (APs/sec) FIX ME 
     v_rest : int - V when ni I injected
-
     '''
     _, df_V = igor_exporter(path_V) # _ will be the continious wave which is no use here
     _, df_I = igor_exporter(path_I)
@@ -185,7 +183,6 @@ def extract_FI_x_y (path_I, path_V):
         y_ = df_V.iloc[:,i].tolist()
         v_smooth, peak_locs , _ , num_peaks  = ap_finder(y_) #props cotains dict with height/width for each AP
         y.append(num_peaks) 
-        
     
     x = [] #current injection per sweep (taking max)
     for i in range (len(df_I.columns)):
@@ -697,16 +694,15 @@ def steady_state_value(voltage_trace, current_trace, step_current_val,  avg_wind
 
 
 
-def calculate_max_firing(voltage_array, input_sampling_rate=1e4): 
+def calculate_max_firing(voltage_array, input_sampling_rate=1e4): #HARD CODE sampeling rate
     '''
     Function to calculate max firing of given voltage traces in Hz
     Input : 
             voltage_array : 2d array containing sweeps of voltage recordings / traces for different step currents
-
     Output: 
             max_firing : float in Hz 
     '''
-    num_aps_all  = np.array(num_ap_finder(voltage_array))                               # get num aps from each sweep
+    num_aps_all  = np.array(num_ap_finder(voltage_array))           # get num aps from each sweep
     index_max = np.where(num_aps_all == max(num_aps_all)) [0][0]    # get trace number with max aps 
     sampling_rate = input_sampling_rate
     _ , peak_locs , _ , _   =  ap_finder(voltage_array[:, index_max ] , smoothing_kernel = 10)

@@ -132,6 +132,10 @@ def isCached(filename, identifier):
 
 #need to also add from_scratch = None 
 #need to make forloop combinations
+def getRawDF(filename):
+    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
+    return (df)
+
 def getCellDF(df, cell_id, data_type = None):
     cell_df = df[df['cell_ID']==cell_id]
     if data_type is not None:
