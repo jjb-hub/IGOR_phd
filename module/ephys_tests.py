@@ -26,7 +26,7 @@ def function_tester_all_files(feature_df, test_function = None):
     
     for nrow in range(feature_df.shape[0]):
         
-        folder_file	 , cell_ID	, data_type	  , drug 	 , replication_no	,application_order	, drug_in	,drug_out	, I_setting ,	R_series_Mohm , _  = feature_df.loc[nrow + 1]
+        folder_file	 , cell_id	, data_type	  , drug 	 , replication_no	,application_order	, drug_in	,drug_out	, I_setting ,	R_series_Mohm , _  = feature_df.loc[nrow + 1]
         
         # most test functions look at AP files?? 
         
@@ -36,12 +36,12 @@ def function_tester_all_files(feature_df, test_function = None):
             if test_function == 'depol': 
                 if  type(drug_in) is int :
                     pAD_df, V_array = generate_V_pAD_df(folder_file) 
-                    depol_val = action_potential_functions.cell_membrane_polarisation_detector(folder_file =  folder_file, cell_ID = cell_ID,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
+                    depol_val = action_potential_functions.cell_membrane_polarisation_detector(folder_file =  folder_file, cell_id = cell_id,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
                     
             
             if test_function == 'AP_figure': 
             
-                buildApplicationFig(color_dict, cell_ID = cell_ID , folder_file = folder_file	 , drug_in = drug_in, drug_out= drug_out ,I_set = I_setting )
+                buildApplicationFig(color_dict, cell_id = cell_id , folder_file = folder_file	 , drug_in = drug_in, drug_out= drug_out ,I_set = I_setting )
             elif  test_function ==  'PCA' : 
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
             elif  test_function == 'Phase':
@@ -50,14 +50,14 @@ def function_tester_all_files(feature_df, test_function = None):
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
             elif  test_function ==  'Mean_AP':
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
-                buildMeanAPFig(cell_ID, pAD_df, V_array)
+                buildMeanAPFig(cell_id, pAD_df, V_array)
             elif test_function == 'beta_pAD': 
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
                 action_potential_functions.beta_pAD_detection(V_array)
                 
     return None 
 
-def function_tester_single_file(folder_file, cell_ID, test_function = None):
+def function_tester_single_file(folder_file, cell_id, test_function = None):
     if test_function is None: 
         raise Exception("Test function not chosen")
         sys.exit(1)
@@ -70,7 +70,7 @@ def function_tester_single_file(folder_file, cell_ID, test_function = None):
         
     if test_function == 'AP_figure': 
     
-        buildApplicationFig(color_dict, cell_ID = cell_ID , folder_file = folder_file	 , drug_in = drug_in, drug_out= drug_out ,I_set = I_setting )
+        buildApplicationFig(color_dict, cell_id = cell_id , folder_file = folder_file	 , drug_in = drug_in, drug_out= drug_out ,I_set = I_setting )
     elif  test_function ==  'PCA' : 
         pAD_df, V_array = generate_V_pAD_df(folder_file)
     elif  test_function == 'Phase':
@@ -79,7 +79,7 @@ def function_tester_single_file(folder_file, cell_ID, test_function = None):
         pAD_df, V_array = generate_V_pAD_df(folder_file)
     elif  test_function ==  'Mean_AP':
         pAD_df, V_array = generate_V_pAD_df(folder_file)
-        buildMeanAPFig(cell_ID, pAD_df, V_array)
+        buildMeanAPFig(cell_id, pAD_df, V_array)
     
     return None 
         
@@ -141,7 +141,7 @@ def single_drug_aplication_visualisation(feature_df,  color_dict, cell = 'DRD230
         aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
         
         for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
-            if row['cell_ID'] == cell and row['drug'] == drug:
+            if row['cell_id'] == cell and row['drug'] == drug:
                 path_V, path_I = make_path(row['folder_file'])
                 print (path_V)
                 _ , y_df = igor_exporter(path_V)
@@ -162,7 +162,7 @@ def single_drug_aplication_visualisation(feature_df,  color_dict, cell = 'DRD230
     
                     axs.set_xlabel( "Time (s)", fontsize = 15)
                     axs.set_ylabel( "Membrane Potential (mV)", fontsize = 15)
-                    axs.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Aplication" + " (" + str(row['aplication_order']) + ")", fontsize = 25)
+                    axs.set_title(row['cell_id'] + ' '+ row['drug'] +' '+ " Aplication" + " (" + str(row['aplication_order']) + ")", fontsize = 25)
                     pdf.savefig(fig)
                     plt.close("all") 
 

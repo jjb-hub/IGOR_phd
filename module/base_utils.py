@@ -137,7 +137,7 @@ def getRawDF(filename):
     return (df)
 
 def getCellDF(df, cell_id, data_type = None):
-    cell_df = df[df['cell_ID']==cell_id]
+    cell_df = df[df['cell_id']==cell_id]
     if data_type is not None:
         cell_df = cell_df[cell_df['data_type']== data_type]
     return cell_df
