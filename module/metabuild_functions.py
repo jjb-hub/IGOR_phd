@@ -153,7 +153,7 @@ def expandFeatureDF(filename_or_df): #if passed in get or build will be filename
         df=filename_or_df
 
     og_columns = df.columns.copy() #origional columns #for ordering columns
-    df['mouseline'] = df.cell_ID.str[:3]
+    df['mouseline'] = df.cell_id.str[:3]
     df = df.apply(_handleFile, axis=1) #Apply a function along an axis (rows = 1) of the DataFrame
 
     #ORDERING DF internal: like this new columns added will appear at the end of the df in the order they were created in _handelfile()
@@ -268,7 +268,7 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
         return df
     
     elif data_type == 'FP':
-        cell_id_list = list(df['cell_ID'].unique())
+        cell_id_list = list(df['cell_id'].unique())
         build_first_drug_ap_column(df, cell_id_list) #builds df['first_drug_AP']
         
         df_only_first_app = df.loc[df['application_order'] <= 1] #only include first drug application data 
@@ -288,13 +288,13 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
             statistical_df = build_FP_statistical_df(df_only_first_app, cell_id_list, col_name)
             drug_count_n = statistical_df['drug'].value_counts()
             drugs_to_remove = drug_count_n[drug_count_n < n_minimum].index.tolist()
-            statistical_df_filtered = statistical_df[~statistical_df['cell_ID'].isin(statistical_df[statistical_df['drug'].isin(drugs_to_remove)]['cell_ID'])]
+            statistical_df_filtered = statistical_df[~statistical_df['cell_id'].isin(statistical_df[statistical_df['drug'].isin(drugs_to_remove)]['cell_id'])]
    
             #create df_to_plot with only one value per cell (not per file)
-            df_to_plot = df_only_first_app[['cell_ID','drug',col_name, 'first_drug_AP']]
+            df_to_plot = df_only_first_app[['cell_id','drug',col_name, 'first_drug_AP']]
             df_to_plot = df_to_plot.drop_duplicates()
             #remove cells where the 'drug' occures <  n_minimum
-            df_to_plot_filtered = df_to_plot[~df_to_plot['cell_ID'].isin(df_to_plot[df_to_plot['drug'].isin(drugs_to_remove)]['cell_ID'])]
+            df_to_plot_filtered = df_to_plot[~df_to_plot['cell_id'].isin(df_to_plot[df_to_plot['drug'].isin(drugs_to_remove)]['cell_id'])]
 
             if len(df_to_plot_filtered) == 0:
                 print(f'Insufficient data for {cell_type}for{name}')
@@ -318,13 +318,13 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
 def _plot_pAD(celltype_drug_datatype, df, color_dict):
     cell_type, drug , data_type = celltype_drug_datatype
     if data_type == 'AP': 
-        pAD_df = df[['cell_ID','PRE_pAD_AP_locs', 'APP_pAD_AP_locs', 'WASH_pAD_AP_locs', 'PRE_Somatic_AP_locs', 'APP_Somatic_AP_locs', 'WASH_Somatic_AP_locs']]
+        pAD_df = df[['cell_id','PRE_pAD_AP_locs', 'APP_pAD_AP_locs', 'WASH_pAD_AP_locs', 'PRE_Somatic_AP_locs', 'APP_Somatic_AP_locs', 'WASH_Somatic_AP_locs']]
         pAD_df = pAD_df.dropna() #removing traces with no APs at all
-        if len(pAD_df['cell_ID'].unique()) <= n_minimum:
+        if len(pAD_df['cell_id'].unique()) <= n_minimum:
             print(f'Insuficient data with APs for {cell_type} with {drug} application ')
             return df
         
-        pAD_df_to_plot = pd.melt(pAD_df, id_vars=['cell_ID'], var_name='col_name', value_name='AP_locs'  )
+        pAD_df_to_plot = pd.melt(pAD_df, id_vars=['cell_id'], var_name='col_name', value_name='AP_locs'  )
         pAD_df_to_plot[['drug', 'AP']] = pAD_df_to_plot['col_name'].str.split('_', n=1, expand=True).apply(lambda x: x.str.split('_').str[0])
         pAD_df_to_plot['count'] = pAD_df_to_plot['AP_locs'].apply(len)
         pAD_df_to_plot['drug'] = pAD_df_to_plot['drug'].str.replace('APP', drug)
@@ -356,7 +356,7 @@ def loopCombinations_stats(filename):
     
     combinations = [
                     (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP),
-                    (["cell_ID", "drug",  "data_type"], _colapse_to_cell_pre_post_FP),
+                    (["cell_id", "drug",  "data_type"], _colapse_to_cell_pre_post_FP),
                     (["cell_type",  "data_type"], _colapse_to_cell_pre_post_tau_sag_FP), 
                     (["cell_type",  "data_type"], _plotwithstats_FP), 
                     (["cell_type", "drug", "data_type"], _plot_pAD)
@@ -375,12 +375,12 @@ def loopCombinations_stats(filename):
 def build_first_drug_ap_column(df, cell_id_list):
     df['first_drug_AP'] = ''  #create a column for  specifying the first drug applied for each cell
     for cell_id in cell_id_list:
-        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only
+        cell_df = df.loc[df['cell_id'] == cell_id] #slice df to cell only
         first_drug_series = cell_df.loc[df['application_order'] == 1, 'drug'] 
         if len(first_drug_series.unique()) > 1: 
             print ('ERROR IN DATA ENTERY: multiple drugs for first aplication on cell ', cell_id)
         first_drug_string = first_drug_series.unique()[0] 
-        df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
+        df.loc[df['cell_id'] == cell_id, 'first_drug_AP'] = first_drug_string
     return
 
 def fill_statistical_df_lists(cell_df, col_name, first_drug_string, lists_to_fill):
@@ -464,12 +464,12 @@ def build_FP_statistical_df(df_only_first_app, cell_id_list, col_name):  #col_na
     
     for cell_id in cell_id_list:
         
-        cell_df = df_only_first_app.loc[df_only_first_app['cell_ID'] == cell_id] #slice df to cell only 
+        cell_df = df_only_first_app.loc[df_only_first_app['cell_id'] == cell_id] #slice df to cell only 
         first_drug_string = cell_df['first_drug_AP'].unique()[0]
 
         fill_statistical_df_lists(cell_df, col_name, first_drug_string, lists_to_fill) #e.g col_name = 'max_firing_cell_drug'
     #create statistical df for celltype with all raw data for single value type e.g. max firing
-    statistical_df = pd.DataFrame({'cell_ID': cell_id_list,
+    statistical_df = pd.DataFrame({'cell_id': cell_id_list,
                                   'drug': first_drug_,
                                   'PRE': PRE_,
                                   'POST': POST_
