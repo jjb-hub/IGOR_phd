@@ -6,7 +6,8 @@ import igor.binarywave
 import os
 import matplotlib.pyplot as plt
 
-######### BASE ##########
+######### IMPORT RAW DATA ##########
+
 #takes filename reads excel as pandas.dataframe
 def getRawDF(filename):
     df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
@@ -20,19 +21,14 @@ def make_path(folder_file):
     '''
     Parameters       
     ----------
-    folder_file : TYPE
-        DESCRIPTION.
-
+    folder_file : 'folder_file'
     Returns
     -------
     path_V : string - path for V data 
     path_I : string - path for I data 
     '''
-    # ROOT = os.getcwd() #This gives terminal location (terminal working dir)  #HARD CODE ISH
-    # INPUT_DIR = f'{ROOT}/input'
     data_path = f'{INPUT_DIR}/PatchData/'
-
-    extension_V = "Soma.ibw" #HARD CODE SPECIFIC 
+    extension_V = "Soma.ibw" #HARD CODE  
     extension_I = "Soma_outwave.ibw" 
     path_V = data_path + folder_file + extension_V
     path_I = data_path + folder_file + extension_I
@@ -48,12 +44,10 @@ def igor_exporter(path):
     -------
     'point_list' : a continious points  (combining sweeps into continious wave)  
     'igor_df' : a df with each column corisponding to one sweep  
-
      '''
     igor_file = igor.binarywave.load(path)
     wave = igor_file["wave"]["wData"]
     igor_df = pd.DataFrame(wave)
-    
     point_list = list()
     counter = len(igor_df.columns)
     
@@ -61,9 +55,10 @@ def igor_exporter(path):
         temp_list = igor_df.iloc[:,i].tolist()
         point_list.extend(temp_list)
         counter = counter - 1
-    
     return (point_list, igor_df)
 
+
+#JJB what is this?
 if __name__ == "__main__": #inbuilt test that will not be excuted unless run inside this file
     print('igor tester being run...')
     point_list, igor_df = igor_exporter('/Users/jasminebutler/Desktop/IGOR_phd/input/PatchData/JJB221230/t15Soma.ibw')
