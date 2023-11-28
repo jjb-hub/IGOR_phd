@@ -2,7 +2,6 @@
 from module.metabuild_functions import expandFeatureDF, loopCombinations_stats
 from module.utils import *
 from module.getters import getorbuildExpandedDF, getCellDF
-from module.metabuild_functions import extract_FI_x_y
 from module.action_potential_functions import pAD_detection
 #external
 from matplotlib import pyplot as plt
