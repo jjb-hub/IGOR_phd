@@ -17,12 +17,15 @@ from module.plotter_functions import (
 
 from module.utils import (
     initiateFileSystem, 
-    saveColors, 
-    getCellDF, 
-    getorbuildExpandedDF,
-    getRawDF)
+    saveColors,
+    getRawDF  
+    )
 
-from module.metadata import build_cell_type_dict
+from module.getters import (
+    getorbuild_cell_type_dict, 
+    getCellDF, 
+    getorbuildExpandedDF
+    )
 
 ######## INIT ##########
 # Start by checking filesystem has all the folders necessary for read/write operations (cache) or create them otherwise

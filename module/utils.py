@@ -6,12 +6,12 @@ import igor.binarywave
 import os
 import matplotlib.pyplot as plt
 
-# ######## CONSTANTS ######################
-# # Constants are like variables that should not be rewritten, they are declared in all caps by convention
-# ROOT = os.getcwd() #This gives terminal location (terminal working dir)
-# INPUT_DIR = f'{ROOT}/input'
-# OUTPUT_DIR = f'{ROOT}/output'
-# CACHE_DIR = f'{ROOT}/cache'
+######### BASE ##########
+#takes filename reads excel as pandas.dataframe
+def getRawDF(filename):
+    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
+    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
+    return (df)
 
 
 ######### IGOR ##########
@@ -163,39 +163,4 @@ def saveAP_PCAFig(fig, identifier):
 
 def saveAP_HistogramFig(fig, identifier):
     saveFigure(fig, identifier, 'Histogram_APs')
-
-########## GETTERS ##########
-#need to also add from_scratch = None 
-#need to make forloop combinations
-
-#takes filename returns excel as pandas.dataframe
-def getRawDF(filename):
-    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
-    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
-    return (df)
-
-
-
-#takes filename or df,  the cell id and optional data type returns subset of df
-def getCellDF(filename_or_df, cell_id, data_type = None):
-    if not isinstance(filename_or_df, pd.DataFrame):
-        df=getRawDF(filename_or_df)
-    else:
-        df=filename_or_df
-
-    cell_df = df[df['cell_id']==cell_id]
-    if data_type is not None:
-        cell_df = cell_df[cell_df['data_type']== data_type]
-    return cell_df
-
-#take filename and runs full df expansion using 
-def getorbuildExpandedDF(filename, identifier, builder_cb, from_scratch=None):
-    filename_no_extension = filename.split(".")[0]
-    from_scratch = from_scratch if from_scratch is not None else input("Recalculate DF even if previous version exists? (y/n)") == 'y'
-    if from_scratch or not isCached(filename, identifier):
-        print(f'BUILDING "{identifier}"')    #build useing callback otherwise and cache result
-        df = builder_cb(filename)
-        cache(filename_no_extension, identifier, df)
-    else : df = getCache(filename, identifier)
-    return df
 
