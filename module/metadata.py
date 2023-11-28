@@ -5,6 +5,7 @@ from module.utils import checkFileSystem, getJSON, saveJSON, getRawDF
 
 
 
+
 #creates a dictionay of cell ids for each cell type and subtype 
 #TODO does not yet include different data type but should
 def build_cell_type_dict(filename):
@@ -45,6 +46,7 @@ def build_cell_type_dict(filename):
             cell_id_tracker[cell_id] = [(cell_type, cell_subtype)]
             cell_type_dict.setdefault(cell_type, {}).setdefault(cell_subtype, []).append(cell_id)
 
+    
     return cell_type_dict
 
 
