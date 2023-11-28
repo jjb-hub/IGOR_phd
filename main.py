@@ -15,7 +15,7 @@ from module.plotter_functions import (
     quick_plot_file 
 )
 
-from module.base_utils import (
+from module.utils import (
     initiateFileSystem, 
     saveColors, 
     getCellDF, 

@@ -1,7 +1,7 @@
 ####### FUNCTION THAT DEAL WITH SAVING INFORMATIONS ABOUT EXPERIMENTS ###########
 import os
 from module.constants import CACHE_DIR
-from module.base_utils import checkFileSystem, getJSON, saveJSON, getRawDF
+from module.utils import checkFileSystem, getJSON, saveJSON, getRawDF
 
 
 

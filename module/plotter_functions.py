@@ -1,6 +1,6 @@
 # module
 from module.metabuild_functions import expandFeatureDF, loopCombinations_stats
-from module.base_utils import *
+from module.utils import *
 from module.metabuild_functions import extract_FI_x_y
 from module.action_potential_functions import pAD_detection
 #external

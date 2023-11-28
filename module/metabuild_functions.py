@@ -6,7 +6,7 @@ Created on Wed May 10 10:43:53 2023
 """
 
 #my modular imports
-from module.base_utils import *
+from module.utils import *
 from module.action_potential_functions import calculate_max_firing, extract_FI_x_y, extract_FI_slope_and_rheobased_threshold
 from module.action_potential_functions import ap_characteristics_extractor_main, tau_analyser, sag_current_analyser , pAD_detection
 
