@@ -159,3 +159,19 @@ def saveAP_PCAFig(fig, identifier):
 def saveAP_HistogramFig(fig, identifier):
     saveFigure(fig, identifier, 'Histogram_APs')
 
+########## SUBSELECTOR ##########
+def maskDf(df, mask_conditions):
+    complex_filter = True
+    for column, value in mask_conditions.items():
+        if isinstance(value, list):
+            atomic_filter = df[column].isin(value)
+        else:
+            atomic_filter = df[column] == value
+        complex_filter &= atomic_filter
+    return complex_filter
+
+def subselectDf(df, subselection):
+    df = df[
+        maskDf(df, subselection)
+    ]
+    return df

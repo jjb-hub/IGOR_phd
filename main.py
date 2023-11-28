@@ -16,6 +16,7 @@ from module.plotter_functions import (
 )
 
 from module.utils import (
+    subselectDf,
     initiateFileSystem, 
     saveColors,
     getRawDF  
@@ -24,7 +25,8 @@ from module.utils import (
 from module.getters import (
     getorbuild_cell_type_dict, 
     getCellDF, 
-    getorbuildExpandedDF
+    getorbuildExpandedDF, 
+    build_cell_type_expandedFeatureDF
     )
 
 ######## INIT ##########
