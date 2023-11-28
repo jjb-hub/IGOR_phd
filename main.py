@@ -4,6 +4,7 @@ from module.metabuild_functions import (
     expandFeatureDF, 
     loopCombinations_stats
 )
+
 from module.plotter_functions import (
     getorbuildApplicationFig, 
     loopbuildAplicationFigs, 
@@ -20,6 +21,8 @@ from module.base_utils import (
     getCellDF, 
     getorbuildExpandedDF,
     getRawDF)
+
+from module.metadata import build_cell_type_dict
 
 ######## INIT ##########
 # Start by checking filesystem has all the folders necessary for read/write operations (cache) or create them otherwise
