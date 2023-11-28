@@ -1,6 +1,7 @@
 # module
 from module.metabuild_functions import expandFeatureDF, loopCombinations_stats
 from module.utils import *
+from module.getters import getorbuildExpandedDF, getCellDF
 from module.metabuild_functions import extract_FI_x_y
 from module.action_potential_functions import pAD_detection
 #external
@@ -14,9 +15,9 @@ import numpy as np
 import timeit
 
 
-#BASE PLOTTERS
-# just plots any waveform
+########## BASE PLOTTERS ##########
 
+#  plots any waveform based off fold_file
 def quick_plot_file(filename, folder_file):
     df=getRawDF(filename)
     path_V, path_I = make_path(folder_file)
