@@ -36,7 +36,7 @@ def function_tester_all_files(feature_df, test_function = None):
             if test_function == 'depol': 
                 if  type(drug_in) is int :
                     pAD_df, V_array = generate_V_pAD_df(folder_file) 
-                    depol_val = action_potential_functions.cell_membrane_polarisation_detector(folder_file =  folder_file, cell_id = cell_id,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
+                    depol_val = cell_membrane_polarisation_detector(folder_file =  folder_file, cell_id = cell_id,   drug = drug ,  drug_in = drug_in  , drug_out = drug_out ,  application_order=  application_order,  pAD_locs= pAD_df[pAD_df['pAD'] ==  'pAD']['AP_loc'] , I_set = I_setting ) 
                     
             
             if test_function == 'AP_figure': 
