@@ -123,7 +123,7 @@ def _handleFile(row): #THIS FUNCTION IS TOO BIG AND TOO SLOW TODO
     return row
 
 
-def expandFeatureDF(filename_or_df): #if passed in get or build will be filename therefor cant subset to try #modularising now
+def buildExpandedDF(filename_or_df): #if passed in get or build will be filename therefor cant subset to try #modularising now
     if not isinstance(filename_or_df, pd.DataFrame):
         print('fetchig raw df')
         df = getRawDF(filename_or_df)
@@ -143,10 +143,10 @@ def expandFeatureDF(filename_or_df): #if passed in get or build will be filename
     return df_reordered
 
 
-def build_cell_type_expandedFeatureDF(filename, cell_type):
+def buildExpandedDF_cell_type(filename, cell_type):
     df = getRawDF(filename)
     cell_type_df = subselectDf(df, {'cell_type':[cell_type]})
-    cell_type_df_expanded = expandFeatureDF(cell_type_df)
+    cell_type_df_expanded = buildExpandedDF(cell_type_df)
     return cell_type_df_expanded
 
 
@@ -171,9 +171,9 @@ def getorbuildExpandedDF(filename, identifier, builder_cb, cell_type=None, from_
     if from_scratch or not isCached(filename, identifier):
         print(f'BUILDING "{identifier}"')    
         if cell_type: 
-            df = builder_cb(filename, cell_type) #build_cell_type_expandedFeatureDF will be the builder_cb
+            df = builder_cb(filename, cell_type) #buildExpandedDF_cell_type will be the builder_cb
         else:
-            df = builder_cb(filename) # expandFeatureDF will be the builder_cb
+            df = builder_cb(filename) # buildExpandedDF will be the builder_cb
         cache(filename_no_extension, identifier, df)
     else : df = getCache(filename, identifier)
     return df

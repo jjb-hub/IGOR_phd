@@ -5,7 +5,7 @@ Created on Wed May 10 14:16:00 2023
 @author: Debapratim Jana, Jasmine Butler
 """
 from module.utils import *
-from module.stats import  expandFeatureDF  #only works in this order for me DJ had lower idk how
+from module.stats import  buildExpandedDF  #only works in this order for me DJ had lower idk how
 from module.action_potential_functions import *
 from module.plotters import buildApplicationFig, buildMeanAPFig 
 import os, shutil, itertools, json, timeit, functools, pickle

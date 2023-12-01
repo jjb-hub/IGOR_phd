@@ -3,7 +3,7 @@
 from module.utils import *
 
 from module.action_potential_functions import  pAD_detection
-from module.getters import getorbuildExpandedDF, expandFeatureDF
+from module.getters import getorbuildExpandedDF, buildExpandedDF
 
 #generic imports
 import os, shutil, itertools, json, time, functools, pickle
@@ -215,7 +215,7 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
 def loopCombinations_stats(filename_or_df):
 
     if not isinstance(filename_or_df,  pd.DataFrame):
-        df = getorbuildExpandedDF(filename_or_df, 'feature_df_expanded', expandFeatureDF, from_scratch=False) #load feature df
+        df = getorbuildExpandedDF(filename_or_df, 'feature_df_expanded', buildExpandedDF, from_scratch=False) #load feature df
     else:
         df = filename_or_df
 

@@ -1,7 +1,7 @@
 ######## ONLY IMPORT THE USER ACCESSIBLE FUNCTIONS HERE ##########
 
 from module.stats import (
-    expandFeatureDF, 
+    buildExpandedDF, 
     loopCombinations_stats
 )
 
@@ -26,7 +26,7 @@ from module.getters import (
     getorbuild_cell_type_dict, 
     getCellDF, 
     getorbuildExpandedDF, 
-    build_cell_type_expandedFeatureDF
+    buildExpandedDF_cell_type
     )
 
 ######## INIT ##########

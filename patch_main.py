@@ -6,7 +6,7 @@ Created on Wed May 10 13:58:27 2023
 """
 #%%
 
-from utils.metabuild_functions import expandFeatureDF, loopCombinations_stats
+from utils.metabuild_functions import buildExpandedDF, loopCombinations_stats
 from utils.plotter import drug_aplication_visualisation, plot_all_FI_curves, plot_FI_AP_curves
 from utils import base_utils 
 from ephys import ap_functions
@@ -50,7 +50,7 @@ data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_fo
 
 #%% Extrapolate data from files
 feature_df_ex = feature_df.copy()
-feature_df_expanded_raw = expandFeatureDF(feature_df_ex)  #in helper functions #check dif in make_path and passing of directory
+feature_df_expanded_raw = buildExpandedDF(feature_df_ex)  #in helper functions #check dif in make_path and passing of directory
 
 #fix tau and sag from named tuples to: sag_val, sag_steady_state, sag_I_inj       and        tau_val, tau_steady_state, tau_I_inj
 #FIX ME
