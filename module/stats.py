@@ -212,16 +212,12 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
     return df 
 
 
-def loopCombinations_stats(filename):
+def loopCombinations_stats(filename_or_df):
 
-    # if not isinstance(filename_or_df,  pd.DataFrame):
-    #     df = getorbuildExpandedDF(filename_or_df, 'feature_df_expanded', expandFeatureDF, from_scratch=False) #load feature df
-    # else:
-    #     df = filename_or_df
-
-
-    df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False) #load feature df
-    color_dict = getColors(filename) # 28/11/23 colors in constants would man i can pass dfs not always filename and there full df
+    if not isinstance(filename_or_df,  pd.DataFrame):
+        df = getorbuildExpandedDF(filename_or_df, 'feature_df_expanded', expandFeatureDF, from_scratch=False) #load feature df
+    else:
+        df = filename_or_df
 
     #create a copy of file_folder column to use at end of looping to restore  origional row order !!! #FIX ME
     # df_row_order = df['folder_file'] / df_raw_col_order[]
