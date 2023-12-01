@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed May 10 10:43:53 2023
-
-@author: Debapratim Jana, Jasmine Butler
-"""
 
 #my modular imports
 from module.utils import *
@@ -30,16 +24,7 @@ from statannotations.Annotator import Annotator
 
 
 #CONSTANTS   
-from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict 
-
-
-
-#FIX ME build these in with simple get or guild functions outside the meta loop also interrate with meta loop
-n_minimum = 3 
-p_value_threshold=0.05
-
-
-
+from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict, n_minimum,  p_value_threshold
 
 
 
