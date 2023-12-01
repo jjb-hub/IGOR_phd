@@ -5,7 +5,7 @@ from module.stats import (
     loopCombinations_stats
 )
 
-from module.plotter_functions import (
+from module.plotters import (
     getorbuildApplicationFig, 
     loopbuildAplicationFigs, 
     getorbuildAP_MeanFig, 
