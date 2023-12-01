@@ -887,6 +887,26 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
     return sag_current_all
 
+#FIX ME POU IN RIGHT PLACE
+## New function DJ : 
+def generate_V_pAD_df(folder_file): 
+    '''
+    Generates pAD_df, V_array  
+    Input : 
+           folder_file : str 
+    
+    Ouput : 
+           pAD_df  : pAD dataframe built from pAD_detection
+           V_array : v array     
+    '''
+    path_V, path_I = make_path(folder_file)
+    V_list, V_df = igor_exporter(path_V)
+    V_array      = np.array(V_df) 
+    
+    peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
+    
+    return pAD_df , V_array
+
 
 
 #DJ: this is here so we do not lose your plotting settings for pca, kmeans and his even tho they wont run for me - each needs to be its own simple func like buildMeanAPFig()

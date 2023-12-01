@@ -1,6 +1,6 @@
 ######## ONLY IMPORT THE USER ACCESSIBLE FUNCTIONS HERE ##########
 
-from module.metabuild_functions import (
+from module.stats import (
     expandFeatureDF, 
     loopCombinations_stats
 )

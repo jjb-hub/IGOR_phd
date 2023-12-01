@@ -1,5 +1,5 @@
 # module
-from module.metabuild_functions import expandFeatureDF, loopCombinations_stats
+from module.stats import expandFeatureDF, loopCombinations_stats
 from module.utils import *
 from module.getters import getorbuildExpandedDF, getCellDF
 from module.action_potential_functions import pAD_detection
