@@ -30,7 +30,7 @@ from statannotations.Annotator import Annotator
 
 
 #CONSTANTS   
-from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR 
+from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict 
 
 
 
@@ -39,25 +39,8 @@ n_minimum = 3
 p_value_threshold=0.05
 
 
-#FIX ME POU IN RIGHT PLACE
-## New function DJ : 
-def generate_V_pAD_df(folder_file): 
-    '''
-    Generates pAD_df, V_array  
-    Input : 
-           folder_file : str 
-    
-    Ouput : 
-           pAD_df  : pAD dataframe built from pAD_detection
-           V_array : v array     
-    '''
-    path_V, path_I = make_path(folder_file)
-    V_list, V_df = igor_exporter(path_V)
-    V_array      = np.array(V_df) 
-    
-    peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
-    
-    return pAD_df , V_array
+
+
 
 
 ########## WORKING WITH EXPANDED DF ###########
