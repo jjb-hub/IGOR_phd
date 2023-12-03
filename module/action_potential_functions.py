@@ -424,6 +424,7 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 ########## ACTION POTENTIAL RETROAXONAL / ANTIDROMIC
 
 #newer DJ 'subroutine functions'
+#DJ check - if i recall this will return AP charecteristics for the first two sweeps wher APs are present ? correct?
 def ap_characteristics_extractor_subroutine_linear(V_dataframe, sweep_index, main_plot = False, input_sampling_rate = 1e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, input_backwards_window = 100 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
     '''
     input: 
@@ -433,7 +434,7 @@ def ap_characteristics_extractor_subroutine_linear(V_dataframe, sweep_index, mai
     outputs: 
     peak_locs_corr : location of exact AP peaks 
     upshoot_locs   : location of thresholds for AP i.e. where the voltage trace takes the upshoot from   
-    v_thresholds   : voltage at the upshoot poiny
+    v_thresholds   : voltage at the upshoot point
     peak_heights   : voltage diff or height from threshold point to peak 
     peak_latencies : time delay or latency for membrane potential to reach peak from threshold
     peak_slope     : rate of change of membrane potential 
@@ -495,11 +496,9 @@ def ap_characteristics_extractor_subroutine_linear(V_dataframe, sweep_index, mai
         end_loc = peak_locs_corr[peak_idx]
 
         # Get AP slice
-
         v_temp = v_array[end_loc - ap_backwards_window: end_loc ]
 
         # Define x, y for linear regression fit
-
         y_all = gaussian_filter1d(v_temp   , smoothing_kernel)        # entire AP slice 
         y     = gaussian_filter1d(v_temp[0:pre_ap_baseline_forwards_window]   , smoothing_kernel)        # pre AP baseline
 

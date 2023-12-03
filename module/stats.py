@@ -46,7 +46,7 @@ def apply_group_by_funcs(df, groupby_cols, handleFn, color_dict): #creating a li
 
 
 def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
-    #colaps  metrics to a single value for each file/row i.e. lists become a mean ect.
+    #colaps  metrics to a single value for each file/row i.e. lists become a mean 
     cell_type, drug, data_type = celltype_drug_datatype
     
     if data_type == 'AP': 
@@ -55,20 +55,20 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
         return df
     elif data_type in ['FP', 'FP_AP']:
         df = df.copy()
-        #AP Charecteristics i.e. mean/SD e.c.t. for a single file 
+        #AP Charecteristics take mean for single file
         df['mean_voltage_threshold_file'] = df.voltage_threshold.apply(np.mean)  #FIX ME: RuntimeWarning: Mean of empty slice.
         df['mean_AP_height_file'] = df.AP_height.apply(np.mean)
         df['mean_AP_slope_file'] = df.AP_slope.apply(np.mean)
         df['mean_AP_width_file'] = df.AP_width.apply(np.mean)
         df['mean_AP_latency_file'] = df.AP_latency.apply(np.mean)
         
-        
-        #Tau and Sag colapse to lowest value #NO LOBGER TUPLES
+        #TODO
+        #Tau and Sag colapse to single value #NO LOBGER TUPLES ## DJ where are the funcs at to normalise based off voltage diference?
         # extract_truple_data('sag', df) #creating columns 'tau_file' and 'sag_file'
         # extract_truple_data('tau_rc', df)
        
     else:
-        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP or FP
+        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
     
     return df
     
@@ -95,7 +95,7 @@ def _colapse_to_cell_pre_post_FP(cellid_drug_datatype, df, color_dict):
         df['AP_width_cell_drug'] = df['mean_AP_width_file'].mean()
         df['AP_latency_cell_drug'] = df['mean_AP_latency_file'].mean()
         
-        #Tau and Sag #FIX ME tau and sag are in list now #FIX ME 
+        #Tau and Sag #FIX ME tau and sag are in list now #FIX ME #TODO
         #chose optimal paring for comparison
         # df['tau_cell_drug'] = df['tau_rc_file'].mean()
         # df['sag_cell_drug'] = df['sag_file'].mean()
@@ -214,12 +214,13 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
 
 def loopCombinations_stats(filename_or_df):
 
+#check if df if not then pull entire ExpandedDF (or build)
     if not isinstance(filename_or_df,  pd.DataFrame):
         df = getorbuildExpandedDF(filename_or_df, 'feature_df_expanded', buildExpandedDF, from_scratch=False) #load feature df
     else:
         df = filename_or_df
 
-    #create a copy of file_folder column to use at end of looping to restore  origional row order !!! #FIX ME
+    # TODO #create a copy of file_folder column to use at end of looping to restore  origional row order 
     # df_row_order = df['folder_file'] / df_raw_col_order[]
     
     combinations = [
@@ -235,6 +236,7 @@ def loopCombinations_stats(filename_or_df):
         df = apply_group_by_funcs(df, col_names, handlingFn, color_dict) #note that as each function is run the updated df is fed to the next function
 
     # df[ order(match(df['folder_file'], df_row_order)) ]  #FIX ME
+
     return df
 
 
