@@ -3,6 +3,7 @@ from module.stats import buildExpandedDF, loopCombinations_stats
 from module.utils import *
 from module.getters import getorbuildExpandedDF, getCellDF
 from module.action_potential_functions import pAD_detection
+from module.constants import color_dict
 #external
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -72,7 +73,7 @@ def loopbuildAplicationFigs(filename):
 ## GETTERS ##
 
 def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
-    color_dict = getColors(filename) 
+    # color_dict = getColors(filename) 
 
     if not isinstance(cell_id_or_cell_df, pd.DataFrame):
         expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', buildExpandedDF, from_scratch=False)
