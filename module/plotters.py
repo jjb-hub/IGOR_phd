@@ -48,7 +48,10 @@ def quick_line_plot(plotlist, plottitle):
 
 
 
-## LOOPERS ## 
+## LOOPER ## 
+
+#for cell_type and drug
+
 # #right now need expanded df to make ap figuures not ideal
 
 def loopbuildAplicationFigs(filename):

@@ -23,13 +23,21 @@ import traceback
 
  ########## DICT ORGANISATION ##########
 
-def getorbuild_cell_type_dict(filename, from_scratch=None): #may be redundant dont know if will use or just to check input file
+#takes featureDF and outputs a nested dict checking for unique celltype for aingle cell id and prints basic readout 
+def checkFeatureDF(filename, from_scratch=None): #may be redundant dont know if will use or just to check input file
     filename_no_extension = filename.split(".")[0]
+    df = getRawDF(filename)
+    #prints
+    print(f"cell types : {df['cell_type'].unique()}")
+    print(f" drugs applied : {df['drug'].unique()}")
+    print(f"cell subtypes : {df['cell_subtype'].unique()}")
+    print(f"data types : {df['data_type'].unique()}")
+
     identifier = 'cell_type_dict'
     from_scratch = from_scratch if from_scratch is not None else input("Recalculate DF even if previous version exists? (y/n)") == 'y'
     if from_scratch or not isCached(filename, identifier):
         print(f'BUILDING "{identifier}"') 
-        cell_type_dict = build_cell_type_dict(filename)
+        cell_type_dict = build_cell_type_dict(df)
         subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
         saveJSON(f"{subcache_dir}/cell_type_dict.json", cell_type_dict)
         print (f"CELL TYPE DICT {cell_type_dict} SAVED TO {subcache_dir}")
@@ -124,11 +132,11 @@ def _handleFile(row):
             pass
         
         elif row.data_type == "pAD":
-            print('data_type pAD')
+            print(f'{row.folder_file} data_type pAD')
 
         else:
-            raise NotADirectoryError(f"Didn't handle: {row.data_type}") # data_type can be AP, FP_AP or FP 
-    #data type checker shoudl be elsewhere
+            raise NotADirectoryError(f"Didn't handle data type: {row.data_type}") # data_type can be AP, FP_AP or FP 
+    
 
 
     except Exception as e:

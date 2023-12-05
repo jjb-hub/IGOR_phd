@@ -8,8 +8,7 @@ from module.utils import checkFileSystem, getJSON, saveJSON, getRawDF
 
 #creates a dictionay of cell ids for each cell type and subtype 
 #TODO does not yet include different data type but should
-def build_cell_type_dict(filename):
-    df = getRawDF(filename)
+def build_cell_type_dict(df):
     # check and report folder_file's missing a cell_type
     folder_files_missing_cell_type = df[df['cell_type'].isnull()]['folder_file'].tolist() if not df[df['cell_type'].isnull()].empty else []
     if folder_files_missing_cell_type:

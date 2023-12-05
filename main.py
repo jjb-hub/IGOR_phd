@@ -23,7 +23,7 @@ from module.utils import (
     )
 
 from module.getters import (
-    getorbuild_cell_type_dict, 
+    checkFeatureDF, 
     getCellDF, 
     getorbuildExpandedDF, 
     buildExpandedDF_cell_type
