@@ -220,8 +220,8 @@ def loopCombinations_stats(filename_or_df):
     else:
         df = filename_or_df
 
-    # TODO #create a copy of file_folder column to use at end of looping to restore  origional row order 
-    # df_row_order = df['folder_file'] / df_raw_col_order[]
+    df_row_order = df['folder_file'].tolist()  # save origional row order
+
     
     combinations = [
                     (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP),
@@ -235,7 +235,7 @@ def loopCombinations_stats(filename_or_df):
     for col_names, handlingFn in combinations:
         df = apply_group_by_funcs(df, col_names, handlingFn, color_dict) #note that as each function is run the updated df is fed to the next function
 
-    # df[ order(match(df['folder_file'], df_row_order)) ]  #FIX ME
+    df = df.loc[df['folder_file'].isin(df_row_order)]# rearrange the DataFrame to match the original row order
 
     return df
 
