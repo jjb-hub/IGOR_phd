@@ -739,6 +739,9 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
             
         peak_fw       += [ sec_to_ms * (return_x  - first_x)  / sampling_rate ]
 
+    return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
+
+
 
 
 def ap_characteristics_extractor_main(V_dataframe, critical_num_spikes = 4, all_sweeps = False, method = "derivative"): 
