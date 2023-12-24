@@ -1254,7 +1254,8 @@ def extract_FI_x_y (path_I, path_V):
     x = [] #current injection per sweep (taking max)
     for i in range (len(df_I.columns)):
         x_ = df_I.iloc[:,i].tolist()
-        I_modes = max(set(x_), key=x_.count)
+        #I_modes = max(set(x_), key=x_.count)
+        I_modes = np.max(np.abs(x_))
         x.append(I_modes)
     
     #now df is trimmed to fit eachother should not be relevant 
