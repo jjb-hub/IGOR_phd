@@ -50,12 +50,12 @@ def checkFeatureDF(filename, from_scratch=None): #may be redundant dont know if 
 
 #row handeler for expandDF
 def _handleFile(row):
-    row = row.copy() #isnt this redundant? 
+    row = row.copy() #conserve order
     error_msg = None
     error_traceback = None
 
     def log_error(msg, tb):
-        nonlocal error_msg
+        nonlocal error_msg #, error_traceback #GPT recoment test after DJ issue #28 merge
         error_msg=msg
         error_traceback = tb
 
@@ -151,7 +151,7 @@ def _handleFile(row):
                 break
 
         log_error(f'{error_type}: {str(e)}', relevant_tb)
-        error_traceback = relevant_tb  # Capture traceback within the except block
+        error_traceback = relevant_tb  # Capture traceback within the except block #check redundancey after DJ #28 merge with gpt addition in log_error() def
 
         
     if error_msg:

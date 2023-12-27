@@ -62,10 +62,7 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
         df['mean_AP_width_file'] = df.AP_width.apply(np.mean)
         df['mean_AP_latency_file'] = df.AP_latency.apply(np.mean)
         
-        #TODO
-        #Tau and Sag colapse to single value #NO LOBGER TUPLES ## DJ where are the funcs at to normalise based off voltage diference?
-        # extract_truple_data('sag', df) #creating columns 'tau_file' and 'sag_file'
-        # extract_truple_data('tau_rc', df)
+
        
     else:
         raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
@@ -96,6 +93,7 @@ def _colapse_to_cell_pre_post_FP(cellid_drug_datatype, df, color_dict):
         df['AP_latency_cell_drug'] = df['mean_AP_latency_file'].mean()
         
         #Tau and Sag #FIX ME tau and sag are in list now #FIX ME #TODO
+        #for cell_id take normalised tau and sag by v difference 
         #chose optimal paring for comparison
         # df['tau_cell_drug'] = df['tau_rc_file'].mean()
         # df['sag_cell_drug'] = df['sag_file'].mean()
@@ -224,7 +222,7 @@ def loopCombinations_stats(filename_or_df):
 
     
     combinations = [
-                    (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP),
+                    (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP), #AP charecteristics from first 2 sweeps with APs
                     (["cell_id", "drug",  "data_type"], _colapse_to_cell_pre_post_FP),
                     (["cell_type",  "data_type"], _colapse_to_cell_pre_post_tau_sag_FP), 
                     (["cell_type",  "data_type"], _plotwithstats_FP), 

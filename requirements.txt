@@ -1,248 +1,103 @@
-# Depencies required for the code to run
-# These are by order of installation (ex pandas requires numpy)
+# python version 3.9.1
+
+
 # Make sure you have last versions of pip and setuptools with : "pip3 install -U pip" then "pip3 install -U setuptools" in venv
 # Use command "pip install -r requirements.txt" to install
 
-Cython
-wheel
-numpy<=1.19
-igor
-openpyxl
-pandas
-outlier_utils
-matplotlib
-pingouin
-scipy
-seaborn
-sklearn
-statannotations
-statannot
-statsmodels
-weasyprint
+#in previous requirements but not in pip freeze 18/12/23
+# wheel
+# sklearn
 
-## pythong 3.8.5 - DJ working on spyder
-# (base) C:\Users\debap\IGOR_phd>pip list
-# Package                       Version
-# ----------------------------- -------------------
-# alabaster                     0.7.13
-# anaconda-client               1.7.2
-# anaconda-navigator            1.10.0
-# argon2-cffi                   20.1.0
-# arrow                         1.2.3
-# astroid                       2.15.4
-# asttokens                     2.2.1
-# async-generator               1.10
-# atomicwrites                  1.4.1
-# attrs                         21.2.0
-# autopep8                      2.0.2
-# Babel                         2.12.1
-# backcall                      0.2.0
-# backports.functools-lru-cache 1.6.4
-# backports.tempfile            1.0
-# backports.weakref             1.0.post1
-# bcrypt                        4.0.1
-# beautifulsoup4                4.9.3
-# binaryornot                   0.4.4
-# black                         23.3.0
-# bleach                        3.2.1
-# Brian2                        2.5.0.1
-# brotlipy                      0.7.0
-# certifi                       2020.6.20
-# cffi                          1.14.5
-# chardet                       4.0.0
-# click                         8.0.1
-# cloudpickle                   2.2.1
-# clyent                        1.2.2
-# colorama                      0.4.6
-# colorspacious                 1.1.2
-# comm                          0.1.3
-# conda                         4.10.1
-# conda-build                   3.20.5
-# conda-package-handling        1.7.3
-# conda-verify                  3.4.2
-# contourpy                     1.0.7
-# cookiecutter                  2.1.1
-# cryptography                  3.4.7
-# cycler                        0.10.0
-# Cython                        0.29.25
-# debugpy                       1.6.7
-# decorator                     4.4.2
-# defusedxml                    0.6.0
-# diff-match-patch              20230430
-# dill                          0.3.6
-# docstring-to-markdown         0.12
-# docutils                      0.19
-# entrypoints                   0.3
-# et-xmlfile                    1.1.0
-# exceptiongroup                1.1.1
-# executing                     1.2.0
-# filelock                      3.0.12
-# flake8                        6.0.0
-# fonttools                     4.39.4
-# future                        0.18.2
-# glob2                         0.7
-# idna                          2.10
-# igor                          0.3
-# imagesize                     1.4.1
-# importlib-metadata            6.6.0
-# importlib-resources           5.12.0
-# inflection                    0.5.1
-# iniconfig                     2.0.0
-# intervaltree                  3.1.0
-# ipykernel                     6.23.0
-# ipython                       8.12.2
-# ipython-genutils              0.2.0
-# ipywidgets                    7.5.1
-# isort                         5.12.0
-# jaraco.classes                3.2.3
-# jedi                          0.18.0
-# jellyfish                     0.11.2
-# Jinja2                        3.0.0
-# jinja2-time                   0.2.0
-# joblib                        1.2.0
-# jsonschema                    3.2.0
-# jupyter                       1.0.0
-# jupyter-client                8.2.0
-# jupyter-console               6.2.0
-# jupyter-core                  5.3.0
-# jupyterlab-pygments           0.1.2
-# keyring                       23.13.1
-# kiwisolver                    1.3.1
-# lazy-object-proxy             1.9.0
-# libarchive-c                  2.9
-# MarkupSafe                    2.0.1
-# matplotlib                    3.7.1
-# matplotlib-inline             0.1.6
-# matplotlib-scalebar           0.8.1
-# mccabe                        0.7.0
-# menuinst                      1.4.16
-# mistune                       0.8.4
-# mkl-fft                       1.3.0
-# mkl-random                    1.2.1
-# mkl-service                   2.3.0
-# more-itertools                9.1.0
-# mpmath                        1.2.1
-# mypy-extensions               1.0.0
-# navigator-updater             0.2.1
-# nbclient                      0.5.1
-# nbconvert                     6.0.7
-# nbformat                      5.1.3
-# nest-asyncio                  1.4.1
-# notebook                      6.1.4
-# numpy                         1.20.2
-# numpydoc                      1.5.0
-# olefile                       0.46
-# openpyxl                      3.1.2
-# packaging                     23.1
-# pandas                        1.1.3
-# pandocfilters                 1.4.2
-# paramiko                      3.1.0
-# parso                         0.8.0
-# pathspec                      0.11.1
-# pexpect                       4.8.0
-# pickleshare                   0.7.5
-# Pillow                        8.2.0
-# pip                           21.1.1
-# pkginfo                       1.7.0
-# platformdirs                  3.5.0
-# plottools                     0.2.0
-# pluggy                        1.0.0
-# prometheus-client             0.8.0
-# prompt-toolkit                3.0.38
-# psutil                        5.8.0
-# ptyprocess                    0.7.0
-# pure-eval                     0.2.2
-# py-cpuinfo                    8.0.0
-# pycodestyle                   2.10.0
-# pycosat                       0.6.3
-# pycparser                     2.20
-# pydocstyle                    6.3.0
-# pyflakes                      3.0.1
-# Pygments                      2.15.1
-# pylint                        2.17.4
-# pylint-venv                   3.0.1
-# pyls-spyder                   0.4.0
-# PyNaCl                        1.5.0
-# pyOpenSSL                     20.0.1
-# pyparsing                     2.4.7
-# PyQt5                         5.15.9
-# PyQt5-Qt5                     5.15.2
-# PyQt5-sip                     12.12.1
-# PyQtWebEngine                 5.15.6
-# PyQtWebEngine-Qt5             5.15.2
-# pyrsistent                    0.17.3
-# PySocks                       1.7.1
-# pytest                        7.3.1
-# python-dateutil               2.8.2
-# python-lsp-black              1.2.1
-# python-lsp-jsonrpc            1.0.0
-# python-lsp-server             1.7.2
-# python-slugify                8.0.1
-# pytoolconfig                  1.2.5
-# pytz                          2021.1
-# pywin32                       306
-# pywin32-ctypes                0.2.0
-# pywinpty                      0.5.7
-# PyYAML                        5.4.1
-# pyzmq                         25.0.2
-# QDarkStyle                    3.1
-# qstylizer                     0.2.2
-# QtAwesome                     1.2.3
-# qtconsole                     5.4.3
-# QtPy                          2.3.1
-# requests                      2.25.1
-# rope                          1.8.0
-# Rtree                         1.0.1
-# ruamel-yaml-conda             0.15.100
-# scikit-learn                  1.2.2
-# scipy                         1.10.1
-# seaborn                       0.11.0
-# Send2Trash                    1.5.0
-# setuptools                    52.0.0.post20210125
-# sip                           4.19.13
-# six                           1.15.0
-# sklearn                       0.0.post5
-# snowballstemmer               2.2.0
-# sortedcontainers              2.4.0
-# sounddevice                   0.4.1
-# soupsieve                     2.2.1
-# sphinx                        7.0.0
-# sphinxcontrib-applehelp       1.0.4
-# sphinxcontrib-devhelp         1.0.2
-# sphinxcontrib-htmlhelp        2.0.1
-# sphinxcontrib-jsmath          1.0.1
-# sphinxcontrib-qthelp          1.0.3
-# sphinxcontrib-serializinghtml 1.1.5
-# spyder                        5.4.3
-# spyder-kernels                2.4.3
-# stack-data                    0.6.2
-# sympy                         1.9
-# terminado                     0.9.1
-# testpath                      0.4.4
-# text-unidecode                1.3
-# textdistance                  4.5.0
-# threadpoolctl                 3.1.0
-# three-merge                   0.1.1
-# tinycss2                      1.2.1
-# toml                          0.10.2
-# tomli                         2.0.1
-# tomlkit                       0.11.8
-# tornado                       6.3.1
-# tqdm                          4.59.0
-# traitlets                     5.9.0
-# typing-extensions             4.5.0
-# ujson                         5.7.0
-# urllib3                       1.26.4
-# watchdog                      3.0.0
-# wcwidth                       0.2.5
-# webencodings                  0.5.1
-# whatthepatch                  1.0.5
-# wheel                         0.36.2
-# widgetsnbextension            3.5.1
-# win-inet-pton                 1.1.0
-# wincertstore                  0.2
-# wrapt                         1.15.0
-# xlrd                          2.0.1
-# xmltodict                     0.12.0
-# yapf                          0.32.0
-# zipp                          3.4.1
+
+
+
+appnope==0.1.3
+astroid==3.0.0
+asttokens==2.2.1
+backcall==0.2.0
+brokenaxes==0.5.0
+Brotli==1.0.9
+certifi==2022.12.7
+cffi==1.15.1
+charset-normalizer==3.1.0
+comm==0.1.3
+cssselect2==0.7.0
+cycler==0.10.0
+Cython==0.29.34
+debugpy==1.6.7
+decorator==5.1.1
+dill==0.3.7
+et-xmlfile==1.1.0
+executing==1.2.0
+fonttools==4.39.3
+html5lib==1.1
+idna==3.4
+igor==0.3
+importlib-metadata==6.3.0
+ipykernel==6.22.0
+ipython==8.12.0
+isort==5.12.0
+jedi==0.18.2
+joblib==1.2.0
+jupyter_client==8.2.0
+jupyter_core==5.3.0
+kiwisolver==1.3.1
+lazy_loader==0.2
+littleutils==0.2.2
+matplotlib==3.4.2
+matplotlib-inline==0.1.6
+mccabe==0.7.0
+nest-asyncio==1.5.6
+nose==1.3.7
+numpy==1.24.2
+openpyxl==3.1.2
+outdated==0.2.2
+outlier-utils==0.0.3
+packaging==23.1
+pandas==1.5.2
+pandas-flavor==0.5.0
+parso==0.8.3
+patsy==0.5.3
+pexpect==4.8.0
+pickleshare==0.7.5
+Pillow==9.5.0
+pingouin==0.5.3
+platformdirs==3.2.0
+prompt-toolkit==3.0.38
+psutil==5.9.4
+ptyprocess==0.7.0
+pure-eval==0.2.2
+pycparser==2.21
+pydyf==0.6.0
+Pygments==2.15.0
+pylint==3.0.0
+pyparsing==2.4.7
+pyphen==0.14.0
+python-dateutil==2.8.2
+pytz==2021.1
+pyzmq==25.0.2
+requests==2.28.2
+scikit-learn==1.2.2
+scipy==1.10.1
+seaborn==0.11.2
+six==1.16.0
+stack-data==0.6.2
+statannot==0.2.3
+statannotations==0.6.0
+statsmodels==0.13.5
+tabulate==0.9.0
+threadpoolctl==3.1.0
+tinycss2==1.2.1
+tomli==2.0.1
+tomlkit==0.12.1
+tornado==6.2
+traitlets==5.9.0
+typing_extensions==4.5.0
+tzdata==2023.3
+urllib3==1.26.15
+wcwidth==0.2.6
+weasyprint==58.1
+webencodings==0.5.1
+xarray==2023.9.0
+zipp==3.15.0
+zopfli==0.2.2
