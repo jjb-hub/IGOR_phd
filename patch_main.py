@@ -50,19 +50,19 @@ data_path = f'{INPUT_DIR}/PatchData/' #THIS IS HARD CODED INTO make_path(file_fo
 
 #%% Extrapolate data from files
 feature_df_ex = feature_df.copy()
-feature_df_expanded_raw = buildExpandedDF(feature_df_ex)  #in helper functions #check dif in make_path and passing of directory
+expanded_df_raw = buildExpandedDF(feature_df_ex)  #in helper functions #check dif in make_path and passing of directory
 
 #fix tau and sag from named tuples to: sag_val, sag_steady_state, sag_I_inj       and        tau_val, tau_steady_state, tau_I_inj
 #FIX ME
-# feature_df_expanded_raw.to_pickle(f'{OUTPUT_DIR}/feature_df_ecpanded_raw.pkl')
-# feature_df_expanded_raw_pkl= pd.read_pickle(f'{OUTPUT_DIR}/feature_df_ecpanded_raw.pkl')
+# expanded_df_raw.to_pickle(f'{OUTPUT_DIR}/feature_df_ecpanded_raw.pkl')
+# expanded_df_raw_pkl= pd.read_pickle(f'{OUTPUT_DIR}/feature_df_ecpanded_raw.pkl')
 
 
 #%%
 
 #Do statistical anlaysis of FP data and plot
 multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
-feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw, OUTPUT_DIR, color_dict)
+expanded_df_stats = loopCombinations_stats(expanded_df_raw, OUTPUT_DIR, color_dict)
 
 
-print(feature_df_expanded_raw)
+print(expanded_df_raw)

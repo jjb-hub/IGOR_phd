@@ -1527,7 +1527,7 @@ def loopCombinations(df):
     
     return df_reordered
 #RUN
-feature_df_expanded_raw = loopCombinations(feature_df_ex)
+expanded_df_raw = loopCombinations(feature_df_ex)
 
 # feature_df_ex_tau.to_csv('middle_TCB_data.xls')
 
@@ -1637,7 +1637,7 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
     cell_id_list = list(df['cell_id'].unique())
     
     #tobuild dummy df
-    # subset = feature_df_expanded_stats.loc[feature_df_expanded_stats['cell_type']== 'L5a_TLX']
+    # subset = expanded_df_stats.loc[expanded_df_stats['cell_type']== 'L5a_TLX']
     # subset = subset.loc[subset['data_type']== 'FP']
     # df_only_first_app = subset.loc[subset['application_order'] <= 1]
 
@@ -1712,7 +1712,7 @@ def loopCombinations_stats(df):
 #cell_type is used s an exclusion
 multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
 
-feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
+expanded_df_stats = loopCombinations_stats(expanded_df_raw)
 
 
 

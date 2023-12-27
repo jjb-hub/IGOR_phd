@@ -214,7 +214,7 @@ def loopCombinations_stats(filename_or_df):
 
 #check if df if not then pull entire ExpandedDF (or build)
     if not isinstance(filename_or_df,  pd.DataFrame):
-        df = getorbuildExpandedDF(filename_or_df, 'feature_df_expanded', buildExpandedDF, from_scratch=False) #load feature df
+        df = getorbuildExpandedDF(filename_or_df, 'expanded_df', buildExpandedDF, from_scratch=False) #load feature df
     else:
         df = filename_or_df
 

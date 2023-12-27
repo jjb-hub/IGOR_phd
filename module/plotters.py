@@ -55,7 +55,7 @@ def quick_line_plot(plotlist, plottitle):
 # #right now need expanded df to make ap figuures not ideal
 
 def loopbuildAplicationFigs(filename):
-    df = getorbuildExpandedDF(filename, 'feature_df_expanded', buildExpandedDF, from_scratch=False)
+    df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
     color_dict = getColors(filename)
     application_df = df[df.data_type == 'AP'] 
     for row_ind, row in application_df.iterrows():  #row is a series that can be called row['colname']
@@ -79,7 +79,7 @@ def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
     # color_dict = getColors(filename) 
 
     if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-        expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', buildExpandedDF, from_scratch=False)
+        expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
         cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
     else:
         cell_df = cell_id_or_cell_df
@@ -107,7 +107,7 @@ def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', buildExpandedDF, from_scratch=False)
+            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
             cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
@@ -130,7 +130,7 @@ def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
         
 def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', buildExpandedDF, from_scratch=False)
+            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
             cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
@@ -154,7 +154,7 @@ def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', buildExpandedDF, from_scratch=False)
+            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
             cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
@@ -177,7 +177,7 @@ def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', buildExpandedDF, from_scratch=False)
+            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
             cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
