@@ -1,10 +1,11 @@
 ######## ONLY IMPORT THE USER ACCESSIBLE FUNCTIONS HERE ##########
 
-from module.metabuild_functions import (
-    expandFeatureDF, 
+from module.stats import (
+    buildExpandedDF, 
     loopCombinations_stats
 )
-from module.plotter_functions import (
+
+from module.plotters import (
     getorbuildApplicationFig, 
     loopbuildAplicationFigs, 
     getorbuildAP_MeanFig, 
@@ -14,12 +15,19 @@ from module.plotter_functions import (
     quick_plot_file 
 )
 
-from module.base_utils import (
+from module.utils import (
+    subselectDf,
     initiateFileSystem, 
-    saveColors, 
+    saveColors,
+    getRawDF  
+    )
+
+from module.getters import (
+    checkFeatureDF, 
     getCellDF, 
-    getorbuildExpandedDF,
-    getRawDF)
+    getorbuildExpandedDF, 
+    buildExpandedDF_cell_type
+    )
 
 ######## INIT ##########
 # Start by checking filesystem has all the folders necessary for read/write operations (cache) or create them otherwise

@@ -1,14 +1,9 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Wed May 10 10:43:53 2023
-
-@author: Debapratim Jana, Jasmine Butler
-"""
 
 #my modular imports
-from module.base_utils import *
-from module.action_potential_functions import calculate_max_firing, extract_FI_x_y, extract_FI_slope_and_rheobased_threshold
-from module.action_potential_functions import ap_characteristics_extractor_main, tau_analyser, sag_current_analyser , pAD_detection
+from module.utils import *
+
+from module.action_potential_functions import  pAD_detection
+from module.getters import getorbuildExpandedDF, buildExpandedDF
 
 #generic imports
 import os, shutil, itertools, json, time, functools, pickle
@@ -29,141 +24,11 @@ from statannotations.Annotator import Annotator
 
 
 #CONSTANTS   
-from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR 
+from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict, n_minimum,  p_value_threshold
 
 
 
-#FIX ME build these in with simple get or guild functions outside the meta loop also interrate with meta loop
-n_minimum = 3 
-p_value_threshold=0.05
-
-
-#FIX ME POU IN RIGHT PLACE
-## New function DJ : 
-def generate_V_pAD_df(folder_file): 
-    '''
-    Generates pAD_df, V_array  
-    Input : 
-           folder_file : str 
-    
-    Ouput : 
-           pAD_df  : pAD dataframe built from pAD_detection
-           V_array : v array     
-    '''
-    path_V, path_I = make_path(folder_file)
-    V_list, V_df = igor_exporter(path_V)
-    V_array      = np.array(V_df) 
-    
-    peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
-    
-    return pAD_df , V_array
-
-
-##### EXPAND FEATURE_DF ######
-#takes a row of the df (a single file) and extractes values based on the data type  FP or AP then appends values to df
-
-def _handleFile(row): #THIS FUNCTION IS TOO BIG AND TOO SLOW TODO 
-    row = row.copy() #isnt this redundant? JJB
-
-    # Dataframe extraction 
-    path_V, path_I = make_path(row.folder_file)
-    V_list, V_df = igor_exporter(path_V)
-    V_array      = np.array(V_df) 
-    # handel missing I traces (Soma_outwave)
-    try:
-        I_list, I_df = igor_exporter(path_I)
-        I_array      = np.array(I_df)
-    except FileNotFoundError:
-        print('I file not found, path:', path_I)
-
-
-    if row.data_type in ["FP", "FP_AP"]: 
-        # pass 
-        print("FP type file")
-        print(row.folder_file)
-
-        #data files to be fed into extraction funcs feature_df_extended
-        row["max_firing"] = calculate_max_firing(V_array)
-        
-        x, y, v_rest = extract_FI_x_y (path_I, path_V) # x = current injected, y = number of APs, v_rest = the steady state voltage (no I injected)
-        FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True) #FIX ME: handel pAD APs better slope fit
-        row["rheobased_threshold"] = rheobase_threshold
-        row["FI_slope"] = FI_slope
-
-        peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(V_df)
-        row["voltage_threshold"] = v_thresholds_all 
-        row["AP_height"] = peak_heights_all
-        row["AP_width"] = peak_fw_all
-        row["AP_slope"] = peak_slope_all 
-        row["AP_latency"] = peak_latencies_all
-
-        #to DJ: to remove the named tuples I just mad them lists of lists i.e. [[value, steady_state, I_injected], [value, steady_state, I_injected] ]
-        row["tau_rc"] = tau_analyser(V_array, I_array, x, plotting_viz= False, analysis_mode = 'max')
-        row["sag"]    = sag_current_analyser(V_array, I_array, x)
-
-        
-    elif row.data_type == "AP":
-
-        print("AP type file")
-        print(row.folder_file)        
-        
-        # pAD classification
-        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
-        print('pAD detection complete .... ')
-
-        if len(pAD_df["pAD_count"]) == 0:  #if there are no APs of any kind detected
-            row["pAD_count"] =  np.nan
-            row["AP_locs"]   =  pAD_df["AP_loc"].ravel()   # getlocations of ALL? APs : AP_lcos 
-        else:
-            row["pAD_count"] =  pAD_df["pAD_count"][0]     #  need to make count not series / ERROR HERE  
-            row["AP_locs"]   =  pAD_df["AP_loc"].ravel()    
-
-            #unsure weather to just do count but can use len()
-            row['PRE_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
-            row['APP_Somatic_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
-            row['WASH_Somatic_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
-            row['PRE_pAD_AP_locs'] = pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
-            row['APP_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
-            row['WASH_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
-
-        #make points list for PRE , APP and WASH voltages #THIS IS TOO BIG EXTRACT RELEVANT DATA i.e. SD and add 
-        #saving full points list is too long! #to float 16 instead of 32 
-        #FIX ME 
-        # varray[ rows to take   : cols to take ]
-        # varray[:, :row.drug_in] #take all rows up to drug_in
-
-        # row['PRE_V'] = V_array[:, :row.drug_in] 
-        # row['APP_V'] = V_array[:, row.drug_in:row.drug_out]
-        # row['WASH_V'] = V_array[:, row.drug_out:]
-        pass
-    
-    elif row.data_type == "pAD":
-        print('data_type pAD')
-
-    else:
-        raise NotADirectoryError(f"Didn't handle: {row.data_type}") # data_type can be AP, FP_AP or FP
-    return row
-
-
-def expandFeatureDF(filename_or_df): #if passed in get or build will be filename therefor cant subset to try #modularising now
-    if not isinstance(filename_or_df, pd.DataFrame):
-        print('fetchig raw df')
-        df = getRawDF(filename_or_df)
-    else:
-        df=filename_or_df
-
-    og_columns = df.columns.copy() #origional columns #for ordering columns
-    df['mouseline'] = df.cell_ID.str[:3]
-    df = df.apply(_handleFile, axis=1) #Apply a function along an axis (rows = 1) of the DataFrame
-
-    #ORDERING DF internal: like this new columns added will appear at the end of the df in the order they were created in _handelfile()
-    all_cur_columns = df.columns.copy()
-    new_colums_set = set(all_cur_columns ) - set(og_columns) # Subtract mathematical sets of all cols - old columns to get a set of the new columns
-    new_colums_li = list(new_colums_set)
-    reorder_cols_li =  list(og_columns) + new_colums_li # ['mouseline'] + ordering
-    df_reordered = df[reorder_cols_li]    
-    
-    return df_reordered
+########## WORKING WITH EXPANDED DF ###########
 
 
 
@@ -181,7 +46,7 @@ def apply_group_by_funcs(df, groupby_cols, handleFn, color_dict): #creating a li
 
 
 def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
-    #colaps  metrics to a single value for each file/row i.e. lists become a mean ect.
+    #colaps  metrics to a single value for each file/row i.e. lists become a mean 
     cell_type, drug, data_type = celltype_drug_datatype
     
     if data_type == 'AP': 
@@ -190,20 +55,17 @@ def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
         return df
     elif data_type in ['FP', 'FP_AP']:
         df = df.copy()
-        #AP Charecteristics i.e. mean/SD e.c.t. for a single file 
+        #AP Charecteristics take mean for single file
         df['mean_voltage_threshold_file'] = df.voltage_threshold.apply(np.mean)  #FIX ME: RuntimeWarning: Mean of empty slice.
         df['mean_AP_height_file'] = df.AP_height.apply(np.mean)
         df['mean_AP_slope_file'] = df.AP_slope.apply(np.mean)
         df['mean_AP_width_file'] = df.AP_width.apply(np.mean)
         df['mean_AP_latency_file'] = df.AP_latency.apply(np.mean)
         
-        
-        #Tau and Sag colapse to lowest value #NO LOBGER TUPLES
-        # extract_truple_data('sag', df) #creating columns 'tau_file' and 'sag_file'
-        # extract_truple_data('tau_rc', df)
+
        
     else:
-        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP or FP
+        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
     
     return df
     
@@ -230,7 +92,8 @@ def _colapse_to_cell_pre_post_FP(cellid_drug_datatype, df, color_dict):
         df['AP_width_cell_drug'] = df['mean_AP_width_file'].mean()
         df['AP_latency_cell_drug'] = df['mean_AP_latency_file'].mean()
         
-        #Tau and Sag #FIX ME tau and sag are in list now #FIX ME 
+        #Tau and Sag #FIX ME tau and sag are in list now #FIX ME #TODO
+        #for cell_id take normalised tau and sag by v difference 
         #chose optimal paring for comparison
         # df['tau_cell_drug'] = df['tau_rc_file'].mean()
         # df['sag_cell_drug'] = df['sag_file'].mean()
@@ -268,7 +131,7 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
         return df
     
     elif data_type == 'FP':
-        cell_id_list = list(df['cell_ID'].unique())
+        cell_id_list = list(df['cell_id'].unique())
         build_first_drug_ap_column(df, cell_id_list) #builds df['first_drug_AP']
         
         df_only_first_app = df.loc[df['application_order'] <= 1] #only include first drug application data 
@@ -288,13 +151,13 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
             statistical_df = build_FP_statistical_df(df_only_first_app, cell_id_list, col_name)
             drug_count_n = statistical_df['drug'].value_counts()
             drugs_to_remove = drug_count_n[drug_count_n < n_minimum].index.tolist()
-            statistical_df_filtered = statistical_df[~statistical_df['cell_ID'].isin(statistical_df[statistical_df['drug'].isin(drugs_to_remove)]['cell_ID'])]
+            statistical_df_filtered = statistical_df[~statistical_df['cell_id'].isin(statistical_df[statistical_df['drug'].isin(drugs_to_remove)]['cell_id'])]
    
             #create df_to_plot with only one value per cell (not per file)
-            df_to_plot = df_only_first_app[['cell_ID','drug',col_name, 'first_drug_AP']]
+            df_to_plot = df_only_first_app[['cell_id','drug',col_name, 'first_drug_AP']]
             df_to_plot = df_to_plot.drop_duplicates()
             #remove cells where the 'drug' occures <  n_minimum
-            df_to_plot_filtered = df_to_plot[~df_to_plot['cell_ID'].isin(df_to_plot[df_to_plot['drug'].isin(drugs_to_remove)]['cell_ID'])]
+            df_to_plot_filtered = df_to_plot[~df_to_plot['cell_id'].isin(df_to_plot[df_to_plot['drug'].isin(drugs_to_remove)]['cell_id'])]
 
             if len(df_to_plot_filtered) == 0:
                 print(f'Insufficient data for {cell_type}for{name}')
@@ -318,13 +181,13 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
 def _plot_pAD(celltype_drug_datatype, df, color_dict):
     cell_type, drug , data_type = celltype_drug_datatype
     if data_type == 'AP': 
-        pAD_df = df[['cell_ID','PRE_pAD_AP_locs', 'APP_pAD_AP_locs', 'WASH_pAD_AP_locs', 'PRE_Somatic_AP_locs', 'APP_Somatic_AP_locs', 'WASH_Somatic_AP_locs']]
+        pAD_df = df[['cell_id','PRE_pAD_AP_locs', 'APP_pAD_AP_locs', 'WASH_pAD_AP_locs', 'PRE_Somatic_AP_locs', 'APP_Somatic_AP_locs', 'WASH_Somatic_AP_locs']]
         pAD_df = pAD_df.dropna() #removing traces with no APs at all
-        if len(pAD_df['cell_ID'].unique()) <= n_minimum:
+        if len(pAD_df['cell_id'].unique()) <= n_minimum:
             print(f'Insuficient data with APs for {cell_type} with {drug} application ')
             return df
         
-        pAD_df_to_plot = pd.melt(pAD_df, id_vars=['cell_ID'], var_name='col_name', value_name='AP_locs'  )
+        pAD_df_to_plot = pd.melt(pAD_df, id_vars=['cell_id'], var_name='col_name', value_name='AP_locs'  )
         pAD_df_to_plot[['drug', 'AP']] = pAD_df_to_plot['col_name'].str.split('_', n=1, expand=True).apply(lambda x: x.str.split('_').str[0])
         pAD_df_to_plot['count'] = pAD_df_to_plot['AP_locs'].apply(len)
         pAD_df_to_plot['drug'] = pAD_df_to_plot['drug'].str.replace('APP', drug)
@@ -347,16 +210,20 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
     return df 
 
 
-def loopCombinations_stats(filename):
-    df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False) #load feature df
-    color_dict = getColors(filename)
+def loopCombinations_stats(filename_or_df):
 
-    #create a copy of file_folder column to use at end of looping to restore  origional row order !!! #FIX ME
-    # df_row_order = df['folder_file'] / df_raw_col_order[]
+#check if df if not then pull entire ExpandedDF (or build)
+    if not isinstance(filename_or_df,  pd.DataFrame):
+        df = getorbuildExpandedDF(filename_or_df, 'expanded_df', buildExpandedDF, from_scratch=False) #load feature df
+    else:
+        df = filename_or_df
+
+    df_row_order = df['folder_file'].tolist()  # save origional row order
+
     
     combinations = [
-                    (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP),
-                    (["cell_ID", "drug",  "data_type"], _colapse_to_cell_pre_post_FP),
+                    (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP), #AP charecteristics from first 2 sweeps with APs
+                    (["cell_id", "drug",  "data_type"], _colapse_to_cell_pre_post_FP),
                     (["cell_type",  "data_type"], _colapse_to_cell_pre_post_tau_sag_FP), 
                     (["cell_type",  "data_type"], _plotwithstats_FP), 
                     (["cell_type", "drug", "data_type"], _plot_pAD)
@@ -366,7 +233,8 @@ def loopCombinations_stats(filename):
     for col_names, handlingFn in combinations:
         df = apply_group_by_funcs(df, col_names, handlingFn, color_dict) #note that as each function is run the updated df is fed to the next function
 
-    # df[ order(match(df['folder_file'], df_row_order)) ]  #FIX ME
+    df = df.loc[df['folder_file'].isin(df_row_order)]# rearrange the DataFrame to match the original row order
+
     return df
 
 
@@ -375,12 +243,12 @@ def loopCombinations_stats(filename):
 def build_first_drug_ap_column(df, cell_id_list):
     df['first_drug_AP'] = ''  #create a column for  specifying the first drug applied for each cell
     for cell_id in cell_id_list:
-        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only
+        cell_df = df.loc[df['cell_id'] == cell_id] #slice df to cell only
         first_drug_series = cell_df.loc[df['application_order'] == 1, 'drug'] 
         if len(first_drug_series.unique()) > 1: 
             print ('ERROR IN DATA ENTERY: multiple drugs for first aplication on cell ', cell_id)
         first_drug_string = first_drug_series.unique()[0] 
-        df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
+        df.loc[df['cell_id'] == cell_id, 'first_drug_AP'] = first_drug_string
     return
 
 def fill_statistical_df_lists(cell_df, col_name, first_drug_string, lists_to_fill):
@@ -464,12 +332,12 @@ def build_FP_statistical_df(df_only_first_app, cell_id_list, col_name):  #col_na
     
     for cell_id in cell_id_list:
         
-        cell_df = df_only_first_app.loc[df_only_first_app['cell_ID'] == cell_id] #slice df to cell only 
+        cell_df = df_only_first_app.loc[df_only_first_app['cell_id'] == cell_id] #slice df to cell only 
         first_drug_string = cell_df['first_drug_AP'].unique()[0]
 
         fill_statistical_df_lists(cell_df, col_name, first_drug_string, lists_to_fill) #e.g col_name = 'max_firing_cell_drug'
     #create statistical df for celltype with all raw data for single value type e.g. max firing
-    statistical_df = pd.DataFrame({'cell_ID': cell_id_list,
+    statistical_df = pd.DataFrame({'cell_id': cell_id_list,
                                   'drug': first_drug_,
                                   'PRE': PRE_,
                                   'POST': POST_

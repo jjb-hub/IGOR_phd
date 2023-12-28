@@ -1,3 +1,4 @@
+from module.constants import INPUT_DIR, CACHE_DIR, OUTPUT_DIR
 import os, shutil, itertools, json, time, functools, pickle
 import pandas as pd
 import igor.packed
@@ -5,33 +6,29 @@ import igor.binarywave
 import os
 import matplotlib.pyplot as plt
 
-######## CONSTANTS ######################
-# Constants are like variables that should not be rewritten, they are declared in all caps by convention
-ROOT = os.getcwd() #This gives terminal location (terminal working dir)
-INPUT_DIR = f'{ROOT}/input'
-OUTPUT_DIR = f'{ROOT}/output'
-CACHE_DIR = f'{ROOT}/cache'
+######### IMPORT RAW DATA ##########
+
+#takes filename reads excel as pandas.dataframe
+def getRawDF(filename):
+    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
+    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
+    return (df)
 
 
-#IGOR 
+######### IGOR ##########
 
 def make_path(folder_file): 
     '''
     Parameters       
     ----------
-    folder_file : TYPE
-        DESCRIPTION.
-
+    folder_file : 'folder_file'
     Returns
     -------
     path_V : string - path for V data 
     path_I : string - path for I data 
     '''
-    # ROOT = os.getcwd() #This gives terminal location (terminal working dir)  #HARD CODE ISH
-    # INPUT_DIR = f'{ROOT}/input'
     data_path = f'{INPUT_DIR}/PatchData/'
-
-    extension_V = "Soma.ibw" #HARD CODE SPECIFIC 
+    extension_V = "Soma.ibw" #HARD CODE  
     extension_I = "Soma_outwave.ibw" 
     path_V = data_path + folder_file + extension_V
     path_I = data_path + folder_file + extension_I
@@ -47,12 +44,10 @@ def igor_exporter(path):
     -------
     'point_list' : a continious points  (combining sweeps into continious wave)  
     'igor_df' : a df with each column corisponding to one sweep  
-
      '''
     igor_file = igor.binarywave.load(path)
     wave = igor_file["wave"]["wData"]
     igor_df = pd.DataFrame(wave)
-    
     point_list = list()
     counter = len(igor_df.columns)
     
@@ -60,16 +55,18 @@ def igor_exporter(path):
         temp_list = igor_df.iloc[:,i].tolist()
         point_list.extend(temp_list)
         counter = counter - 1
-    
     return (point_list, igor_df)
 
+
+#JJB what is this?
 if __name__ == "__main__": #inbuilt test that will not be excuted unless run inside this file
     print('igor tester being run...')
     point_list, igor_df = igor_exporter('/Users/jasminebutler/Desktop/IGOR_phd/input/PatchData/JJB221230/t15Soma.ibw')
 
 
 
-#CACHE SYSTEM and SAVING 
+######### CACHE SYSTEM and SAVING ##########
+
 #Check filesystem is set up for write operations
 def saveColors(filename, color_dict):
     subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
@@ -80,16 +77,19 @@ def saveColors(filename, color_dict):
 def getColors(filename):
     return getJSON(f"{CACHE_DIR}/{filename.split('.')[0]}/color_dict.json")
 
+
+
+#This function saves dictionnaries, JSON is a dictionnary text format that you use to not have to reintroduce dictionnaries as variables 
+def saveJSON(path, dict_to_save):
+    with open(path, 'w', encoding ='utf8') as json_file:
+        json.dump(dict_to_save, json_file)
+
 #This function gets JSON files and makes them into python dictionnaries
 def getJSON(path):
     with open(path) as outfile:
         loaded_json = json.load(outfile)
     return loaded_json
 
-#This function saves dictionnaries, JSON is a dictionnary text format that you use to not have to reintroduce dictionnaries as variables 
-def saveJSON(path, dict_to_save):
-    with open(path, 'w', encoding ='utf8') as json_file:
-        json.dump(dict_to_save, json_file)
 
 def checkFileSystem(filepath):
     if not os.path.exists(filepath):
@@ -100,7 +100,6 @@ def initiateFileSystem():
     checkFileSystem(INPUT_DIR)
     checkFileSystem(CACHE_DIR)
     checkFileSystem(OUTPUT_DIR)
-    
 
 #This function deletes all cached files, it is used when you want to start from square one because all intermediary results will be cached
 def resetCache():
@@ -130,27 +129,7 @@ def isCached(filename, identifier):
     return os.path.isfile(f'{CACHE_DIR}/{filename}/{identifier}.pkl')
 
 
-#need to also add from_scratch = None 
-#need to make forloop combinations
-def getRawDF(filename):
-    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
-    return (df)
-
-def getCellDF(df, cell_id, data_type = None):
-    cell_df = df[df['cell_ID']==cell_id]
-    if data_type is not None:
-        cell_df = cell_df[cell_df['data_type']== data_type]
-    return cell_df
-
-def getorbuildExpandedDF(filename, identifier, builder_cb, from_scratch=None):
-    filename_no_extension = filename.split(".")[0]
-    from_scratch = from_scratch if from_scratch is not None else input("Recalculate DF even if previous version exists? (y/n)") == 'y'
-    if from_scratch or not isCached(filename, identifier):
-        print(f'BUILDING "{identifier}"')    #Build useing callback otherwise and cache result
-        df = builder_cb(filename)
-        cache(filename_no_extension, identifier, df)
-    else : df = getCache(filename, identifier)
-    return df
+######### SAVE ##########
 
 def saveFigure(fig, identifier, fig_type):
     output_subdir = f"{OUTPUT_DIR}/{fig_type}"
@@ -180,6 +159,19 @@ def saveAP_PCAFig(fig, identifier):
 def saveAP_HistogramFig(fig, identifier):
     saveFigure(fig, identifier, 'Histogram_APs')
 
-######## INIT ##########
-#Start by checking filesystem has all the folders necessary for read/write operations (cache) or create them otherwise
-initiateFileSystem()
+########## SUBSELECTOR ##########
+def maskDf(df, mask_conditions):
+    complex_filter = True
+    for column, value in mask_conditions.items():
+        if isinstance(value, list):
+            atomic_filter = df[column].isin(value)
+        else:
+            atomic_filter = df[column] == value
+        complex_filter &= atomic_filter
+    return complex_filter
+
+def subselectDf(df, subselection):
+    df = df[
+        maskDf(df, subselection)
+    ]
+    return df

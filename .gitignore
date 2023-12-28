@@ -7,3 +7,4 @@ __pycache__
 input
 debug.py
 cache
+ephys_phd.db

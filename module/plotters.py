@@ -1,8 +1,9 @@
 # module
-from module.metabuild_functions import expandFeatureDF, loopCombinations_stats
-from module.base_utils import *
-from module.metabuild_functions import extract_FI_x_y
+from module.stats import buildExpandedDF, loopCombinations_stats
+from module.utils import *
+from module.getters import getorbuildExpandedDF, getCellDF
 from module.action_potential_functions import pAD_detection
+from module.constants import color_dict
 #external
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -14,9 +15,9 @@ import numpy as np
 import timeit
 
 
-#BASE PLOTTERS
-# just plots any waveform
+########## BASE PLOTTERS ##########
 
+#  plots any waveform based off fold_file
 def quick_plot_file(filename, folder_file):
     df=getRawDF(filename)
     path_V, path_I = make_path(folder_file)
@@ -47,16 +48,19 @@ def quick_line_plot(plotlist, plottitle):
 
 
 
-## LOOPERS ## 
+## LOOPER ## 
+
+#for cell_type and drug
+
 # #right now need expanded df to make ap figuures not ideal
 
 def loopbuildAplicationFigs(filename):
-    df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
+    df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
     color_dict = getColors(filename)
     application_df = df[df.data_type == 'AP'] 
     for row_ind, row in application_df.iterrows():  #row is a series that can be called row['colname']
         #inputs to builder if not cached:
-        cell_ID = row['cell_ID']
+        cell_id = row['cell_id']
         folder_file = row['folder_file']
         I_set = row['I_set']
         drug = row['drug']
@@ -65,24 +69,24 @@ def loopbuildAplicationFigs(filename):
         application_order = row['application_order']
         pAD_locs = row['APP_pAD_AP_locs']
 
-        buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
+        buildApplicationFig(color_dict, cell_id=cell_id, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
         plt.close()
     return
 
 ## GETTERS ##
 
-def getorbuildApplicationFig(filename, cell_ID_or_cell_df, from_scratch=None):
-    color_dict = getColors(filename) 
+def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
+    # color_dict = getColors(filename) 
 
-    if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
-        expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
-        cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
+    if not isinstance(cell_id_or_cell_df, pd.DataFrame):
+        expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
+        cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
     else:
-        cell_df = cell_ID_or_cell_df
-    cell_ID = cell_df['cell_ID'].iloc[0]
+        cell_df = cell_id_or_cell_df
+    cell_id = cell_df['cell_id'].iloc[0]
 
     from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
-    if from_scratch or not isCached(filename, cell_ID):
+    if from_scratch or not isCached(filename, cell_id):
         for index, row in cell_df.iterrows(): #loops rows from multiple applications
             #inputs to builder if not cached:
             folder_file = row['folder_file']
@@ -91,111 +95,111 @@ def getorbuildApplicationFig(filename, cell_ID_or_cell_df, from_scratch=None):
             drug_in = row['drug_in']
             drug_out = row['drug_out']
             application_order = row['application_order']
-            print(f'BUILDING "{cell_ID} Application {application_order} Figure"') #Build useing callback otherwise and cache result
-            fig = buildApplicationFig(color_dict, cell_ID=cell_ID, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
-            saveAplicationFig(fig, f'{cell_ID}_application_{application_order}')
+            print(f'BUILDING "{cell_id} Application {application_order} Figure"') #Build useing callback otherwise and cache result
+            fig = buildApplicationFig(color_dict, cell_id=cell_id, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
+            saveAplicationFig(fig, f'{cell_id}_application_{application_order}')
             plt.close(fig)
             
     else : 
-        fig = getCache(filename, cell_ID)
+        fig = getCache(filename, cell_id)
     # fig.show()
     
 
-def getorbuildAP_MeanFig(filename, cell_ID_or_cell_df, from_scratch=None):
-        if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
+def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
+        if not isinstance(cell_id_or_cell_df, pd.DataFrame):
+            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
+            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
-            cell_df = cell_ID_or_cell_df
-        cell_ID = cell_df['cell_ID'].iloc[0]
+            cell_df = cell_id_or_cell_df
+        cell_id = cell_df['cell_id'].iloc[0]
 
         from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
-        if from_scratch or not isCached(filename, cell_ID):
-            print(f'BUILDING "{cell_ID} Mean APs Figure"') 
+        if from_scratch or not isCached(filename, cell_id):
+            print(f'BUILDING "{cell_id} Mean APs Figure"') 
             folder_file = cell_df['folder_file'].values[0]
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
             if len(peak_heights_all) <=1:
-                return print(f'No APs in trace for {cell_ID}')
-            fig = buildAP_MeanFig(cell_ID, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
-            saveAP_MeanFig(fig, cell_ID)
-        else : fig = getCache(filename, cell_ID)
+                return print(f'No APs in trace for {cell_id}')
+            fig = buildAP_MeanFig(cell_id, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
+            saveAP_MeanFig(fig, cell_id)
+        else : fig = getCache(filename, cell_id)
         fig.show()
         
-def getorbuildAP_PhasePlotFig(filename, cell_ID_or_cell_df, from_scratch=None):
-        if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
+def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
+        if not isinstance(cell_id_or_cell_df, pd.DataFrame):
+            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
+            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
-            cell_df = cell_ID_or_cell_df
-        cell_ID = cell_df['cell_ID'].iloc[0]
+            cell_df = cell_id_or_cell_df
+        cell_id = cell_df['cell_id'].iloc[0]
 
         from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
-        if from_scratch or not isCached(filename, cell_ID):
-            print(f'BUILDING "{cell_ID} Phase Plot Figure"') 
+        if from_scratch or not isCached(filename, cell_id):
+            print(f'BUILDING "{cell_id} Phase Plot Figure"') 
             folder_file = cell_df['folder_file'].values[0]
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
             if len(peak_heights_all) <=1:
-                return print(f'No APs in trace for {cell_ID}')
-            fig =buildAP_PhasePlotFig(cell_ID, pAD_df, V_array)
-            saveAP_PhasePlotFig(fig, cell_ID)
-        else : fig = getCache(filename, cell_ID)
+                return print(f'No APs in trace for {cell_id}')
+            fig =buildAP_PhasePlotFig(cell_id, pAD_df, V_array)
+            saveAP_PhasePlotFig(fig, cell_id)
+        else : fig = getCache(filename, cell_id)
         fig.show()
 
 
-def getorbuildAP_PCAFig(filename, cell_ID_or_cell_df, from_scratch=None):
-        if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
+def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
+        if not isinstance(cell_id_or_cell_df, pd.DataFrame):
+            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
+            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
-            cell_df = cell_ID_or_cell_df
-        cell_ID = cell_df['cell_ID'].iloc[0]
+            cell_df = cell_id_or_cell_df
+        cell_id = cell_df['cell_id'].iloc[0]
 
         from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
-        if from_scratch or not isCached(filename, cell_ID):
-            print(f'BUILDING "{cell_ID} PCA Figure"') 
+        if from_scratch or not isCached(filename, cell_id):
+            print(f'BUILDING "{cell_id} PCA Figure"') 
             folder_file = cell_df['folder_file'].values[0]
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
             if len(peak_heights_all) <=1:
-                return print(f'No APs in trace for {cell_ID}')
-            fig =buildAP_PCAFig(cell_ID, pAD_df, V_array)
-            saveAP_PCAFig(fig, cell_ID)
-        else : fig = getCache(filename, cell_ID)
+                return print(f'No APs in trace for {cell_id}')
+            fig =buildAP_PCAFig(cell_id, pAD_df, V_array)
+            saveAP_PCAFig(fig, cell_id)
+        else : fig = getCache(filename, cell_id)
         fig.show()
 
-def getorbuildAP_HistogramFig(filename, cell_ID_or_cell_df, from_scratch=None):
-        if not isinstance(cell_ID_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'feature_df_expanded', expandFeatureDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_ID_or_cell_df, data_type = 'AP')
+def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
+        if not isinstance(cell_id_or_cell_df, pd.DataFrame):
+            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
+            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
-            cell_df = cell_ID_or_cell_df
-        cell_ID = cell_df['cell_ID'].iloc[0]
+            cell_df = cell_id_or_cell_df
+        cell_id = cell_df['cell_id'].iloc[0]
 
         from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
-        if from_scratch or not isCached(filename, cell_ID):
-            print(f'BUILDING "{cell_ID} AP Histogram Figure"') 
+        if from_scratch or not isCached(filename, cell_id):
+            print(f'BUILDING "{cell_id} AP Histogram Figure"') 
             folder_file = cell_df['folder_file'].values[0]
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
             if len(peak_heights_all) <=1:
-                return print(f'No APs in trace for {cell_ID}')
-            fig =buildAP_HistogramFig(cell_ID, pAD_df, V_array)
-            saveAP_HistogramFig(fig, cell_ID)
-        else : fig = getCache(filename, cell_ID)
+                return print(f'No APs in trace for {cell_id}')
+            fig =buildAP_HistogramFig(cell_id, pAD_df, V_array)
+            saveAP_HistogramFig(fig, cell_id)
+        else : fig = getCache(filename, cell_id)
         fig.show()
 
 ## BUILDERS ##
-def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, application_order=None, pAD_locs=None):
+def buildApplicationFig(color_dict, cell_id=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, application_order=None, pAD_locs=None):
     #load raw data 
     color_dict = {"pAD":"orange","Somatic":"blue","WASH":"lightsteelblue", "PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue', 'I_display':'cornflowerblue'} 
     if drug is None:
@@ -207,7 +211,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     try:
         array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
     except FileNotFoundError: #if no I file exists 
-        print(f"no I file found for {cell_ID}, I setting used was: {I_set}")
+        print(f"no I file found for {cell_id}, I setting used was: {I_set}")
         array_I = np.zeros(len(df_V)-1)
     #scale data
     x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
@@ -254,7 +258,7 @@ def buildApplicationFig(color_dict, cell_ID=None, folder_file=None, I_set=None, 
     ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
     ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
     ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
-    #ax1.set_title(cell_ID + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
+    #ax1.set_title(cell_id + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
     plt.tight_layout()
     plt.show()
     return fig

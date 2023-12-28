@@ -999,7 +999,7 @@ def single_drug_aplication_visualisation(feature_df,  color_dict, cell = 'DRD230
         aplication_df = feature_df[feature_df.data_type == 'AP'] #create sub dataframe of aplications
         
         for row_ind, row in aplication_df.iterrows():  #row is a series that can be called row['colname']
-            if row['cell_ID'] == cell and row['drug'] == drug:
+            if row['cell_id'] == cell and row['drug'] == drug:
                 path_V, path_I = make_path(row['folder_file'])
                 print (path_V)
                 _ , y_df = igor_exporter(path_V)
@@ -1020,7 +1020,7 @@ def single_drug_aplication_visualisation(feature_df,  color_dict, cell = 'DRD230
     
                     axs.set_xlabel( "Time (s)", fontsize = 15)
                     axs.set_ylabel( "Membrane Potential (mV)", fontsize = 15)
-                    axs.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Aplication" + " (" + str(row['aplication_order']) + ")", fontsize = 25)
+                    axs.set_title(row['cell_id'] + ' '+ row['drug'] +' '+ " Aplication" + " (" + str(row['aplication_order']) + ")", fontsize = 25)
                     pdf.savefig(fig)
                     plt.close("all") 
 
@@ -1091,7 +1091,7 @@ def drug_aplication_visualisation(feature_df,  color_dict):
             try:
                 array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
             except FileNotFoundError: #if no I file exists 
-                print(f"no I file found for {row['cell_ID']}, I setting used was: {row['I_set']}")
+                print(f"no I file found for {row['cell_id']}, I setting used was: {row['I_set']}")
                 array_I = np.zeros(len(df_V)-1)
                 I_color='grey'
                 
@@ -1126,7 +1126,7 @@ def drug_aplication_visualisation(feature_df,  color_dict):
             ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
             ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
             ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
-            ax1.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 16) # , fontsize = 25
+            ax1.set_title(row['cell_id'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 16) # , fontsize = 25
             plt.tight_layout()
             pdf.savefig()
 
@@ -1184,7 +1184,7 @@ def drug_aplication_visualisation_old(feature_df,  color_dict):
             axs.axvspan((int((row['drug_in'])* x_scaler_drug_bar) - x_scaler_drug_bar), (int(row['drug_out'])* x_scaler_drug_bar), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
             axs.set_xlabel( "Time (s)", fontsize = 15)
             axs.set_ylabel( "Membrane Potential (mV)", fontsize = 15)
-            axs.set_title(row['cell_ID'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 25)
+            axs.set_title(row['cell_id'] + ' '+ row['drug'] +' '+ " Application" + " (" + str(row['application_order']) + ")", fontsize = 25)
             pdf.savefig(fig)
             plt.close("all")
     stop = timeit.default_timer()
@@ -1212,7 +1212,7 @@ def plot_all_FI_curves(feature_df,  color_dict):
         
         FI_df = feature_df[feature_df.data_type == 'FP'] #create sub dataframe of firing properties
         
-        for cell_ID_name, cell_df in FI_df.groupby('cell_ID'): # looping for each cell 
+        for cell_id_name, cell_df in FI_df.groupby('cell_id'): # looping for each cell 
             fig, ax = plt.subplots(1,1, figsize = (10,5)) #generate empty figure for each cell to plot all FI curves on
             
             for row_ind, row in cell_df.iterrows(): 
@@ -1230,7 +1230,7 @@ def plot_all_FI_curves(feature_df,  color_dict):
 
             ax.set_xlabel( "Current (pA)", fontsize = 15)
             ax.set_ylabel( "AP frequency", fontsize = 15)
-            ax.set_title( cell_ID_name + " FI curves", fontsize = 20)
+            ax.set_title( cell_id_name + " FI curves", fontsize = 20)
             ax.legend(fontsize = 10)
             pdf.savefig(fig)
             plt.close("all") 
@@ -1262,7 +1262,7 @@ def plot_FI_AP_curves(feature_df):
         
         FI_AP_df = feature_df[feature_df.data_type == 'FP_AP'] #create sub dataframe of firing properties
         
-        for cell_ID_name, cell_df in FI_AP_df.groupby('cell_ID'): # looping for each cell 
+        for cell_id_name, cell_df in FI_AP_df.groupby('cell_id'): # looping for each cell 
             fig, ax = plt.subplots(1,1, figsize = (10,5)) #generate empty figure for each cell to plot all FI curves on
             color = get_color_gradient(color1, color2, len(cell_df['replication_no']))
             
@@ -1280,7 +1280,7 @@ def plot_FI_AP_curves(feature_df):
 
             ax.set_xlabel( "Current (pA)", fontsize = 15)
             ax.set_ylabel( "AP frequency", fontsize = 15)
-            ax.set_title( cell_ID_name + " FI curves", fontsize = 20)
+            ax.set_title( cell_id_name + " FI curves", fontsize = 20)
             ax.legend(fontsize = 10)
             pdf.savefig(fig)
             plt.close("all") 
@@ -1506,13 +1506,13 @@ def _handleCellID(cell_id_drug, cell_df):
 
 def loopCombinations(df):
     og_columns = df.columns.copy() #origional columns #for ordering columns
-    df['mouseline'] = df.cell_ID.str[:3]
+    df['mouseline'] = df.cell_id.str[:3]
     # print("Columns: ", df.columns[-40:])
     # df = pd.read_excel(r'E:\OneDrive - Floating Reality\analysis\feature_df_py.xlsx')
     df = df.apply(_handleFile, axis=1) #Apply a function along an axis (rows = 1) of the DataFrame
     # display(df)
     combinations = [
-                    (["cell_ID", "drug"], _handleCellID), #finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
+                    (["cell_id", "drug"], _handleCellID), #finding all combination in df and applying a function to them #here could average and plot or add to new df for stats
                     #(["cell_type", "drug"], _poltbygroup) #same as df.apply as folder_file is unique for each row
     ]
     # for col_names, handlingFn in combinations:
@@ -1527,7 +1527,7 @@ def loopCombinations(df):
     
     return df_reordered
 #RUN
-feature_df_expanded_raw = loopCombinations(feature_df_ex)
+expanded_df_raw = loopCombinations(feature_df_ex)
 
 # feature_df_ex_tau.to_csv('middle_TCB_data.xls')
 
@@ -1634,10 +1634,10 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
         return df
     
     print(f'analising... {cell_type}')
-    cell_id_list = list(df['cell_ID'].unique())
+    cell_id_list = list(df['cell_id'].unique())
     
     #tobuild dummy df
-    # subset = feature_df_expanded_stats.loc[feature_df_expanded_stats['cell_type']== 'L5a_TLX']
+    # subset = expanded_df_stats.loc[expanded_df_stats['cell_type']== 'L5a_TLX']
     # subset = subset.loc[subset['data_type']== 'FP']
     # df_only_first_app = subset.loc[subset['application_order'] <= 1]
 
@@ -1664,7 +1664,7 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
         order = [x for x in order_dict if x in order_me]
         
         #create df_to_plot with only one value per cell (not per file)
-        df_to_plot = df_only_first_app[['cell_ID','drug',col_name, 'first_drug_AP']]
+        df_to_plot = df_only_first_app[['cell_id','drug',col_name, 'first_drug_AP']]
         df_to_plot = df_to_plot.drop_duplicates()
         
         student_t_df = build_student_t_df(statistical_df, cell_type) #calculate and create student t test df to be used to plot stars
@@ -1694,10 +1694,10 @@ def loopCombinations_stats(df):
     #keepingin mind that the order is vital  as the df is passed through againeach one
     combinations = [
                     (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP),
-                    (["cell_ID", "drug",  "data_type"], _colapse_to_cell_pre_post_FP), #stats_df to be fed to next function mouseline 
+                    (["cell_id", "drug",  "data_type"], _colapse_to_cell_pre_post_FP), #stats_df to be fed to next function mouseline 
                     (["cell_type",  "data_type"], _prep_plotwithstats_FP)
                      
-                    # (["cell_ID", "drug", "data_type"], _pAD_detector_AP)
+                    # (["cell_id", "drug", "data_type"], _pAD_detector_AP)
     ]
 
     for col_names, handlingFn in combinations:
@@ -1712,7 +1712,7 @@ def loopCombinations_stats(df):
 #cell_type is used s an exclusion
 multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
 
-feature_df_expanded_stats = loopCombinations_stats(feature_df_expanded_raw)
+expanded_df_stats = loopCombinations_stats(expanded_df_raw)
 
 
 
@@ -1734,14 +1734,14 @@ def build_first_drug_ap_column(df, cell_id_list):
     '''
     df['first_drug_AP'] = ''  #create a column for  specifying the first drug applied for each cell
     for cell_id in cell_id_list:
-        cell_df = df.loc[df['cell_ID'] == cell_id] #slice df to cell only
+        cell_df = df.loc[df['cell_id'] == cell_id] #slice df to cell only
     
         first_drug_series = cell_df.loc[df['application_order'] == 1, 'drug'] 
         if len(first_drug_series.unique()) > 1: 
             print ('ERROR IN DATA ENTERY: multiple drugs for first aplication on cell ', cell_id)
             
         first_drug_string = first_drug_series.unique()[0] 
-        df.loc[df['cell_ID'] == cell_id, 'first_drug_AP'] = first_drug_string
+        df.loc[df['cell_id'] == cell_id, 'first_drug_AP'] = first_drug_string
     return
 
 def fill_statistical_df_lists(cell_df, col_name, first_drug_string, lists_to_fill):
@@ -1858,13 +1858,13 @@ def build_statistical_df(df_only_first_app, cell_id_list, col_name):  #col_name 
     
     for cell_id in cell_id_list:
         
-        cell_df = df_only_first_app.loc[df_only_first_app['cell_ID'] == cell_id] #slice df to cell only 
+        cell_df = df_only_first_app.loc[df_only_first_app['cell_id'] == cell_id] #slice df to cell only 
         first_drug_string = cell_df['first_drug_AP'].unique()[0]
 
         fill_statistical_df_lists(cell_df, col_name, first_drug_string, lists_to_fill) #col_name = 'max_firing_cell_drug'
 
     #create statistical df for celltype with all raw data for single value type e.g. max firing
-    statistical_df = pd.DataFrame({'cell_ID': cell_id_list,
+    statistical_df = pd.DataFrame({'cell_id': cell_id_list,
                                   'drug': first_drug_,
                                   'PRE': PRE_,
                                   'POST': POST_
