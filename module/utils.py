@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 #takes filename reads excel as pandas.dataframe
 def getRawDF(filename):
-    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
+    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int}, engine='openpyxl')
     df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
     return (df)
 
