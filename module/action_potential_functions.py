@@ -1327,6 +1327,166 @@ def extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True):
     return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
 
 
+def array_peak_cleaner(array, prominence = 10 , threshold = -55 ,  peak_pre_window = 5 ):
+    
+    array_cleaned  = array.copy() 
+    
+    array_cleaned[array_cleaned > np.mean(array_cleaned) + 10] = np.nan
+    array_cleaned = array_cleaned[~np.isnan(array_cleaned) ] 
+     
+    return array_cleaned, None  
+
+
+def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, I_setting = 'short step',  application_order=None, pAD_locs=None):
+    
+    path_V, path_I = make_path(folder_file)
+    array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+    df_V = np.array(df_V)
+    
+    try:
+        array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
+    except FileNotFoundError: #if no I file exists 
+        print(f"no I file found for {cell_ID}, I setting used was: {I_set}")
+        array_I = np.zeros(len(df_V)-1)
+    #scale data
+    
+    x_scaler_drug_bar = df_V.shape[0] * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
+    x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
+    x_I = np.arange(len(array_I))*0.00005 #20kHz igor 
+    
+    num_sweeps  =  int( x_V[-1] / x_I[-1] ) 
+    num_sweeps_ = df_V.shape[-1]
+    
+    print(num_sweeps,num_sweeps_, df_V.shape)
+    
+    drug_in_time  =  int( drug_in* x_scaler_drug_bar  - x_scaler_drug_bar) 
+    drug_out_time =  int(drug_out* x_scaler_drug_bar) 
+    
+    print("printing drug in drug out sweep nums")
+    
+    print(drug_in, drug_out)
+    
+    
+    ######## PARAMETERS #################
+    
+    
+    V_array = np.array(array_V)
+    
+    V_pre =  V_array[0:drug_in_time]
+    V_drug =  V_array[drug_in_time:drug_out_time]
+    V_post =  V_array[drug_out_time:]
+    
+    plt.plot(x_I, np.array(array_I))
+    plt.show()
+    
+    
+    print("Lengths before clamping")
+    
+    print(V_pre.shape,V_drug.shape, V_post.shape )
+    
+    
+    V_pre[ V_pre > np.mean(V_pre) + 3*np.std(V_pre) ]     =  np.nan
+    V_drug[V_drug >= np.mean(V_drug) + 3*np.std(V_drug) ] = np.nan
+    V_post[V_post >= np.mean(V_post) + 3*np.std(V_post) ] = np.nan
+    
+    V_pre = V_pre[~np.isnan(V_pre)]
+    V_drug = V_drug[~np.isnan(V_drug)]
+    V_post = V_post[~np.isnan(V_post)]
+    
+    
+        
+    print("Lengths after clamping")
+    print(V_pre.shape,V_drug.shape, V_post.shape )
+    
+    
+    x_pre = np.arange(len(V_pre))*1e-4
+    x_drug = np.arange(len(V_drug))*1e-4
+    x_post = np.arange(len(V_post))*1e-4
+    
+    
+    I_abs = np.abs(array_I)
+    
+    
+    first_step_current_point = np.where(I_abs == max(I_abs))[0][0]
+    last_step_current_point = np.where(I_abs == max(I_abs))[0][-1]
+    
+    
+    # pre 
+    v_array_pre  = [] 
+    v_steps_pre  = np.zeros([ int(last_step_current_point - first_step_current_point) , drug_in])
+    
+    for pre_sweep_idx in range(drug_in):
+        v_temp = df_V[:,pre_sweep_idx]
+        v_steps_pre[:, pre_sweep_idx] = v_temp[first_step_current_point:last_step_current_point]
+        v_array_pre += v_temp[0:first_step_current_point].tolist()
+        v_array_pre += v_temp[last_step_current_point + 1_0000: ].tolist()        
+        
+    # drug : drug_in to drug_out 
+    
+    v_array_drug  = [] 
+    v_steps_drug  = np.zeros([ int(last_step_current_point - first_step_current_point) , drug_out - drug_in ])
+    
+    for drug_sweep_idx in range(drug_in,drug_out):
+        v_temp = df_V[:,drug_sweep_idx]
+        v_steps_drug[:, drug_sweep_idx - drug_in] = v_temp[first_step_current_point:last_step_current_point]
+        v_array_drug += v_temp[0:first_step_current_point].tolist()
+        v_array_drug += v_temp[last_step_current_point + 1_0000 : ].tolist() 
+        
+        
+    # post : drug_out  till end 
+    
+    v_array_post = [] 
+    v_steps_post = np.zeros([ int(last_step_current_point - first_step_current_point) , df_V.shape[-1] -  drug_out ])
+    
+    for post_sweep_idx in range(drug_out,df_V.shape[-1]):
+        v_temp = df_V[:,drug_sweep_idx]
+        v_steps_post[:, post_sweep_idx - drug_out] = v_temp[first_step_current_point:last_step_current_point]
+        v_array_post += v_temp[0:first_step_current_point].tolist()
+        v_array_post += v_temp[last_step_current_point + 1_0000 : ].tolist() 
+    
+    # clean up spikes: 
+    
+    v_array_drug = np.array(v_array_drug)
+    v_drug_diff  = np.diff(v_array_drug)
+       
+    
+    v_drug_filtered = v_array_drug[np.concatenate(  (   v_drug_diff - np.mean(v_drug_diff)   <= 2*np.std(v_drug_diff)    , [True] ) )]
+    
+    
+    v_drug_cleaned, v_drug_peaks  =  array_peak_cleaner(v_array_drug)
+    
+    fig, axs = plt.subplots(1,1)
+    axs.plot(v_array_pre, label = 'pre')
+    axs.plot(v_array_drug, label  = 'drug', alpha = 0.5)
+    axs.plot(v_drug_cleaned, label  = 'drug clean', alpha = 0.5)
+    
+    
+    plt.legend()
+    plt.show()
+    
+    
+    print(np.mean(v_array_pre), np.mean(v_array_drug), np.mean(v_array_post))
+        
+               
+    
+    fig, axs = plt.subplots(2,1)
+
+    
+    for idx in range(df_V.shape[-1]):
+        axs[0].plot(df_V[:,idx], c=  'grey', alpha = 0.6)
+    axs[0].plot(np.nanmean( df_V  , axis  = 1 ), c = 'k', label = 'Mean')
+    
+    axs[1].plot(np.array(array_I))
+    plt.legend(loc = 'best')
+    plt.show()
+
+    
+    
+    print("depol is : ")
+    print(np.mean(V_drug)   -  np.mean(V_pre) + 2*np.std(V_pre) ) 
+    
+    return x_pre, x_drug, x_post, V_array , df_V, df_I , v_drug_filtered
+
 
 
 
