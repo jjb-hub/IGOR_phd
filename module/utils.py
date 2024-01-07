@@ -1,8 +1,7 @@
 from module.constants import INPUT_DIR, CACHE_DIR, OUTPUT_DIR
 import os, shutil, itertools, json, time, functools, pickle
 import pandas as pd
-import igor.packed
-import igor.binarywave
+import igor2 as igor
 import os
 import matplotlib.pyplot as plt
 

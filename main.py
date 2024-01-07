@@ -26,7 +26,7 @@ from module.getters import (
     checkFeatureDF, 
     getCellDF, 
     getorbuildExpandedDF, 
-    buildExpandedDF_cell_type
+    buildExpandedDF_cell_type, buildExpandedDF
     )
 
 ######## INIT ##########
