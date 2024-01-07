@@ -9,8 +9,7 @@ from module.getters import getorbuildExpandedDF, buildExpandedDF
 import os, shutil, itertools, json, time, functools, pickle
 import pandas as pd
 import glob #new
-import igor.packed
-import igor.binarywave
+import igor2 as igor
 import numpy as np
 import pandas as pd #new
 from pathlib import Path #new
