@@ -14,6 +14,11 @@ def getRawDF(filename):
     df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
     return (df)
 
+def RawDFRow_unpacker(df, row_index):
+    folder_file, cell_id, data_type, drug, conc_uM, replication_no, application_order, drug_in, drug_out, I_set, R_series, R_tip, cell_type, cell_subtype, sex, offset, weight, P_age, Bistable, pAD  = raw_df_application.iloc(0)[0][['folder_file', 'cell_id', 'data_type', 'drug', 'conc_uM', 'replication_no', 'application_order', 'drug_in', 'drug_out', 'I_set', 'R_series', 'R_tip', 'cell_type', 'cell_subtype', 'sex', 'offset', 'weight', 'P_age', 'Bistable', 'pAD']]
+
+    return folder_file, cell_id, data_type, drug, conc_uM, replication_no, application_order, drug_in, drug_out, I_set, R_series, R_tip, cell_type, cell_subtype, sex, offset, weight, P_age, Bistable, pAD  
+
 
 ######### IGOR ##########
 
