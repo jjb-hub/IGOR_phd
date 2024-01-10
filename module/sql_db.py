@@ -2,13 +2,13 @@
 import sqlite3
 import pandas as pd
 
-from module.getters import getRawDF
+from module.getters import getRawDf
 
 
 #will iniate or replace 'folder_file' table in db
 def initiate_ephys_phd_db(filename):
     #get raw df
-    df = getRawDF(filename)
+    df = getRawDf(filename)
 
     #connection to SQLite database
     conn = sqlite3.connect('ephys_phd.db')

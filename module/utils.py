@@ -5,13 +5,10 @@ import igor2 as igor
 import os
 import matplotlib.pyplot as plt
 
-######### IMPORT RAW DATA ##########
 
-#takes filename reads excel as pandas.dataframe
-def getRawDF(filename):
-    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
-    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
-    return (df)
+
+
+
 
 
 ######### IGOR ##########
@@ -65,6 +62,10 @@ if __name__ == "__main__": #inbuilt test that will not be excuted unless run ins
 
 
 ######### CACHE SYSTEM and SAVING ##########
+#figures
+IDENTIFIERS={
+
+}
 
 #Check filesystem is set up for write operations
 def saveColors(filename, color_dict):

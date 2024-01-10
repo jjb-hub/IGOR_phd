@@ -3,7 +3,7 @@
 from module.utils import *
 
 from module.action_potential_functions import  pAD_detection
-from module.getters import getorbuildExpandedDF, buildExpandedDF
+from module.getters import  getExpandedDfIfFilename, updateFPStats
 
 #generic imports
 import os, shutil, itertools, json, time, functools, pickle
@@ -30,94 +30,86 @@ from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict, n_min
 ########## WORKING WITH EXPANDED DF ###########
 
 
+def loopFP_stats(filename_or_df):
 
+    df, filename = getExpandedDfIfFilename(filename_or_df)
+    df_row_order = df['folder_file'].tolist()  # save origional row order
 
-# GENERATE STATS AND PLOT EXPANDED_DF  
-def apply_group_by_funcs(df, groupby_cols, handleFn, color_dict): #creating a list of new values and adding them to the existign df
+    combinations = [(["cell_type", "cell_id", "data_type"], _update_FP_stats),
+                    # (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP), #AP charecteristics from first 2 sweeps with APs
+                    # (["cell_id", "drug",  "data_type"], _colapse_to_cell_pre_post_FP),
+                    # (["cell_type",  "data_type"], _colapse_to_cell_pre_post_tau_sag_FP), 
+                    # (["cell_type",  "data_type"], _plotwithstats_FP), 
+                    # (["cell_type", "drug", "data_type"], _plot_pAD)
+    ]
+    for groupby_cols, handlingFn in combinations:
+        df = apply_group_by_funcs(filename, df, groupby_cols, handlingFn) #note that as each function is run the updated df is fed to the next function
+    df = df.loc[df['folder_file'].isin(df_row_order)]# rearrange the DataFrame to match the original row order
+    return df
+
+def apply_group_by_funcs(filename, df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
     res_dfs_li = [] #list of dfs
     for group_info, group_df in df.groupby(groupby_cols):
-        
-        res_df = handleFn(group_info, group_df, color_dict)
+        res_df = handleFn(filename, group_info, group_df)
         res_dfs_li.append(res_df)
-        
-    new_df = pd.concat(res_dfs_li)
+    new_df = pd.concat(res_dfs_li) # some functions expand expanded_df so all function must return df and only df
     return new_df
 
+def _update_FP_stats(filename, celltype_cellid_datatype, df):
+    '''
+    input: single cell FP expanded df
+    output: updates FP_stats
+    '''
+    cell_type, cell_id, data_type = celltype_cellid_datatype
+    update_rows = []
+    if data_type == 'FP':
+        # normalised tau and sag by v difference / I injected (pA) #TODO
+        # df['tau_rc_v_diff'] = df['tau_rc'].apply(lambda x: [abs(item[1] - item[3]) for item in x])
+        # df['sag_v_diff'] = df['sag'].apply(lambda x: [abs(item[1] - item[3]) for item in x])
 
-def _colapse_to_file_value_FP(celltype_drug_datatype, df, color_dict):
-    #colaps  metrics to a single value for each file/row i.e. lists become a mean 
-    cell_type, drug, data_type = celltype_drug_datatype
-    
-    if data_type == 'AP': 
-        return df
-    elif data_type == "pAD":
-        return df
-    elif data_type in ['FP', 'FP_AP']:
-        df = df.copy()
-        #AP Charecteristics take mean for single file
-        df['mean_voltage_threshold_file'] = df.voltage_threshold.apply(np.mean)  #FIX ME: RuntimeWarning: Mean of empty slice.
-        df['mean_AP_height_file'] = df.AP_height.apply(np.mean)
-        df['mean_AP_slope_file'] = df.AP_slope.apply(np.mean)
-        df['mean_AP_width_file'] = df.AP_width.apply(np.mean)
-        df['mean_AP_latency_file'] = df.AP_latency.apply(np.mean)
-        
+        treatment = ', '.join(df[df['drug'] != 'PRE']['drug'].unique())
+        for drug, pre_post_df in df.groupby('drug'):
+            pre_post = 'PRE' if 'PRE' in pre_post_df['drug'].values else 'POST'
 
-       
+            for measure in ['max_firing', 
+                            'voltage_threshold',
+                            'AP_height',
+                            'AP_slope',
+                            'AP_width',
+                            'AP_latency']:
+
+                mean_value, file_values = fetchMeans(pre_post_df, measure)
+                update_row = {
+                    "cell_type": cell_type,
+                    "cell_id": cell_id,
+                    "measure": measure,
+                    "treatment": treatment,
+                    "pre_post": pre_post,
+                    "mean_value": mean_value,
+                    "file_values": file_values
+                }
+                # Append the dictionary to the list
+                update_rows.append(update_row)
+        updateFPStats(filename, update_rows)
+        print()
     else:
-        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
-    
+        pass
     return df
-    
+
+def fetchMeans(pre_post_df, measure):
+    column=pre_post_df[measure]
+    if all(isinstance(value, list) for value in column): #list comprehansion 
+        file_values = [np.mean(value) for value in column]
+        mean_value = np.mean(file_values)
+    else: #single value comprehension
+        file_values = column.tolist()  
+        mean_value = np.mean(file_values)
+    return mean_value, file_values
 
 
-def _colapse_to_cell_pre_post_FP(cellid_drug_datatype, df, color_dict):
-    #for each cellid_drug_datatype colapses to a  single value 
-    cell_id, drug , data_type = cellid_drug_datatype
-    
-    if data_type == 'AP': 
-        return df
-    elif data_type == 'FP_AP': 
-        return df
-    elif data_type == 'pAD': 
-        return df
-    
-    elif data_type == 'FP':
-        df = df.copy()
-        df['max_firing_cell_drug'] = df['max_firing'].mean() #RuntimeWarning: Mean of empty slice.
-        #AP Charecteristics 
-        df['voltage_threshold_cell_drug'] = df['mean_voltage_threshold_file'].mean()
-        df['AP_height_cell_drug'] = df['mean_AP_height_file'].mean()
-        df['AP_slope_cell_drug'] = df['mean_AP_slope_file'].mean()
-        df['AP_width_cell_drug'] = df['mean_AP_width_file'].mean()
-        df['AP_latency_cell_drug'] = df['mean_AP_latency_file'].mean()
-        
-        #Tau and Sag #FIX ME tau and sag are in list now #FIX ME #TODO
-        #for cell_id take normalised tau and sag by v difference 
-        #chose optimal paring for comparison
-        # df['tau_cell_drug'] = df['tau_rc_file'].mean()
-        # df['sag_cell_drug'] = df['sag_file'].mean()
 
-    else:
-        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
-    return df 
+####### IN THE PROCESS OF BEING REWRITTEN
 
-def _colapse_to_cell_pre_post_tau_sag_FP(celltype_datatype, df, color_dict):
-    cell_type, data_type = celltype_datatype
-    if data_type in ['AP', 'pAD']: 
-        return df
-    elif data_type == 'FP_AP': 
-        return df
-    elif data_type == 'FP': 
-        return df
-         ### FIX ME 
-        #List of Lists    len(list)=1/2     each item = [value, steady_state, I_injected]    if no data 'NaN'
-        # for drug, df_drug in df.groupby('drug'):  #normalised for I injection
-        #     df_drug['sag']
-        # df['tau_cell_drug'] =  /
-        # df['sag_file'] = 
-    else:
-        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
-    return df 
 
 def _plotwithstats_FP(celltype_datatype, df, color_dict):
     cell_type, data_type = celltype_datatype
@@ -177,64 +169,7 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
         raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
     return df 
 
-def _plot_pAD(celltype_drug_datatype, df, color_dict):
-    cell_type, drug , data_type = celltype_drug_datatype
-    if data_type == 'AP': 
-        pAD_df = df[['cell_id','PRE_pAD_AP_locs', 'APP_pAD_AP_locs', 'WASH_pAD_AP_locs', 'PRE_Somatic_AP_locs', 'APP_Somatic_AP_locs', 'WASH_Somatic_AP_locs']]
-        pAD_df = pAD_df.dropna() #removing traces with no APs at all
-        if len(pAD_df['cell_id'].unique()) <= n_minimum:
-            print(f'Insuficient data with APs for {cell_type} with {drug} application ')
-            return df
-        
-        pAD_df_to_plot = pd.melt(pAD_df, id_vars=['cell_id'], var_name='col_name', value_name='AP_locs'  )
-        pAD_df_to_plot[['drug', 'AP']] = pAD_df_to_plot['col_name'].str.split('_', n=1, expand=True).apply(lambda x: x.str.split('_').str[0])
-        pAD_df_to_plot['count'] = pAD_df_to_plot['AP_locs'].apply(len)
-        pAD_df_to_plot['drug'] = pAD_df_to_plot['drug'].str.replace('APP', drug)
-        order = ['PRE', drug , 'WASH']
-        
-        fig, axs = plotSwarmHistogram(cell_type, data=pAD_df_to_plot, order=order, color_dict=color_dict, x='drug', y='count', 
-                                        swarm_hue='AP', bar_hue='AP', x_label='', y_label='number of APs', marker = 'x',  swarm_dodge= True)
-        axs.set_title( f'{cell_type}_pAD_vs_somatic_APs_{drug} (CI 95%)', fontsize = 30) 
-        saveFP_HistogramFig(fig, f'{cell_type}_pAD_vs_somatic_APs_{drug}')
-        plt.close('all')
-        
-    elif data_type == 'FP_AP': 
-        return df
-    elif data_type == 'pAD': 
-        return df
-    elif data_type == 'FP': 
-        return df
-    else:
-        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
-    return df 
 
-
-def loopCombinations_stats(filename_or_df):
-
-#check if df if not then pull entire ExpandedDF (or build)
-    if not isinstance(filename_or_df,  pd.DataFrame):
-        df = getorbuildExpandedDF(filename_or_df, 'expanded_df', buildExpandedDF, from_scratch=False) #load feature df
-    else:
-        df = filename_or_df
-
-    df_row_order = df['folder_file'].tolist()  # save origional row order
-
-    
-    combinations = [
-                    (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP), #AP charecteristics from first 2 sweeps with APs
-                    (["cell_id", "drug",  "data_type"], _colapse_to_cell_pre_post_FP),
-                    (["cell_type",  "data_type"], _colapse_to_cell_pre_post_tau_sag_FP), 
-                    (["cell_type",  "data_type"], _plotwithstats_FP), 
-                    (["cell_type", "drug", "data_type"], _plot_pAD)
-           
-    ]
-
-    for col_names, handlingFn in combinations:
-        df = apply_group_by_funcs(df, col_names, handlingFn, color_dict) #note that as each function is run the updated df is fed to the next function
-
-    df = df.loc[df['folder_file'].isin(df_row_order)]# rearrange the DataFrame to match the original row order
-
-    return df
 
 
 ## dependants of above #old
@@ -357,3 +292,36 @@ def plotSwarmHistogram(name, data=None, order=None, color_dict=None, x='col_name
     return fig, axs
 
 
+
+#### FOR future function
+
+def _plot_pAD(celltype_drug_datatype, df, color_dict):
+    cell_type, drug , data_type = celltype_drug_datatype
+    if data_type == 'AP': 
+        pAD_df = df[['cell_id','PRE_pAD_AP_locs', 'APP_pAD_AP_locs', 'WASH_pAD_AP_locs', 'PRE_Somatic_AP_locs', 'APP_Somatic_AP_locs', 'WASH_Somatic_AP_locs']]
+        pAD_df = pAD_df.dropna() #removing traces with no APs at all
+        if len(pAD_df['cell_id'].unique()) <= n_minimum:
+            print(f'Insuficient data with APs for {cell_type} with {drug} application ')
+            return df
+        
+        pAD_df_to_plot = pd.melt(pAD_df, id_vars=['cell_id'], var_name='col_name', value_name='AP_locs'  )
+        pAD_df_to_plot[['drug', 'AP']] = pAD_df_to_plot['col_name'].str.split('_', n=1, expand=True).apply(lambda x: x.str.split('_').str[0])
+        pAD_df_to_plot['count'] = pAD_df_to_plot['AP_locs'].apply(len)
+        pAD_df_to_plot['drug'] = pAD_df_to_plot['drug'].str.replace('APP', drug)
+        order = ['PRE', drug , 'WASH']
+        
+        fig, axs = plotSwarmHistogram(cell_type, data=pAD_df_to_plot, order=order, color_dict=color_dict, x='drug', y='count', 
+                                        swarm_hue='AP', bar_hue='AP', x_label='', y_label='number of APs', marker = 'x',  swarm_dodge= True)
+        axs.set_title( f'{cell_type}_pAD_vs_somatic_APs_{drug} (CI 95%)', fontsize = 30) 
+        saveFP_HistogramFig(fig, f'{cell_type}_pAD_vs_somatic_APs_{drug}')
+        plt.close('all')
+        
+    elif data_type == 'FP_AP': 
+        return df
+    elif data_type == 'pAD': 
+        return df
+    elif data_type == 'FP': 
+        return df
+    else:
+        raise NotADirectoryError(f"Didn't handle: {data_type}") # data_type can be AP, FP_AP, pAD or FP
+    return df 

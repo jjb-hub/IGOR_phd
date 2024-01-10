@@ -1684,7 +1684,7 @@ def _prep_plotwithstats_FP(celltype_datatype, df, color_dict):
 
 
 
-def loopCombinations_stats(df):
+def loopFP_stats(df):
     global multi_page_pdf
     multi_page_pdf = PdfPages('patch_daddy_output/FP_metrics_.pdf')
     #create a copy of file_folder column to use at end of looping to restore  origional row order !!! NEEDS TO BE DONE
@@ -1712,7 +1712,7 @@ def loopCombinations_stats(df):
 #cell_type is used s an exclusion
 multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
 
-expanded_df_stats = loopCombinations_stats(expanded_df_raw)
+expanded_df_stats = loopFP_stats(expanded_df_raw)
 
 
 

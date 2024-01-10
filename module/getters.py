@@ -1,4 +1,4 @@
-########## GETTERS and BUILDERS of raw data ##########
+
 
 from module.constants import INPUT_DIR
 from module.utils import *
@@ -11,7 +11,6 @@ from module.action_potential_functions import (
     pAD_detection,
     sag_current_analyser 
     )
-from module.metadata import build_cell_type_dict
 
 import pandas as pd
 import numpy as np 
@@ -21,41 +20,140 @@ import traceback
 
 
 
- ########## DICT ORGANISATION ##########
 
-#takes featureDF and outputs a nested dict checking for unique celltype for aingle cell id and prints basic readout 
-def checkFeatureDF(filename, from_scratch=None): #may be redundant dont know if will use or just to check input file
+
+########## GETTERS ##########
+
+
+def getRawDf(filename):
+    return getOrBuildDf(filename, "feature_df", buildRawDf)
+
+def getExpandedDf(filename):
+    return getOrBuildDf(filename, "expanded_df", buildExpandedDF)
+
+def getExpandedSubsetDf(filename, cell_type, from_scratch=None):
+    return getorbuildSubselectExpandedDF(filename, f"{cell_type}_expanded_df", buildExpandedDF, cell_type, from_scratch)
+
+def getFPStats(filename):
+    return getOrBuildDf(filename, "FP_stats", buildFPStatsDf)
+
+
+
+
+def getCellDf(filename, cell_id, data_type = None):
+    df=getRawDf(filename)
+    cell_df = df[df['cell_id']==cell_id]
+    if data_type is not None:
+        cell_df = cell_df[cell_df['data_type']== data_type]
+    return cell_df
+
+
+
+
+
+def getOrBuildDf(filename, df_identifier, builder_cb):
     filename_no_extension = filename.split(".")[0]
-    df = getRawDF(filename)
-    #prints
-    print(f"cell types : {df['cell_type'].unique()}")
-    print(f" drugs applied : {df['drug'].unique()}")
-    print(f"cell subtypes : {df['cell_subtype'].unique()}")
-    print(f"data types : {df['data_type'].unique()}")
+    # Check cache to avoid recalcuating from scratch if alreasy done
+    if isCached(filename_no_extension, df_identifier):
+        return getCache(filename_no_extension, df_identifier)
+    # Build useing callback otherwise and cache result
+    print(f'BUILDING "{df_identifier}"')
+    df = builder_cb(filename)
+    cache(filename_no_extension, df_identifier, df)
+    return df
 
-    identifier = 'cell_type_dict'
+    
+#expands featureDF into expandedDF if specififed for only a single cell_type 
+def getorbuildSubselectExpandedDF(filename, identifier, builder_cb, cell_type, from_scratch):
+    filename_no_extension = filename.split(".")[0]
     from_scratch = from_scratch if from_scratch is not None else input("Recalculate DF even if previous version exists? (y/n)") == 'y'
     if from_scratch or not isCached(filename, identifier):
-        print(f'BUILDING "{identifier}"') 
-        cell_type_dict = build_cell_type_dict(df)
-        subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
-        saveJSON(f"{subcache_dir}/cell_type_dict.json", cell_type_dict)
-        print (f"CELL TYPE DICT {cell_type_dict} SAVED TO {subcache_dir}")
+        print(f'BUILDING "{identifier}"')    
+
+        df_raw = getRawDf(filename)
+        df_cell_type = df_raw[df_raw['cell_type']== cell_type]
+        
+        df = builder_cb(df_cell_type) # buildExpandedDF will be the builder_cb
+        cache(filename_no_extension, identifier, df)
+    else : df = getCache(filename, identifier)
+    return df
+
+def getExpandedDfIfFilename(filename_or_df):
+    '''
+    input: filename or df s
+    output: df
+    '''
+    if not isinstance(filename_or_df,  pd.DataFrame):
+        filename=filename_or_df
+        df = getExpandedDf(filename_or_df)
+        print('fetching full expanded df')
     else:
-        getJSON(f"{subcache_dir}/cell_type_dict.json")
-    return cell_type_dict
+        df = filename_or_df
+        filename= "feature_df_py.xlsx" #HARD CODED
+        print ('using suplied expanded df')
+    return df, filename
+
+
+
+########## SETTERS ##########
+def updateFPStats(filename, rows):
+    '''
+    input: filename , rows - a list of dictionaries corisponding to columns'''
+    FP_stats_df = getFPStats(filename)
+
+    for row in rows:
+        data_row = pd.DataFrame([row])
+        unique_row = maskDf(FP_stats_df, {key: value for key, value in row.items() if key in ["cell_type", "cell_id", "measure", "treatment", "pre_post"]}) 
+        if unique_row.any():
+            FP_stats_df.loc[unique_row, ["mean_value", "file_values"]] = data_row[["mean_value", "file_values"]]
+        else:
+            FP_stats_df = pd.concat([FP_stats_df, data_row])
+    cache(filename, "FP_stats", FP_stats_df)
+    print("FP STATS UPDATED")
+
+        
 
 
 ############ BUILDERS ##########
 
 #row handeler for expandDF
+def buildExpandedDF(filename_or_df): 
+    '''
+    input: filename or df (to allow subsetting)
+    output: expanded df with aditional columns 'mouseline', 
+    '''
+    if not isinstance(filename_or_df, pd.DataFrame):
+        print('fetchig raw df')
+        df = getRawDf(filename_or_df)
+    else:
+        df=filename_or_df
+        print ('expanding on provided df')
+
+    og_columns = df.columns.copy() #origional column order
+    df['mouseline'] = df.cell_id.str[:3]
+
+    df = df.apply(lambda row: _handleFile(row), axis=1) #chat gpt but dont get why ?
+
+    #ORDERING DF internal: like this new columns added will appear at the end of the df in the order they were created in _handelfile()
+    all_cur_columns = df.columns.copy()
+    new_colums_set = set(all_cur_columns ) - set(og_columns) # Subtract mathematical sets of all cols - old columns to get a set of the new columns
+    new_colums_li = list(new_colums_set)
+    reorder_cols_li =  list(og_columns) + new_colums_li # ['mouseline'] + ordering
+    df_reordered = df[reorder_cols_li]    
+
+    return df_reordered
+
 def _handleFile(row):
+    '''
+    input: single row from feature_df corrisponding to a single file
+    output: updated row with aditonal columns
+    '''
     row = row.copy() #conserve order
     error_msg = None
     error_traceback = None
 
     def log_error(msg, tb):
-        nonlocal error_msg #, error_traceback #GPT recoment test after DJ issue #28 merge
+        nonlocal error_msg 
         error_msg=msg
         error_traceback = tb
 
@@ -72,15 +170,15 @@ def _handleFile(row):
     try:
         # FP data handeling
         if row.data_type in ["FP", "FP_AP"]: 
-            # pass 
+            
             print("FP type file")
             print(row.folder_file)
 
-            #data files to be fed into extraction funcs feature_df_extended
+            #extraction funcs 
             row["max_firing"] = calculate_max_firing(V_array)
             
             x, y, v_rest = extract_FI_x_y (path_I, path_V) # x = current injected, y = number of APs, v_rest = the steady state voltage (no I injected)
-            FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True) #FIX ME: handel pAD APs better slope fit
+            FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True) #TODO handel pAD APs better slope fit
             row["rheobased_threshold"] = rheobase_threshold
             row["FI_slope"] = FI_slope
 
@@ -91,7 +189,7 @@ def _handleFile(row):
             row["AP_slope"] = peak_slope_all 
             row["AP_latency"] = peak_latencies_all
 
-            #to DJ: to remove the named tuples I just mad them lists of lists i.e. [[value, steady_state, I_injected], [value, steady_state, I_injected] ]
+            # lists of lists i.e. [[value, steady_state_I, I_injected, RMP], [...] ]
             row["tau_rc"] = tau_analyser(V_array, I_array, x, plotting_viz= False, analysis_mode = 'max')
             row["sag"]    = sag_current_analyser(V_array, I_array, x)
 
@@ -119,16 +217,6 @@ def _handleFile(row):
                 row['PRE_pAD_AP_locs'] = pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
                 row['APP_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
                 row['WASH_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
-
-            #make points list for PRE , APP and WASH voltages #THIS IS TOO BIG EXTRACT RELEVANT DATA i.e. SD and add 
-            #saving full points list is too long! #to float 16 instead of 32 
-            #FIX ME 
-            # varray[ rows to take   : cols to take ]
-            # varray[:, :row.drug_in] #take all rows up to drug_in
-
-            # row['PRE_V'] = V_array[:, :row.drug_in] 
-            # row['APP_V'] = V_array[:, row.drug_in:row.drug_out]
-            # row['WASH_V'] = V_array[:, row.drug_out:]
             pass
         
         elif row.data_type == "pAD":
@@ -137,8 +225,7 @@ def _handleFile(row):
         else:
             raise NotADirectoryError(f"Didn't handle data type: {row.data_type}") # data_type can be AP, FP_AP or FP 
     
-
-
+    # docuument errors
     except Exception as e:
         error_type = type(e).__name__
         error_tb = traceback.format_exc()
@@ -152,8 +239,6 @@ def _handleFile(row):
 
         log_error(f'{error_type}: {str(e)}', relevant_tb)
         error_traceback = relevant_tb  # Capture traceback within the except block #check redundancey after DJ #28 merge with gpt addition in log_error() def
-
-        
     if error_msg:
         row['error'] = error_msg
         row['traceback'] = error_traceback
@@ -165,59 +250,36 @@ def _handleFile(row):
     return row
 
 
-def buildExpandedDF(filename_or_df): #if passed in get or build will be filename therefor cant subset to try #modularising now
-    if not isinstance(filename_or_df, pd.DataFrame):
-        print('fetchig raw df')
-        df = getRawDF(filename_or_df)
-    else:
-        df=filename_or_df
+def buildRawDf(filename):
+    file_name, file_type = filename.split(".")
+    if file_type.lower() != "xlsx":  # Update the file type check for Excel files
+        raise Exception(f'METHOD TO DEAL WITH FILE TYPE "{file_type}" ABSENT')
+    if not os.path.isfile(f"{INPUT_DIR}/{filename}"):
+        raise Exception(f'FILE {filename} IS ABSENT IN "input/" DIRECTORY')
 
-    og_columns = df.columns.copy() #origional columns #for ordering columns
-    df['mouseline'] = df.cell_id.str[:3]
-    # df = df.apply(_handleFile, axis=1) #Apply a function along an axis (rows = 1) of the DataFrame
-    df = df.apply(lambda row: _handleFile(row), axis=1) #chat gpt but dont get why ?
-
-    #ORDERING DF internal: like this new columns added will appear at the end of the df in the order they were created in _handelfile()
-    all_cur_columns = df.columns.copy()
-    new_colums_set = set(all_cur_columns ) - set(og_columns) # Subtract mathematical sets of all cols - old columns to get a set of the new columns
-    new_colums_li = list(new_colums_set)
-    reorder_cols_li =  list(og_columns) + new_colums_li # ['mouseline'] + ordering
-    df_reordered = df[reorder_cols_li]    
-    return df_reordered
+    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
+    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
+    return (df)
 
 
-def buildExpandedDF_cell_type(filename, cell_type):
-    df = getRawDF(filename)
-    cell_type_df = subselectDf(df, {'cell_type':[cell_type]})
-    cell_type_df_expanded = buildExpandedDF(cell_type_df)
-    return cell_type_df_expanded
+def buildFPStatsDf(filename):
+    return pd.DataFrame(
+        columns=[
+            "cell_type",
+            "cell_id",
+            "measure",
+            "treatment",
+            "pre_post",
+            "mean_value",
+            "file_values",
+        ]
+    )
 
 
-########## GETTERS ##########
+# def buildExpandedDF_cell_type(filename, cell_type):
+#     df = getRawDf(filename)
+#     cell_type_df = subselectDf(df, {'cell_type':[cell_type]})
+#     cell_type_df_expanded = buildExpandedDF(cell_type_df)
+#     return cell_type_df_expanded
 
-#takes filename or df,  the cell id and optional data type returns subset of df
-def getCellDF(filename_or_df, cell_id, data_type = None):
-    if not isinstance(filename_or_df, pd.DataFrame):
-        df=getRawDF(filename_or_df)
-    else:
-        df=filename_or_df
-
-    cell_df = df[df['cell_id']==cell_id]
-    if data_type is not None:
-        cell_df = cell_df[cell_df['data_type']== data_type]
-    return cell_df
-
-#expands featureDF into expandedDF if specififed for only a single cell_type 
-def getorbuildExpandedDF(filename, identifier, builder_cb, cell_type=None, from_scratch=None):
-    filename_no_extension = filename.split(".")[0]
-    from_scratch = from_scratch if from_scratch is not None else input("Recalculate DF even if previous version exists? (y/n)") == 'y'
-    if from_scratch or not isCached(filename, identifier):
-        print(f'BUILDING "{identifier}"')    
-        if cell_type: 
-            df = builder_cb(filename, cell_type) #buildExpandedDF_cell_type will be the builder_cb
-        else:
-            df = builder_cb(filename) # buildExpandedDF will be the builder_cb
-        cache(filename_no_extension, identifier, df)
-    else : df = getCache(filename, identifier)
-    return df
 

@@ -1,8 +1,7 @@
 ######## ONLY IMPORT THE USER ACCESSIBLE FUNCTIONS HERE ##########
 
 from module.stats import (
-    buildExpandedDF, 
-    loopCombinations_stats
+    loopFP_stats
 )
 
 from module.plotters import (
@@ -18,16 +17,18 @@ from module.plotters import (
 from module.utils import (
     subselectDf,
     initiateFileSystem, 
-    saveColors,
-    getRawDF  
+    saveColors,  
     )
 
 from module.getters import (
-    checkFeatureDF, 
-    getCellDF, 
-    getorbuildExpandedDF, 
-    buildExpandedDF_cell_type, buildExpandedDF
+    getRawDf, 
+    getExpandedSubsetDf, 
+    getExpandedDf, 
+    getCellDf, 
+    buildExpandedDF
     )
+
+# from module.metadata import checkFeatureDF #fuck this fix if u need or delete 
 
 ######## INIT ##########
 # Start by checking filesystem has all the folders necessary for read/write operations (cache) or create them otherwise

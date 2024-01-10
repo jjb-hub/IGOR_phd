@@ -1,7 +1,7 @@
 # module
-from module.stats import buildExpandedDF, loopCombinations_stats
+from module.stats import loopFP_stats
 from module.utils import *
-from module.getters import getorbuildExpandedDF, getCellDF
+from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf
 from module.action_potential_functions import pAD_detection
 from module.constants import color_dict
 #external
@@ -11,7 +11,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from matplotlib.lines import Line2D 
 import numpy as np
-
+from IPython.display import display
 import timeit
 
 
@@ -19,7 +19,7 @@ import timeit
 
 #  plots any waveform based off fold_file
 def quick_plot_file(filename, folder_file):
-    df=getRawDF(filename)
+    df=getRawDf(filename)
     path_V, path_I = make_path(folder_file)
     listV, dfV = igor_exporter(path_V)
     V_array = np.array(dfV)
@@ -29,9 +29,7 @@ def quick_plot_file(filename, folder_file):
     except:
         print('no I file found', path_I)
 
-    #incase you want to output the data_type for instance
-    row = df[df['folder_file']==folder_file]
-    print (row)
+    display(df[df['folder_file']==folder_file]) # show file info 
 
     quick_line_plot(listV, f'Voltage trace for {folder_file}')
     quick_line_plot(listI, f'Current (I) trace for {folder_file}')
@@ -55,7 +53,7 @@ def quick_line_plot(plotlist, plottitle):
 # #right now need expanded df to make ap figuures not ideal
 
 def loopbuildAplicationFigs(filename):
-    df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
+    df = getExpandedDf(filename)
     color_dict = getColors(filename)
     application_df = df[df.data_type == 'AP'] 
     for row_ind, row in application_df.iterrows():  #row is a series that can be called row['colname']
@@ -79,8 +77,8 @@ def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
     # color_dict = getColors(filename) 
 
     if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-        expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-        cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+        expanded_df = getExpandedDf(filename)
+        cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
     else:
         cell_df = cell_id_or_cell_df
     cell_id = cell_df['cell_id'].iloc[0]
@@ -107,10 +105,12 @@ def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
+
+
         cell_id = cell_df['cell_id'].iloc[0]
 
         from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
@@ -130,8 +130,8 @@ def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
         
 def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -154,8 +154,8 @@ def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -177,8 +177,8 @@ def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
