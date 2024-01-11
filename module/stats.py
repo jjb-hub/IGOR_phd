@@ -61,6 +61,7 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
     output: updates FP_stats
     '''
     cell_type, cell_id, data_type = celltype_cellid_datatype
+    df=df[df['application_order'] <= 1] #remove second aplication data 
     update_rows = []
     if data_type == 'FP':
         # normalised tau and sag by v difference / I injected (pA) #TODO
@@ -127,12 +128,12 @@ def _plotwithstats_FP(celltype_datatype, df, color_dict):
         
         df_only_first_app = df.loc[df['application_order'] <= 1] #only include first drug application data 
             
-        plot_list = [['max_firing_cell_drug', 'Firing_(Hz)'], 
-                    ['voltage_threshold_cell_drug','Voltage_Threshold_(mV)'], 
-                    ['AP_height_cell_drug', ' AP_Height_(mV)'], 
-                    ['AP_slope_cell_drug', 'AP_slope_(V_s^-1)'],
-                    ['AP_width_cell_drug', 'AP_width_(s) '],
-                    ['AP_latency_cell_drug', 'AP_latency_(ms)']
+        plot_list = [['max_firing', 'Firing_(Hz)'], 
+                    ['voltage_threshold','Voltage_Threshold_(mV)'], 
+                    ['AP_height', ' AP_Height_(mV)'], 
+                    ['AP_slope', 'AP_slope_(V_s^-1)'],
+                    ['AP_width', 'AP_width_(s) '],
+                    ['AP_latency', 'AP_latency_(ms)']
                     ] 
         
                     #  ['tau_cell_drug', 'Tau_RC_(ms)'],

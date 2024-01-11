@@ -75,7 +75,6 @@ def loopbuildAplicationFigs(filename):
 
 def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
     # color_dict = getColors(filename) 
-
     if not isinstance(cell_id_or_cell_df, pd.DataFrame):
         expanded_df = getExpandedDf(filename)
         cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')

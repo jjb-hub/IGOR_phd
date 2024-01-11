@@ -1,5 +1,4 @@
-######### HERE WE DECLARE THE CONSTANTS USED BY OTHER FILES ############
-# Constant are meant to be constants, the should not changed, that's what variables or user are for
+
 
 import os
 
@@ -9,19 +8,30 @@ INPUT_DIR = f"{ROOT}/input"
 OUTPUT_DIR = f"{ROOT}/output"
 CACHE_DIR = f"{INPUT_DIR}/cache"
 
-color_dict = {"pAD":"orange",
-              "Somatic":"blue",
-              "WASH":"lightsteelblue", 
-              "PRE":"black", 
+color_dict = { #drugs
               "CONTROL": 'grey', 
               "TCB2":'green', 
               "DMT":"teal", 
               "PSIL":"orange", 
               "LSD":"purple", 
               "MDL":'blue', 
+                #AP figures
+              "pAD":"orange",
+              "Somatic":"blue",
+                #APP figure
+              "PRE":"black",
+              "WASH":"lightsteelblue", 
               'I_display':'cornflowerblue'} 
 
-#old comment bellow moved here from mettabuiold funcs now stats 
-#FIX ME build these in with simple get or guild functions outside the meta loop also interrate with meta loop
+unit_dict = {'max_firing': 'Firing_(Hz)', 
+            'voltage_threshold':'Voltage_Threshold_(mV)', 
+            'AP_height': ' AP_Height_(mV)', 
+            'AP_slope': 'AP_slope_(V_s^-1)',
+            'AP_width': 'AP_width_(s) ',
+            'AP_latency': 'AP_latency_(ms)',
+            'tau_rc':'ms',
+            'sag':'%',
+            }
+
 n_minimum = 3 
 p_value_threshold=0.05

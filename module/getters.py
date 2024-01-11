@@ -86,7 +86,6 @@ def getExpandedDfIfFilename(filename_or_df):
     if not isinstance(filename_or_df,  pd.DataFrame):
         filename=filename_or_df
         df = getExpandedDf(filename_or_df)
-        print('fetching full expanded df')
     else:
         df = filename_or_df
         filename= "feature_df_py.xlsx" #HARD CODED
@@ -98,16 +97,17 @@ def getExpandedDfIfFilename(filename_or_df):
 ########## SETTERS ##########
 def updateFPStats(filename, rows):
     '''
-    input: filename , rows - a list of dictionaries corisponding to columns'''
+    input: filename , rows - a list of dictionaries corresponding to columns
+    '''
     FP_stats_df = getFPStats(filename)
-
     for row in rows:
         data_row = pd.DataFrame([row])
         unique_row = maskDf(FP_stats_df, {key: value for key, value in row.items() if key in ["cell_type", "cell_id", "measure", "treatment", "pre_post"]}) 
         if unique_row.any():
             FP_stats_df.loc[unique_row, ["mean_value", "file_values"]] = data_row[["mean_value", "file_values"]]
         else:
-            FP_stats_df = pd.concat([FP_stats_df, data_row])
+            FP_stats_df = pd.concat([FP_stats_df, data_row], ignore_index=True)  
+
     cache(filename, "FP_stats", FP_stats_df)
     print("FP STATS UPDATED")
 
