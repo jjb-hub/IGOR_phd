@@ -1,5 +1,5 @@
 # module
-from module.stats import loopFP_stats, add_statistical_annotation
+from module.stats import loop_stats, add_statistical_annotation
 from module.utils import *
 from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf, getFPStats
 from module.action_potential_functions import pAD_detection
