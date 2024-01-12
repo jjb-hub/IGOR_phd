@@ -3,7 +3,7 @@
 from module.utils import *
 
 from module.action_potential_functions import  pAD_detection
-from module.getters import  getExpandedDfIfFilename, updateFPStats
+from module.getters import  getExpandedDfIfFilename, updateFPStats, updateAPPStats
 
 #generic imports
 import os, shutil, itertools, json, time, functools, pickle
@@ -31,16 +31,15 @@ from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict, n_min
 ########## WORKING WITH EXPANDED DF ###########
 
 
-def loopFP_stats(filename_or_df):
+def loop_stats(filename_or_df):
 
     df, filename = getExpandedDfIfFilename(filename_or_df)
     df_row_order = df['folder_file'].tolist()  # save origional row order
 
-    combinations = [(["cell_type", "cell_id", "data_type"], _update_FP_stats),
-                    # (["cell_type", "drug", "data_type"], _colapse_to_file_value_FP), #AP charecteristics from first 2 sweeps with APs
-                    # (["cell_id", "drug",  "data_type"], _colapse_to_cell_pre_post_FP),
-                    # (["cell_type",  "data_type"], _colapse_to_cell_pre_post_tau_sag_FP), 
-                    # (["cell_type",  "data_type"], _plotwithstats_FP), 
+    combinations = [
+                    (["cell_type", "cell_id", "data_type"], _update_FP_stats),
+                    (["cell_type", "data_type", "drug"], _update_APP_stats), 
+               
                     # (["cell_type", "drug", "data_type"], _plot_pAD)
     ]
     for groupby_cols, handlingFn in combinations:
@@ -56,10 +55,49 @@ def apply_group_by_funcs(filename, df, groupby_cols, handleFn): #creating a list
     new_df = pd.concat(res_dfs_li) # some functions expand expanded_df so all function must return df and only df
     return new_df
 
+def _update_APP_stats(filename, celltype_datatype_drug, df):
+    '''
+
+    '''
+    cell_type, data_type, drug = celltype_datatype_drug
+    df=df[df['application_order'] <= 1] #remove second aplication data 
+    update_rows=[]
+    if data_type == 'AP':
+        #counting APs
+        columns_to_count =  ['WASH_Somatic_AP_locs', 'WASH_pAD_AP_locs',
+                            'APP_Somatic_AP_locs', 'APP_pAD_AP_locs', 
+                            'PRE_Somatic_AP_locs', 'PRE_pAD_AP_locs']
+        update_rows=[]
+        for index, row in df.iterrows():
+            cell_id = row['cell_id'] 
+            for col_name in columns_to_count:
+                pre_app_wash = col_name.split('_')[0]
+                AP_type=col_name.split('_')[1]
+                value_len = len(row[col_name]) if isinstance(row[col_name], list) else 0
+                update_row = {
+                            "cell_type": cell_type,
+                            "cell_id": cell_id,
+                            "measure": 'AP_count',
+                            "treatment": drug,
+                            "pre_app_wash": pre_app_wash,
+                            "value": value_len,
+                            "sem": AP_type
+                        }
+                update_rows.append(update_row)
+        updateAPPStats(filename, update_rows)
+
+        #input R
+
+        #RMP
+
+    else:
+        pass
+    return df
+
 def _update_FP_stats(filename, celltype_cellid_datatype, df):
     '''
     input: single cell FP expanded df
-    output: updates FP_stats
+    output: updates FP_stats with a mean pre and post for each cell_id and measure per treatment_group (cell_type/drug)
     '''
     cell_type, cell_id, data_type = celltype_cellid_datatype
     df=df[df['application_order'] <= 1] #remove second aplication data 
@@ -92,7 +130,7 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
                 }
                 # Append the dictionary to the list
                 update_rows.append(update_row)
-                print (update_row)
+
         updateFPStats(filename, update_rows)
     else:
         pass

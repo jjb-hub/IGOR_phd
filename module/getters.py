@@ -37,8 +37,8 @@ def getExpandedSubsetDf(filename, cell_type, from_scratch=None):
 def getFPStats(filename):
     return getOrBuildDf(filename, "FP_stats", buildFPStatsDf)
 
-def getOrBuildDataTracking(filename):
-    return 
+def getAPPStats(filename):
+    return getOrBuildDf(filename, "APP_stats", buildAPPStatsDf)
 
 
 def getCellDf(filename_or_df, cell_id, data_type = None):
@@ -122,6 +122,27 @@ def updateFPStats(filename, rows):
     FP_stats_df.drop('unique_id', axis=1, inplace=True)
 
     cache(filename, "FP_stats", FP_stats_df)
+
+def updateAPPStats(filename, rows):
+    APP_stats_df = getAPPStats(filename)
+    
+    # Create a unique identifier 
+    APP_stats_df['unique_id'] = APP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", "pre_app_wash"]]), axis=1)
+    
+    for row in rows:
+        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", "pre_app_wash"]])
+        data_row = pd.DataFrame([row])
+        data_row['unique_id'] = unique_id
+
+        if unique_id in APP_stats_df['unique_id'].values: #update row
+            match_index = APP_stats_df[APP_stats_df['unique_id'] == unique_id].index[0]
+            APP_stats_df.at[match_index, 'value'] = data_row.at[0, 'value']
+            APP_stats_df.at[match_index, 'sem'] = data_row.at[0, 'sem']
+        else: #add row
+            APP_stats_df = pd.concat([APP_stats_df, data_row], ignore_index=True)
+
+    APP_stats_df.drop('unique_id', axis=1, inplace=True)# Drop unique identifier 
+    cache(filename, "APP_stats", APP_stats_df)
 
 
 ############ BUILDERS ##########
@@ -209,6 +230,8 @@ def _handleFile(row):
             print("AP type file")
             print(row.folder_file)        
             
+
+        
             # pAD classification
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
             print('pAD detection complete .... ')
@@ -220,7 +243,7 @@ def _handleFile(row):
                 row["pAD_count"] =  pAD_df["pAD_count"][0]     #  need to make count not series / ERROR HERE  
                 row["AP_locs"]   =  pAD_df["AP_loc"].ravel()    
 
-                #unsure weather to just do count but can use len()
+                #lists of positions of action potential 
                 row['PRE_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
                 row['APP_Somatic_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
                 row['WASH_Somatic_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
@@ -286,10 +309,16 @@ def buildFPStatsDf(filename):
     )
 
 
-# def buildExpandedDF_cell_type(filename, cell_type):
-#     df = getRawDf(filename)
-#     cell_type_df = subselectDf(df, {'cell_type':[cell_type]})
-#     cell_type_df_expanded = buildExpandedDF(cell_type_df)
-#     return cell_type_df_expanded
-
+def buildAPPStatsDf(filename):
+    return pd.DataFrame(
+        columns=[
+            "cell_type",
+            "cell_id",
+            "measure",
+            "treatment",
+            "pre_app_wash",
+            "value",
+            "sem",
+        ]
+    )
 

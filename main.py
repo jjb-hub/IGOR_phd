@@ -1,7 +1,7 @@
 ######## ONLY IMPORT THE USER ACCESSIBLE FUNCTIONS HERE ##########
 
 from module.stats import (
-    loopFP_stats
+    loop_stats
 )
 
 from module.plotters import (
