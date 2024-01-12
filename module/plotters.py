@@ -1,9 +1,9 @@
 # module
-from module.stats import loopFP_stats
+from module.stats import loopFP_stats, add_statistical_annotation
 from module.utils import *
-from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf
+from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf, getFPStats
 from module.action_potential_functions import pAD_detection
-from module.constants import color_dict
+from module.constants import color_dict, unit_dict, n_minimum
 #external
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from matplotlib.lines import Line2D 
 import numpy as np
 from IPython.display import display
-import timeit
+import seaborn as sns
 
 
 ########## BASE PLOTTERS ##########
@@ -41,7 +41,93 @@ def quick_line_plot(plotlist, plottitle):
 
 
 
-    
+
+
+def build_FP_figs(filename):
+    '''
+    Fetches FP_stats df for filename - plots with paired student t PRE vs POST for each cell_type and FP measure (i.e. max_firing)
+    input: filename
+    output: 
+    '''
+    df=getFPStats(filename)
+    insufficient_data_tracking=getOrBuildDataTracking(filename)
+
+    for (cell_type, measure), subset in df.groupby(['cell_type', 'measure']):
+        print (f"plotting {measure} for {cell_type}")
+
+        #track groups with n < n_minimum 
+        # insufficient_data_tracking = {}
+        
+        #impliment n_minimum
+        treatment_counts = subset.groupby('treatment')['cell_id'].nunique() #n per treatment 
+        insufficient_treatments = treatment_counts[treatment_counts < n_minimum].index.tolist()
+
+        if insufficient_treatments:
+            # Update the tracking dictionary
+            if cell_type not in insufficient_data_tracking:
+                insufficient_data_tracking[cell_type] = {}
+
+            for treatment in insufficient_treatments:
+                count = int(treatment_counts[treatment])
+                if treatment not in insufficient_data_tracking[cell_type]:
+                    insufficient_data_tracking[cell_type][treatment] = {}
+                
+                insufficient_data_tracking[cell_type][treatment]['FP_n'] = count
+
+
+            print(f"Insufficient data for {cell_type} - Treatments: {', '.join(insufficient_treatments)} (n < {n_minimum})")
+            subset = subset[~subset['treatment'].isin(insufficient_treatments)] #remove data 
+            
+            if len(subset['treatment'].unique()) < 2: #  remaining treatments for plotting
+                print(f"Not enough remaining treatments for {cell_type} - {measure}")
+                continue  
+
+        saveDataTracking(filename, insufficient_data_tracking)
+        order = [t for t in color_dict.keys() if t in subset['treatment'].unique()]
+
+        
+        Fig, ax = plt.subplots(figsize=(20, 10))
+        sns.barplot(
+            x='treatment',
+            y='mean_value',
+            hue='pre_post',
+            hue_order=['PRE', 'POST'],
+            data=subset,
+            errorbar=('ci', 68),
+            palette='Set2',
+            edgecolor="k",
+            order=order,
+            ax=ax,
+            )
+        sns.swarmplot(
+            x='treatment',
+            y='mean_value',
+            hue='pre_post',
+            hue_order=['PRE', 'POST'],
+            data=subset,
+            palette='Set2',
+            order=order,
+            edgecolor="k",
+            linewidth=1,
+            linestyle="-",
+            dodge=True,
+            ax=ax, 
+            legend=False,
+        )
+
+        # Add significance annotations for paired t-test
+        add_statistical_annotation(ax, subset, x='treatment', y='mean_value', group='pre_post', test='paired_ttest', p_threshold=0.05)
+
+        # Customize plot labels and titles using ax.set_ methods
+        ax.set_xlabel('Treatment', fontsize=14)  # Adjust font size as needed
+        ax.set_ylabel(unit_dict[measure], fontsize=14)  # Adjust font size as needed
+        ax.set_title(f'{cell_type} - {measure}', fontsize=16)  # Adjust font size as needed
+
+        # Optionally, adjust the font size of the tick labels
+        ax.tick_params(axis='x', labelsize=12)  # Adjust font size for x-axis tick labels
+        ax.tick_params(axis='y', labelsize=12)  # Adjust font size for y-axis tick labels
+        saveFP_HistogramFig(Fig, f'{cell_type}_{measure}')
+      
 
 
 

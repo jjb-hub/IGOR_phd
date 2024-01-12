@@ -37,7 +37,8 @@ def getExpandedSubsetDf(filename, cell_type, from_scratch=None):
 def getFPStats(filename):
     return getOrBuildDf(filename, "FP_stats", buildFPStatsDf)
 
-
+def getOrBuildDataTracking(filename):
+    return 
 
 
 def getCellDf(filename_or_df, cell_id, data_type = None):
@@ -95,23 +96,32 @@ def getExpandedDfIfFilename(filename_or_df):
 
 
 ########## SETTERS ##########
+
 def updateFPStats(filename, rows):
-    '''
-    input: filename , rows - a list of dictionaries corresponding to columns
-    '''
     FP_stats_df = getFPStats(filename)
+    
+    # Create a unique identifier in the existing DataFrame
+    FP_stats_df['unique_id'] = FP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", "pre_post"]]), axis=1)
+    
     for row in rows:
+        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", "pre_post"]])
         data_row = pd.DataFrame([row])
-        unique_row = maskDf(FP_stats_df, {key: value for key, value in row.items() if key in ["cell_type", "cell_id", "measure", "treatment", "pre_post"]}) 
-        if unique_row.any():
-            FP_stats_df.loc[unique_row, ["mean_value", "file_values"]] = data_row[["mean_value", "file_values"]]
+        data_row['unique_id'] = unique_id
+
+        # Check if this unique_id already exists
+        if unique_id in FP_stats_df['unique_id'].values:
+            # Update the existing row
+            match_index = FP_stats_df[FP_stats_df['unique_id'] == unique_id].index[0]
+            FP_stats_df.at[match_index, 'mean_value'] = data_row.at[0, 'mean_value']
+            FP_stats_df.at[match_index, 'file_values'] = data_row.at[0, 'file_values']
         else:
-            FP_stats_df = pd.concat([FP_stats_df, data_row], ignore_index=True)  
+            # Append the new row
+            FP_stats_df = pd.concat([FP_stats_df, data_row], ignore_index=True)
+
+    # Drop the unique identifier column
+    FP_stats_df.drop('unique_id', axis=1, inplace=True)
 
     cache(filename, "FP_stats", FP_stats_df)
-    print("FP STATS UPDATED")
-
-        
 
 
 ############ BUILDERS ##########
