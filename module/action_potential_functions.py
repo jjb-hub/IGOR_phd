@@ -1328,17 +1328,36 @@ def extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True):
 
 
 def array_peak_cleaner(array, prominence = 10 , threshold = -55 ,  peak_pre_window = 5 ):
+
+    '''
+    Cleans a voltage trace by removing spikes 
+    Input: array: voltage  np.array for the voltage trace that needs to be cleaned
+    Returns: array_cleaned: voltage np.array with peaks removed 
+    '''
     
     array_cleaned  = array.copy() 
     
-    array_cleaned[array_cleaned > np.mean(array_cleaned) + 10] = np.nan
+    array_cleaned[array > np.mean(array) + 3*np.std(array)] = np.nan
     array_cleaned = array_cleaned[~np.isnan(array_cleaned) ] 
      
-    return array_cleaned, None  
+    return array_cleaned  
 
 
 def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, I_setting = 'short step',  application_order=None, pAD_locs=None):
     
+    '''
+    
+    Calculates the membrane polarisation of a cell in response to a drug application, 
+    compares the input resistance during PRE, DRUG, WASHOUT
+
+    
+    Input: folder_file, cell_ID,  drug,  application_order, drug_in, drug_out, I_set,   pAD_locs   
+
+
+    Returns: v_depol, input_resistance_pre,  input_resistance_drug, input_resistance_washout 
+
+    '''
+
     path_V, path_I = make_path(folder_file)
     array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
     df_V = np.array(df_V)
@@ -1375,6 +1394,9 @@ def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=N
     V_pre =  V_array[0:drug_in_time]
     V_drug =  V_array[drug_in_time:drug_out_time]
     V_post =  V_array[drug_out_time:]
+
+
+    
     
     plt.plot(x_I, np.array(array_I))
     plt.show()
@@ -1383,6 +1405,8 @@ def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=N
     print("Lengths before clamping")
     
     print(V_pre.shape,V_drug.shape, V_post.shape )
+    print('Drug in, Drug out, Washout Times')
+    print(drug_in_time, drug_out_time - drug_in_time)
     
     
     V_pre[ V_pre > np.mean(V_pre) + 3*np.std(V_pre) ]     =  np.nan
@@ -1395,8 +1419,8 @@ def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=N
     
     
         
-    print("Lengths after clamping")
-    print(V_pre.shape,V_drug.shape, V_post.shape )
+    #print("Lengths after clamping")
+    #print(V_pre.shape,V_drug.shape, V_post.shape )
     
     
     x_pre = np.arange(len(V_pre))*1e-4
@@ -1450,10 +1474,14 @@ def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=N
     v_drug_diff  = np.diff(v_array_drug)
        
     
-    v_drug_filtered = v_array_drug[np.concatenate(  (   v_drug_diff - np.mean(v_drug_diff)   <= 2*np.std(v_drug_diff)    , [True] ) )]
+    #v_drug_filtered = v_array_drug[np.concatenate(  (   v_drug_diff - np.mean(v_drug_diff)   <= 2*np.std(v_drug_diff)    , [True] ) )]
     
     
-    v_drug_cleaned, v_drug_peaks  =  array_peak_cleaner(v_array_drug)
+    print("debugging here")
+    print(v_array_drug.shape)
+
+
+    v_drug_cleaned =  array_peak_cleaner(v_array_drug)
     
     fig, axs = plt.subplots(1,1)
     axs.plot(v_array_pre, label = 'pre')
@@ -1465,7 +1493,7 @@ def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=N
     plt.show()
     
     
-    print(np.mean(v_array_pre), np.mean(v_array_drug), np.mean(v_array_post))
+    #print(np.mean(v_array_pre), np.mean(v_array_drug), np.mean(v_array_post))
         
                
     
@@ -1485,7 +1513,7 @@ def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=N
     print("depol is : ")
     print(np.mean(V_drug)   -  np.mean(V_pre) + 2*np.std(V_pre) ) 
     
-    return x_pre, x_drug, x_post, V_array , df_V, df_I , v_drug_filtered
+    return x_pre, x_drug, x_post, V_array , df_V, df_I ,  v_drug_cleaned
 
 
 
