@@ -31,6 +31,7 @@ unit_dict = {'max_firing': 'Firing_(Hz)',
             'AP_latency': 'AP_latency_(ms)',
             'tau_rc':'ms',
             'sag':'%',
+            'AP_count':'AP_count',
             }
 
 n_minimum = 3 
