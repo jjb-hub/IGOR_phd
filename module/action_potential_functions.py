@@ -1544,7 +1544,7 @@ def  cell_membrane_polarisation_detector(cell_ID=None, folder_file=None, I_set=N
     return x_pre, x_drug, x_post, V_array , df_V, df_I ,  v_drug_cleaned
 
 
-def  membrane_resistance_polarisation_detector(cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, I_setting = 'short step',  application_order=None, pAD_locs=None, verbose=False):
+def  membrane_resistance_main(cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, I_setting = 'short step',  application_order=None, pAD_locs=None, verbose=False):
     
     '''
     
@@ -1615,20 +1615,46 @@ def  membrane_resistance_polarisation_detector(cell_ID=None, folder_file=None, I
     I_injected = np.mean(df_I)
 
 
+    # Call either mean_RMP_APP or mean_inputR_APP depending on whether current was injected or not
 
-    if np.abs(np.mean(I_injected)) < 1e-5:
-        # If no current injected, then returned value is RMP
-        print('no current injected')
-        input_R_type = 'RMP'
-        input_R_PRE  =  V_mean_pre
-        input_R_DRUG =  V_mean_drug
-        input_R_WASHOUT = V_mean_washout
+    if np.abs(np.mean(I_injected)) <= 1e-5:
+        PRE_list, APP_list, WASHOUT_list = mean_RMP_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected)
     else:
-        input_R_type = 'injected current'
-        print(V_mean_pre.shape, V_mean_drug.shape, V_mean_washout.shape , I_injected.shape)
-        input_R_PRE = (V_mean_pre) / I_injected[0]
-        input_R_DRUG = (V_mean_drug) / I_injected[0]
-        input_R_WASHOUT = (V_mean_washout) / I_injected[0]
-        
+        PRE_list, APP_list, WASHOUT_list = mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected)
+
+
+    return PRE_list, APP_list, WASHOUT_list
+
+
+def mean_RMP_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected):
+    '''
+    Calculates RMP or the Resting Membrane Potential based on the V_mean_{condition} and I_injected is zero in this case,
+
+    Returns : input_R_PRE, input_R_APP, input_R_WASHOUT : each a list of RMPs for the condition.
     
-    return input_R_PRE, input_R_DRUG, input_R_WASHOUT, input_R_type
+    '''
+    assert np.abs(np.mean(I_injected)) <= 1e-5
+    # If no current injected, then returned value is RMP
+    print('no current injected')
+    input_R_type    = 'RMP'
+    input_R_PRE     =  V_mean_pre.tolist()
+    input_R_APP   =  V_mean_drug.tolist()
+    input_R_WASHOUT = V_mean_washout.tolist()
+
+    return input_R_PRE, input_R_APP, input_R_WASHOUT
+
+def mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected):
+
+    '''
+    Calculates the input resistance based on the V_mean_{condition} and I_injected 
+
+    Returns : input_R_PRE, input_R_APP, input_R_WASHOUT : each a list of input resistances for the condition.
+    
+    '''
+    assert np.abs(np.mean(I_injected)) >= 1e-5
+    input_R_PRE = ((V_mean_pre) / I_injected[0]).tolist()
+    input_R_APP = ((V_mean_drug) / I_injected[0]).tolist()
+    input_R_WASHOUT = ((V_mean_washout) / I_injected[0]).tolist()
+
+    return input_R_PRE, input_R_APP, input_R_WASHOUT
+
