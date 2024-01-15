@@ -5,10 +5,16 @@ import igor2 as igor
 import os
 import matplotlib.pyplot as plt
 
+#takes filename reads excel as pandas.dataframe
+def getRawDF(filename):
+    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int}, engine='openpyxl')
+    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
+    return (df)
 
+def RawDFRow_unpacker(df, row_index):
+    folder_file, cell_id, data_type, drug, conc_uM, replication_no, application_order, drug_in, drug_out, I_set, R_series, R_tip, cell_type, cell_subtype, sex, offset, weight, P_age, Bistable, pAD  = df.iloc(0)[row_index][['folder_file', 'cell_id', 'data_type', 'drug', 'conc_uM', 'replication_no', 'application_order', 'drug_in', 'drug_out', 'I_set', 'R_series', 'R_tip', 'cell_type', 'cell_subtype', 'sex', 'offset', 'weight', 'P_age', 'Bistable', 'pAD']]
 
-
-
+    return folder_file, cell_id, data_type, drug, conc_uM, replication_no, application_order, drug_in, drug_out, I_set, R_series, R_tip, cell_type, cell_subtype, sex, offset, weight, P_age, Bistable, pAD  
 
 
 ######### IGOR ##########
