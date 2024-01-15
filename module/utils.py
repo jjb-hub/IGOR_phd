@@ -1,9 +1,12 @@
 from module.constants import INPUT_DIR, CACHE_DIR, OUTPUT_DIR
 import os, shutil, itertools, json, time, functools, pickle
 import pandas as pd
-import igor2 as igor
+import igor.packed
+import igor.binarywave
 import os
 import matplotlib.pyplot as plt
+
+######### IMPORT RAW DATA ##########
 
 #takes filename reads excel as pandas.dataframe
 def getRawDF(filename):
@@ -68,10 +71,6 @@ if __name__ == "__main__": #inbuilt test that will not be excuted unless run ins
 
 
 ######### CACHE SYSTEM and SAVING ##########
-#figures
-IDENTIFIERS={
-
-}
 
 #Check filesystem is set up for write operations
 def saveColors(filename, color_dict):
@@ -83,26 +82,7 @@ def saveColors(filename, color_dict):
 def getColors(filename):
     return getJSON(f"{CACHE_DIR}/{filename.split('.')[0]}/color_dict.json")
 
-def saveDataTracking(filename, insufficient_data_tracking):
-    subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
-    json_path = f"{subcache_dir}/insufficient_data_tracking.json"
-    print(f"Saving data tracking to: {json_path}") 
-    checkFileSystem(subcache_dir)
-    saveJSON(f"{subcache_dir}/insufficient_data_tracking.json", insufficient_data_tracking)
-    print(f"DATA TRACKING {insufficient_data_tracking} SAVED TO {subcache_dir} SUBCACHE")
 
-def getOrBuildDataTracking(filename):
-    subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
-    json_path = f"{subcache_dir}/insufficient_data_tracking.json"
-    print(f"Attempting to load data tracking from: {json_path}") 
-    # Check cache 
-    if isCached(filename, 'insufficient_data_tracking', extension='json'):
-        return getJSON(f"{subcache_dir}/insufficient_data_tracking.json")
-    # Build 
-    else:
-        print (f"INITIATING DATA TRACKING")
-        insufficient_data_tracking = {}
-        return insufficient_data_tracking
 
 #This function saves dictionnaries, JSON is a dictionnary text format that you use to not have to reintroduce dictionnaries as variables 
 def saveJSON(path, dict_to_save):
@@ -149,10 +129,10 @@ def getCache(filename, identifier):
         return pickle.load(file)
     
 #This checks if a particulat dataframe/dataset is cached, return boolean
-def isCached(filename, identifier, extension='pkl'):
+def isCached(filename, identifier):
     filename = filename.split(".")[0]
-    print(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
-    return os.path.isfile(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
+    return os.path.isfile(f'{CACHE_DIR}/{filename}/{identifier}.pkl')
+
 
 ######### SAVE ##########
 

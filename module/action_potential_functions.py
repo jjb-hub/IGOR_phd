@@ -211,8 +211,8 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
             input_sampling_rate : float : data acquisition rate as given from Igor. 
             verbose : Boolean : if False, suppresses print outputs 
 
-    #TODO currenly returning only the 1st element as nan in the second and seems inferior quality 
-    Returns : [ [tau (ms), steady state with I , I step (pA) , steady stats no I (RMP)] , [...] ]
+
+    Returns : tuple in the format : ( tau (in ms) , asymptotic steady-state voltage , step current)
     ''' 
     # noisy error msg and chunk stuff / exclusion criterion, calculation based on abs max / steady state . 
 
@@ -232,6 +232,9 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
     
     visualisation = plotting_viz
     tau_array = [] 
+
+    # Define Named Tuple 
+    # tau_tuple  = namedtuple('Tau', ['val', 'steady_state', 'current_inj'])
 
     num_tau_analysed_counter = 0   
     counter = 0                                                      #   as we might potentially skip some step currents as they are too noisy, need to keep track of which/ how many taus are actually analysed (we need two)
@@ -295,7 +298,7 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
                 time_frames_ = time_frames[time_frames > current_inj_first_point]
                 tau = sec_to_ms*(time_frames_[0] - current_inj_first_point) / sampling_rate
 
-                # tau (ms), steady state with I , I step (pA) , steady stats no I
+                # tau_temp = tau_tuple(val = tau , steady_state = asym_current, current_inj=step_current_val)
                 tau_temp = [tau, asym_current, step_current_val, v_resting_membrane]
 
                 tau_array.append(tau_temp)
@@ -303,22 +306,23 @@ def tau_analyser(voltage_array, current_array, input_step_current_values, plotti
         counter += 1
 
     if num_tau_analysed_counter == 0 : 
+        # return tau_tuple(val = np.nan , steady_state = np.nan, current_inj=np.nan)
         return [np.nan, np.nan, np.nan, np.nan]
-    return tau_array[0]
+    return tau_array
 
 
 def sag_current_analyser(voltage_array, current_array, input_step_current_values,input_current_avging_window = 0.5): 
 
     '''
     Function to calculate sag current from voltage and current traces under hyper polarising current steps
-
-    Input:
+    Takes in: 
     volatge array : 2d array containing sweeps of voltage recordings / traces for different step currents
     current array : 2d array containing sweeps of current recordings / traces for different step currents
     input_step_current_values : list containing different step currents 
     input_current_avging_window : float / fraction representating what portion of step current duration is used for calculating 
     
-    Returns : [[ sag(0-1) , steady state with I , I step (pA) , steady stats no I (RMP) ] , [...] ] 
+    Returns : tuple 
+    sag_current_all : List containing tuples in the form (Sag, steady state voltage , step current)
     '''
     # sag : 0, 1 : works with the hyperpolarising current injection steps and 0 and 1 indices correspond to
     # the 1st two (least absolute value) step current injections. Later expand for positive current inj too? 
@@ -344,6 +348,9 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
             
             # Calculate v resting potential 
             v_resting_membrane = np.mean(voltage_array[ 0 : first_min_current_point , sag_idx]) 
+            
+            
+        
 
             asym_sag_current = np.mean(voltage_array[  last_min_current_point - step_current_avg_window: last_min_current_point, sag_idx])
             min_sag_current_timepoint = np.where( voltage_array[:,sag_idx]  ==  min(voltage_array[:,sag_idx]  ) )[0][0] 
@@ -352,11 +359,16 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
             sag_current = (asym_sag_current - min_sag_current)  / (  max_sag_current  - asym_sag_current )
 
+            
+
+            # sag_current_temp = sag_tuple(val=sag_current, steady_state=asym_current , current_inj=input_step_current_values[sag_idx])
             sag_current_temp = [sag_current, asym_current, input_step_current_values[sag_idx], v_resting_membrane] 
 
         elif num_peaks > 0: 
             print('Spike found in Sag analysis, skipping')
+            # sag_current_temp = sag_tuple(val= np.nan, steady_state=np.nan, current_inj = np.nan)
             sag_current_temp = [np.nan, np.nan, np.nan, np.nan] 
+        
         # Append Value to existing named tuple
         sag_current_all.append(sag_current_temp) 
 

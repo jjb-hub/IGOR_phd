@@ -1,11 +1,11 @@
 ######## ONLY IMPORT THE USER ACCESSIBLE FUNCTIONS HERE ##########
 
 from module.stats import (
-    loop_stats
+    buildExpandedDF, 
+    loopCombinations_stats
 )
 
 from module.plotters import (
-    build_FP_figs,
     getorbuildApplicationFig, 
     loopbuildAplicationFigs, 
     getorbuildAP_MeanFig, 
@@ -16,21 +16,18 @@ from module.plotters import (
 )
 
 from module.utils import (
-    getOrBuildDataTracking,
     subselectDf,
     initiateFileSystem, 
-    saveColors,  
+    saveColors,
+    getRawDF  
     )
 
 from module.getters import (
-    getRawDf, 
-    getExpandedSubsetDf, 
-    getExpandedDf, 
-    getCellDf, 
-    buildExpandedDF
+    checkFeatureDF, 
+    getCellDF, 
+    getorbuildExpandedDF, 
+    buildExpandedDF_cell_type
     )
-
-# from module.metadata import checkFeatureDF #fuck this fix if u need or delete 
 
 ######## INIT ##########
 # Start by checking filesystem has all the folders necessary for read/write operations (cache) or create them otherwise
