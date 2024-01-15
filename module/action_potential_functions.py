@@ -1385,7 +1385,7 @@ def  membrane_resistance_main(cell_ID=None, folder_file=None, I_set=None, drug=N
     verbose: for debugging and printing out stuff.  
 
 
-    Returns: input_resistance_pre,  input_resistance_drug, input_resistance_washout 
+    Returns: input_resistance_pre,  input_resistance_drug, input_resistance_wash
 
     '''
 
@@ -1419,23 +1419,23 @@ def  membrane_resistance_main(cell_ID=None, folder_file=None, I_set=None, drug=N
  
     V_pre = df_V[:, 0:drug_in]
     V_drug = df_V[:, drug_in:drug_out]
-    V_washout = df_V[:, drug_out:]  
+    V_wash = df_V[:, drug_out:]  
 
     # Clean arrays of spikes 
 
     if verbose: 
-        return df_V,  df_I  , V_pre, V_drug, V_washout
+        return df_V,  df_I  , V_pre, V_drug, V_wash
 
     V_pre_cleaned = array_peak_cleaner(V_pre)
     V_drug_cleaned = array_peak_cleaner(V_drug)
-    V_washout_cleaned = array_peak_cleaner(V_washout)   
+    V_wash_cleaned = array_peak_cleaner(V_wash)   
 
     # Take means of sweeps 
 
 
     V_mean_pre = np.nanmean(V_pre_cleaned, axis = 0)
     V_mean_drug = np.nanmean(V_drug_cleaned, axis = 0)
-    V_mean_washout = np.nanmean(V_washout_cleaned, axis = 0)
+    V_mean_wash = np.nanmean(V_wash_cleaned, axis = 0)
 
     # Calculate input resistance: 
     # We calculate the  input_R_{CONDITION} as a list or 1d array of resistances corresponding to each sweep 
@@ -1446,44 +1446,43 @@ def  membrane_resistance_main(cell_ID=None, folder_file=None, I_set=None, drug=N
     # Call either mean_RMP_APP or mean_inputR_APP depending on whether current was injected or not
 
     if np.abs(np.mean(I_injected)) <= 1e-5:
-        PRE_list, APP_list, WASHOUT_list = mean_RMP_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected)
+        PRE_list, APP_list, WASH_list = mean_RMP_APP(V_mean_pre, V_mean_drug, V_mean_wash, I_injected)
     else:
-        PRE_list, APP_list, WASHOUT_list = mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected)
+        PRE_list, APP_list, WASH_list = mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_wash, I_injected)
 
 
-    return PRE_list, APP_list, WASHOUT_list
+    return PRE_list, APP_list, WASH_list
 
 
-def mean_RMP_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected):
+def mean_RMP_APP(V_mean_pre, V_mean_drug, V_mean_wash, I_injected):
     '''
     Calculates RMP or the Resting Membrane Potential based on the V_mean_{condition} and I_injected is zero in this case,
 
-    Returns : input_R_PRE, input_R_APP, input_R_WASHOUT : each a list of RMPs for the condition.
+    Returns : input_R_PRE, input_R_APP, input_R_WASH : each a list of RMPs for the condition.
     
     '''
     assert np.abs(np.mean(I_injected)) <= 1e-5
     # If no current injected, then returned value is RMP
     print('no current injected')
-    input_R_type    = 'RMP'
     input_R_PRE     =  V_mean_pre.tolist()
     input_R_APP   =  V_mean_drug.tolist()
-    input_R_WASHOUT = V_mean_washout.tolist()
+    input_R_WASH = V_mean_wash.tolist()
 
-    return input_R_PRE, input_R_APP, input_R_WASHOUT
+    return input_R_PRE, input_R_APP, input_R_WASH
 
-def mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected):
+def mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_wash, I_injected):
 
     '''
     Calculates the input resistance based on the V_mean_{condition} and I_injected 
 
-    Returns : input_R_PRE, input_R_APP, input_R_WASHOUT : each a list of input resistances for the condition.
+    Returns : input_R_PRE, input_R_APP, input_R_WASH : each a list of input resistances for the condition.
     
     '''
     assert np.abs(np.mean(I_injected)) >= 1e-5
     input_R_PRE = ((V_mean_pre) / I_injected[0]).tolist()
     input_R_APP = ((V_mean_drug) / I_injected[0]).tolist()
-    input_R_WASHOUT = ((V_mean_washout) / I_injected[0]).tolist()
+    input_R_WASH = ((V_mean_wash) / I_injected[0]).tolist()
 
-    return input_R_PRE, input_R_APP, input_R_WASHOUT 
+    return input_R_PRE, input_R_APP, input_R_WASH 
 
 
