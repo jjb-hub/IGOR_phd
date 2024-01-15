@@ -1337,7 +1337,7 @@ def replace_nan_with_mean(array):
         return array
 
 
-def array_peak_cleaner(array, prominence = 10 , threshold = -55 ,  peak_pre_window = 5 ):
+def spike_remover(array):
 
     '''
     Cleans a voltage trace by removing spikes 
@@ -1484,5 +1484,6 @@ def mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_washout, I_injected):
     input_R_APP = ((V_mean_drug) / I_injected[0]).tolist()
     input_R_WASHOUT = ((V_mean_washout) / I_injected[0]).tolist()
 
-    return input_R_PRE, input_R_APP, input_R_WASHOUT
+    return input_R_PRE, input_R_APP, input_R_WASHOUT 
+
 
