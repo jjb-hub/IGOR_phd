@@ -231,12 +231,12 @@ def _handleFile(row):
             print(row.folder_file)        
             
             #input_R #DJ THIS IS WHERE THE FUNVTION WOULD BE IMPLIMENTED 
-            # input_R_PRE, input_R_APP, input_R_wash = mean_inputR_APP(V_array, I_array, row.drug_in, row.drug_out)
-            # mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP(V_array, I_array, row.drug_in, row.drug_out)
+            # input_R_PRE, input_R_APP, input_R_wash = mean_inputR_APP(V_df, I_df, row.drug_in, row.drug_out)
+            # mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP(V_df, I_df, row.drug_in, row.drug_out)
 
             #modular functions that will exist in both: 
             #       v_array=spike_remover(v_array)
-            #       list_PRE, list_APP, list_WASH=APP_splitter(v_array, drug_in, drug_out) #ALSO WOULD LIKE TO USE BELLOW FOR pAD list of APs
+            #       list_PRE, list_APP, list_WASH=APP_splitter(v_df, drug_in, drug_out) #ALSO WOULD LIKE TO USE BELLOW FOR pAD list of APs
         
             # pAD classification
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
