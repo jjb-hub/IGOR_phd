@@ -1,9 +1,9 @@
 # module
-from module.stats import buildExpandedDF, loopCombinations_stats
+from module.stats import loop_stats, add_statistical_annotation
 from module.utils import *
-from module.getters import getorbuildExpandedDF, getCellDF
+from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf, getFPStats
 from module.action_potential_functions import pAD_detection
-from module.constants import color_dict
+from module.constants import color_dict, unit_dict, n_minimum
 #external
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -11,15 +11,15 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from matplotlib.lines import Line2D 
 import numpy as np
-
-import timeit
+from IPython.display import display
+import seaborn as sns
 
 
 ########## BASE PLOTTERS ##########
 
 #  plots any waveform based off fold_file
 def quick_plot_file(filename, folder_file):
-    df=getRawDF(filename)
+    df=getRawDf(filename)
     path_V, path_I = make_path(folder_file)
     listV, dfV = igor_exporter(path_V)
     V_array = np.array(dfV)
@@ -29,9 +29,7 @@ def quick_plot_file(filename, folder_file):
     except:
         print('no I file found', path_I)
 
-    #incase you want to output the data_type for instance
-    row = df[df['folder_file']==folder_file]
-    print (row)
+    display(df[df['folder_file']==folder_file]) # show file info 
 
     quick_line_plot(listV, f'Voltage trace for {folder_file}')
     quick_line_plot(listI, f'Current (I) trace for {folder_file}')
@@ -43,7 +41,93 @@ def quick_line_plot(plotlist, plottitle):
 
 
 
-    
+
+
+def build_FP_figs(filename):
+    '''
+    Fetches FP_stats df for filename - plots with paired student t PRE vs POST for each cell_type and FP measure (i.e. max_firing)
+    input: filename
+    output: 
+    '''
+    df=getFPStats(filename)
+    insufficient_data_tracking=getOrBuildDataTracking(filename)
+
+    for (cell_type, measure), subset in df.groupby(['cell_type', 'measure']):
+        print (f"plotting {measure} for {cell_type}")
+
+        #track groups with n < n_minimum 
+        # insufficient_data_tracking = {}
+        
+        #impliment n_minimum
+        treatment_counts = subset.groupby('treatment')['cell_id'].nunique() #n per treatment 
+        insufficient_treatments = treatment_counts[treatment_counts < n_minimum].index.tolist()
+
+        if insufficient_treatments:
+            # Update the tracking dictionary
+            if cell_type not in insufficient_data_tracking:
+                insufficient_data_tracking[cell_type] = {}
+
+            for treatment in insufficient_treatments:
+                count = int(treatment_counts[treatment])
+                if treatment not in insufficient_data_tracking[cell_type]:
+                    insufficient_data_tracking[cell_type][treatment] = {}
+                
+                insufficient_data_tracking[cell_type][treatment]['FP_n'] = count
+
+
+            print(f"Insufficient data for {cell_type} - Treatments: {', '.join(insufficient_treatments)} (n < {n_minimum})")
+            subset = subset[~subset['treatment'].isin(insufficient_treatments)] #remove data 
+            
+            if len(subset['treatment'].unique()) < 2: #  remaining treatments for plotting
+                print(f"Not enough remaining treatments for {cell_type} - {measure}")
+                continue  
+
+        saveDataTracking(filename, insufficient_data_tracking)
+        order = [t for t in color_dict.keys() if t in subset['treatment'].unique()]
+
+        
+        Fig, ax = plt.subplots(figsize=(20, 10))
+        sns.barplot(
+            x='treatment',
+            y='mean_value',
+            hue='pre_post',
+            hue_order=['PRE', 'POST'],
+            data=subset,
+            errorbar=('ci', 68),
+            palette='Set2',
+            edgecolor="k",
+            order=order,
+            ax=ax,
+            )
+        sns.swarmplot(
+            x='treatment',
+            y='mean_value',
+            hue='pre_post',
+            hue_order=['PRE', 'POST'],
+            data=subset,
+            palette='Set2',
+            order=order,
+            edgecolor="k",
+            linewidth=1,
+            linestyle="-",
+            dodge=True,
+            ax=ax, 
+            legend=False,
+        )
+
+        # Add significance annotations for paired t-test
+        add_statistical_annotation(ax, subset, x='treatment', y='mean_value', group='pre_post', test='paired_ttest', p_threshold=0.05)
+
+        # Customize plot labels and titles using ax.set_ methods
+        ax.set_xlabel('Treatment', fontsize=14)  # Adjust font size as needed
+        ax.set_ylabel(unit_dict[measure], fontsize=14)  # Adjust font size as needed
+        ax.set_title(f'{cell_type} - {measure}', fontsize=16)  # Adjust font size as needed
+
+        # Optionally, adjust the font size of the tick labels
+        ax.tick_params(axis='x', labelsize=12)  # Adjust font size for x-axis tick labels
+        ax.tick_params(axis='y', labelsize=12)  # Adjust font size for y-axis tick labels
+        saveFP_HistogramFig(Fig, f'{cell_type}_{measure}')
+      
 
 
 
@@ -55,7 +139,7 @@ def quick_line_plot(plotlist, plottitle):
 # #right now need expanded df to make ap figuures not ideal
 
 def loopbuildAplicationFigs(filename):
-    df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
+    df = getExpandedDf(filename)
     color_dict = getColors(filename)
     application_df = df[df.data_type == 'AP'] 
     for row_ind, row in application_df.iterrows():  #row is a series that can be called row['colname']
@@ -77,10 +161,9 @@ def loopbuildAplicationFigs(filename):
 
 def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
     # color_dict = getColors(filename) 
-
     if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-        expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-        cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+        expanded_df = getExpandedDf(filename)
+        cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
     else:
         cell_df = cell_id_or_cell_df
     cell_id = cell_df['cell_id'].iloc[0]
@@ -107,10 +190,12 @@ def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
+
+
         cell_id = cell_df['cell_id'].iloc[0]
 
         from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
@@ -130,8 +215,8 @@ def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
         
 def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -154,8 +239,8 @@ def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -177,8 +262,8 @@ def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
 
 def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getorbuildExpandedDF(filename, 'expanded_df', buildExpandedDF, from_scratch=False)
-            cell_df = getCellDF(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]

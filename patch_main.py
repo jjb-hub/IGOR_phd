@@ -6,7 +6,7 @@ Created on Wed May 10 13:58:27 2023
 """
 #%%
 
-from utils.metabuild_functions import buildExpandedDF, loopCombinations_stats
+from utils.metabuild_functions import buildExpandedDF, loopFP_stats
 from utils.plotter import drug_aplication_visualisation, plot_all_FI_curves, plot_FI_AP_curves
 from utils import base_utils 
 from ephys import ap_functions
@@ -62,7 +62,7 @@ expanded_df_raw = buildExpandedDF(feature_df_ex)  #in helper functions #check di
 
 #Do statistical anlaysis of FP data and plot
 multi_page_pdf = None #https://matplotlib.org/stable/gallery/misc/multipage_pdf.html
-expanded_df_stats = loopCombinations_stats(expanded_df_raw, OUTPUT_DIR, color_dict)
+expanded_df_stats = loopFP_stats(expanded_df_raw, OUTPUT_DIR, color_dict)
 
 
 print(expanded_df_raw)
