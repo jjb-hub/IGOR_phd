@@ -1328,7 +1328,7 @@ def replace_nan_with_mean(array):
 def spike_remover(array):
 
     '''
-    Cleans a voltage trace by removing spikes 
+    Cleans a voltage trace by removing spikes
     Input: array: voltage  np.array for the voltage trace that needs to be cleaned : shape: length of each sweep x number of sweeps (Note that when using igor
     exporter, this is actually df_V and NOT V_array although V_array when reshaped quickly gives the same result)
     Returns: array_cleaned: voltage np.array with peaks removed 
