@@ -1328,10 +1328,10 @@ def replace_nan_with_mean(array):
 def spike_remover(array):
 
     '''
-    Cleans a voltage trace by removing spikes
-    Input: array: voltage  np.array for the voltage trace that needs to be cleaned : shape: length of each sweep x number of sweeps (Note that when using igor
-    exporter, this is actually df_V and NOT V_array although V_array when reshaped quickly gives the same result)
-    Returns: array_cleaned: voltage np.array with peaks removed 
+    Cleans a voltage array by removing spikes
+    Input: array: voltage  np.array : shape : length x num_sweeps 
+    (Note that when using igor exporter, this is actually df_V and NOT V_array although V_array when reshaped quickly gives the same result)
+    Returns: array_cleaned: voltage np.array  with peaks removed, shape : length x num_sweeps  
     '''
     
     array_cleaned  = array.copy() 
@@ -1345,131 +1345,98 @@ def spike_remover(array):
 
     array_diff_abs = np.abs(np.diff(array, axis = 0))
     array_diff_abs = np.vstack([array_diff_abs, np.mean(array_diff_abs, axis  = 0 ).reshape(1,-1) ])
-
-    print("debugging here")
-    print(array_diff_abs.shape, array_cleaned.shape)
-
     
     array_cleaned[array_diff_abs > np.mean(array_diff_abs , axis = 0 ) + 2*np.std(array_diff_abs , axis =  0 )] = np.nan
 
     array_cleaned = replace_nan_with_mean(array_cleaned)
 
-     
     return array_cleaned  
 
-
-
-
-def  membrane_resistance_main(cell_ID=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, I_setting = 'short step',  application_order=None, pAD_locs=None, verbose=False):
-    
-    '''
-    
-    Calculates the membrane polarisation of a cell in response to a drug application, 
-    compares the input resistance during PRE, DRUG, WASHOUT
-
-    
-    Input: folder_file, cell_ID,  drug,  applicationorder, drug_in, drug_out, I_set,   pAD_locs  , verbose
-
-    verbose: for debugging and printing out stuff.  
-
-
-    Returns: input_resistance_pre,  input_resistance_drug, input_resistance_wash
+def APP_splitter(v_df, drug_in, drug_out):
 
     '''
+    Splits APP (application) voltage dataframe file into three lists for PRE, APP, WASH 
 
-    path_V, path_I = make_path(folder_file)
-    array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
-    df_V = np.array(df_V)
-    
-    try:
-        array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
-        if verbose:
-            print('I file found')
-    except FileNotFoundError: #if no I file exists 
-        print(f"no I file found for {cell_ID}, I setting used was: {I_set}")
-        array_I = np.zeros(len(df_V)-1)
-    #scale data
-    
-    x_scaler_drug_bar = df_V.shape[0] * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
-    x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
-    x_I = np.arange(len(array_I))*0.00005 #20kHz igor 
-    
-    num_sweeps  =  int( x_V[-1] / x_I[-1] ) 
-    num_sweeps_ = df_V.shape[-1]
-    
-    drug_in_time  =  int( drug_in* x_scaler_drug_bar  - x_scaler_drug_bar) 
-    drug_out_time =  int(drug_out* x_scaler_drug_bar) 
-    
-    if verbose: 
-        print("printing drug in drug out sweep nums")
-        print(drug_in, drug_out)
-        
- 
-    V_pre = df_V[:, 0:drug_in]
-    V_drug = df_V[:, drug_in:drug_out]
-    V_wash = df_V[:, drug_out:]  
+    inputs: V_df     :  voltage np.array, shape: length x num_sweeps
+            drug_in  :  integer , sweep number when drug was applied
+            drug_out :  integer , sweep number when drug was washed out
 
-    # Clean arrays of spikes 
+    Returns: list_PRE, list_APP, list_WASH : each a list of input file values for that condition. 
 
-    if verbose: 
-        return df_V,  df_I  , V_pre, V_drug, V_wash
-
-    V_pre_cleaned = array_peak_cleaner(V_pre)
-    V_drug_cleaned = array_peak_cleaner(V_drug)
-    V_wash_cleaned = array_peak_cleaner(V_wash)   
-
-    # Take means of sweeps 
+    '''
+    list_PRE =  v_df[:, 0:drug_in].tolist()
+    list_APP =  v_df[:, drug_in:drug_out].tolist()
+    list_WASH = v_df[:, drug_out:].tolist()
 
 
-    V_mean_pre = np.nanmean(V_pre_cleaned, axis = 0)
-    V_mean_drug = np.nanmean(V_drug_cleaned, axis = 0)
-    V_mean_wash = np.nanmean(V_wash_cleaned, axis = 0)
-
-    # Calculate input resistance: 
-    # We calculate the  input_R_{CONDITION} as a list or 1d array of resistances corresponding to each sweep 
-    
-    I_injected = np.mean(df_I)
+    return list_PRE, list_APP, list_WASH 
 
 
-    # Call either mean_RMP_APP or mean_inputR_APP depending on whether current was injected or not
-
-    if np.abs(np.mean(I_injected)) <= 1e-5:
-        PRE_list, APP_list, WASH_list = mean_RMP_APP(V_mean_pre, V_mean_drug, V_mean_wash, I_injected)
-    else:
-        PRE_list, APP_list, WASH_list = mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_wash, I_injected)
-
-
-    return PRE_list, APP_list, WASH_list
-
-
-def mean_RMP_APP(V_mean_pre, V_mean_drug, V_mean_wash, I_injected):
+def mean_RMP_APP_calculator(V_df, I_df, drug_in, drug_out):
     '''
     Calculates RMP or the Resting Membrane Potential based on the V_mean_{condition} and I_injected is zero in this case,
+    INPUTS  : V_df     : voltage dataframe (array dtype): shape : length x num_sweeps 
+              I_df     : current dataframe (array dtype): shape 
+              drug_in  : integer : index when the drug was applied
+              drug_out : integer : index when the drug was washed out 
 
     Returns : input_R_PRE, input_R_APP, input_R_WASH : each a list of RMPs for the condition.
     
     '''
-    assert np.abs(np.mean(I_injected)) <= 1e-5
-    # If no current injected, then returned value is RMP
-    print('no current injected')
-    input_R_PRE     =  V_mean_pre.tolist()
-    input_R_APP   =  V_mean_drug.tolist()
-    input_R_WASH = V_mean_wash.tolist()
+    
+    assert np.abs(np.mean(I_df))[0] <= 1e-5 , "Injected current must be non-zero."
 
-    return input_R_PRE, input_R_APP, input_R_WASH
+    # Define relevant voltage arrays 
 
-def mean_inputR_APP(V_mean_pre, V_mean_drug, V_mean_wash, I_injected):
+    V_df = np.array(V_df) 
 
+    V_PRE  = V_df[:, 0:drug_in]
+    V_APP  = V_df[:, drug_in:drug_out]
+    V_WASH = V_df[:, drug_out:]
+
+    # Clean arrays of spikes
+
+    V_PRE_CLEANED  = spike_remover(V_PRE)
+    V_APP_CLEANED  = spike_remover(V_APP)
+    V_WASH_CLEANED = spike_remover(V_WASH)
+
+    # Calculate mean resting membrane potential for each condition
+
+    mean_RMP_PRE  = np.mean(V_PRE_CLEANED  , axis = 0).tolist()
+    mean_RMP_APP  = np.mean(V_APP_CLEANED  , axis = 0).tolist()
+    mean_RMP_WASH = np.mean(V_WASH_CLEANED , axis = 0).tolist()
+
+    return mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH
+
+def mean_inputR_APP_calculator(V_df, I_df, drug_in, drug_out):
     '''
     Calculates the input resistance based on the V_mean_{condition} and I_injected 
 
     Returns : input_R_PRE, input_R_APP, input_R_WASH : each a list of input resistances for the condition.
     
     '''
-    assert np.abs(np.mean(I_injected)) >= 1e-5
-    input_R_PRE = ((V_mean_pre) / I_injected[0]).tolist()
-    input_R_APP = ((V_mean_drug) / I_injected[0]).tolist()
-    input_R_WASH = ((V_mean_wash) / I_injected[0]).tolist()
+    assert np.abs(np.mean(I_df))[0] >= 1e-5, "Injected current cannot be non-zero for calculating input resistance."
+    
+    # Define relevant voltage arrays
+
+    V_df = np.array(V_df) 
+
+
+    V_PRE  = V_df[:, 0:drug_in]
+    V_APP  = V_df[:, drug_in:drug_out]
+    V_WASH = V_df[:, drug_out:]
+
+    # Clean arrays of spikes
+
+    V_PRE_CLEANED  = spike_remover(V_PRE)
+    V_APP_CLEANED  = spike_remover(V_APP)
+    V_WASH_CLEANED = spike_remover(V_WASH)
+
+    # Calculate input resistance 
+
+    input_R_PRE  = np.mean(V_PRE_CLEANED  , axis = 0) / np.mean(I_df).tolist()
+    input_R_APP  = np.mean(V_APP_CLEANED  , axis = 0) / np.mean(I_df).tolist()
+    input_R_WASH = np.mean(V_WASH_CLEANED , axis = 0) / np.mean(I_df).tolist()
 
     return input_R_PRE, input_R_APP, input_R_WASH 
 
