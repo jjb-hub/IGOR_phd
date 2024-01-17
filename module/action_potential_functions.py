@@ -1364,9 +1364,11 @@ def APP_splitter(v_df, drug_in, drug_out):
     Returns: list_PRE, list_APP, list_WASH : each a list of input file values for that condition. 
 
     '''
-    list_PRE =  v_df[:, 0:drug_in].tolist()
-    list_APP =  v_df[:, drug_in:drug_out].tolist()
-    list_WASH = v_df[:, drug_out:].tolist()
+    v_df      = np.array(v_df)
+
+    list_PRE  =  list(v_df[:, 0:drug_in])
+    list_APP  =  list(v_df[:, drug_in:drug_out])
+    list_WASH = list(v_df[:, drug_out:])
 
 
     return list_PRE, list_APP, list_WASH 
@@ -1402,9 +1404,9 @@ def mean_RMP_APP_calculator(V_df, I_df, drug_in, drug_out):
 
     # Calculate mean resting membrane potential for each condition
 
-    mean_RMP_PRE  = np.mean(V_PRE_CLEANED  , axis = 0).tolist()
-    mean_RMP_APP  = np.mean(V_APP_CLEANED  , axis = 0).tolist()
-    mean_RMP_WASH = np.mean(V_WASH_CLEANED , axis = 0).tolist()
+    mean_RMP_PRE  = list(np.mean(V_PRE_CLEANED  , axis = 0))
+    mean_RMP_APP  = list(np.mean(V_APP_CLEANED  , axis = 0))
+    mean_RMP_WASH = list(np.mean(V_WASH_CLEANED , axis = 0))
 
     return mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH
 
@@ -1434,9 +1436,13 @@ def mean_inputR_APP_calculator(V_df, I_df, drug_in, drug_out):
 
     # Calculate input resistance 
 
-    input_R_PRE  = np.mean(V_PRE_CLEANED  , axis = 0) / np.mean(I_df).tolist()
-    input_R_APP  = np.mean(V_APP_CLEANED  , axis = 0) / np.mean(I_df).tolist()
-    input_R_WASH = np.mean(V_WASH_CLEANED , axis = 0) / np.mean(I_df).tolist()
+    input_R_PRE  = np.mean(V_PRE_CLEANED  , axis = 0) / np.mean(I_df)[0]
+    input_R_APP  = np.mean(V_APP_CLEANED  , axis = 0) / np.mean(I_df)[0]
+    input_R_WASH = np.mean(V_WASH_CLEANED , axis = 0) / np.mean(I_df)[0]
+
+    input_R_PRE  = list(input_R_PRE)
+    input_R_APP  = list(input_R_APP)
+    input_R_WASH = list(input_R_WASH)
 
     return input_R_PRE, input_R_APP, input_R_WASH 
 
