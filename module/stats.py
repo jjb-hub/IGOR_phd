@@ -21,7 +21,11 @@ import scipy.signal as sg #new
 from scipy import stats
 import seaborn as sns
 from statannotations.Annotator import Annotator
-
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
+from statsmodels.stats.multicomp import pairwise_tukeyhsd
+import matplotlib.lines as mlines
+import matplotlib.transforms as mtransforms
 
 #CONSTANTS   
 from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict, n_minimum,  p_value_threshold
@@ -57,38 +61,54 @@ def apply_group_by_funcs(filename, df, groupby_cols, handleFn): #creating a list
 
 def _update_APP_stats(filename, celltype_datatype_drug, df):
     '''
-
+    Creates a list of rows to be added to APP stats df and calles updateAPPStats()
     '''
     cell_type, data_type, drug = celltype_datatype_drug
     df=df[df['application_order'] <= 1] #remove second aplication data 
     update_rows=[]
+
     if data_type == 'AP':
-        #counting APs
-        columns_to_count =  ['WASH_Somatic_AP_locs', 'WASH_pAD_AP_locs',
+        
+        #measure == input_R / RMP
+
+
+        #measure == AP_count_type and AP_count
+        columns_to_count = ['WASH_Somatic_AP_locs', 'WASH_pAD_AP_locs',
                             'APP_Somatic_AP_locs', 'APP_pAD_AP_locs', 
                             'PRE_Somatic_AP_locs', 'PRE_pAD_AP_locs']
-        update_rows=[]
-        for index, row in df.iterrows():
+        
+        for index, row in df.iterrows():  # Looping over each cell_id
             cell_id = row['cell_id'] 
-            for col_name in columns_to_count:
-                pre_app_wash = col_name.split('_')[0]
-                AP_type=col_name.split('_')[1]
+            ap_count_by_condition = {'PRE': 0, 'APP': 0, 'WASH': 0}  # Initialize AP counts for each condition
+
+            for col_name in columns_to_count:  # Looping over PRE, APP, WASH
+                pre_app_wash, AP_type = col_name.split('_')[0], col_name.split('_')[1]
                 value_len = len(row[col_name]) if isinstance(row[col_name], list) else 0
                 update_row = {
-                            "cell_type": cell_type,
-                            "cell_id": cell_id,
-                            "measure": 'AP_count',
-                            "treatment": drug,
-                            "pre_app_wash": pre_app_wash,
-                            "value": value_len,
-                            "sem": AP_type
-                        }
+                    "cell_type": cell_type,
+                    "cell_id": cell_id,
+                    "measure": f"AP_count_{AP_type}",
+                    "treatment": drug,
+                    "pre_app_wash": pre_app_wash,
+                    "value": value_len,
+                    "sem": np.nan
+                }
                 update_rows.append(update_row)
-        updateAPPStats(filename, update_rows)
+                ap_count_by_condition[pre_app_wash] += value_len  # Accumulate total AP count
 
-        #input R
-
-        #RMP
+            # Add total AP count rows after processing all columns for a cell_id
+            for condition, total_count in ap_count_by_condition.items():
+                total_count_row = {
+                    "cell_type": cell_type,
+                    "cell_id": cell_id,
+                    "measure": "AP_count",
+                    "treatment": drug,
+                    "pre_app_wash": condition,
+                    "value": total_count,
+                    "sem": np.nan
+                }
+                update_rows.append(total_count_row)
+        updateAPPStats(filename, update_rows) 
 
     else:
         pass
@@ -149,29 +169,74 @@ def fetchMeans(pre_post_df, measure):
 
 
 ######## CALCULATE / PLOT STATS
-def add_statistical_annotation(ax, data, x, y, group, test=None, p_threshold=0.05):
+def add_statistical_annotation_hues(ax, data, x, y, group, x_order, hue_order, test='paired_ttest', p_threshold=0.05):
     '''
-    input: axis to plot, df, x axis column name, y axis column name, group to compare column name, '''
+    Performs paired t-tests between groups for each x value, annotates the plot with significance markers,
+    and adds text to indicate which groups are being compared.
+    '''
     if test == 'paired_ttest':
-        treatments = data[x].unique()
+        # Ensure treatments and hues are in the same order as plotted
+        treatments = [t for t in x_order if t in data[x].unique()]
+        hues = [h for h in hue_order if h in data[group].unique()]
+
+        # Determine behavior based on the number of groups
+        if len(hues) > 2:
+            comparison_pairs = [(hues[0], comp_group) for comp_group in hues[1:]]
+        else:
+            comparison_pairs = [(hues[0], hues[1])] if len(hues) > 1 else []
+
+        # Perform comparisons and annotate
         for treatment in treatments:
-            pre_data = data[(data[group] == 'PRE') & (data[x] == treatment)][y]
-            post_data = data[(data[group] == 'POST') & (data[x] == treatment)][y]
-            if len(pre_data) > 0 and len(post_data) > 0:
-                stat, p_value = stats.ttest_rel(pre_data, post_data)
+            for base_group, comp_group in comparison_pairs:
+                base_group_data = data[(data[group] == base_group) & (data[x] == treatment)][y]
+                comp_data = data[(data[group] == comp_group) & (data[x] == treatment)][y]
+
+                if len(base_group_data) > 0 and len(comp_data) > 0:
+                    stat, p_value = stats.ttest_rel(base_group_data, comp_data)
+                    # print (f"{treatment} {base_group} vs {comp_group} p value: {p_value}" )
+
+                    sig_marker = '***' if p_value < 0.001 else '**' if p_value < 0.01 else '*' if p_value < p_threshold else ''
+                    if sig_marker:
+                        # Find the correct x position for the treatment
+                        x_pos = treatments.index(treatment)
+                        y_pos = max(base_group_data.max(), comp_data.max()) + 0.1
+
+                        ax.text(x_pos, y_pos, sig_marker, ha='center', va='bottom', fontsize=14, fontweight='bold')
+                        group_annotation = f"{base_group} vs {comp_group} " #for {treatment}
+                        # print(f"annotating {group_annotation}")
+                        ax.text(x_pos, y_pos - 0.05, group_annotation, ha='center', va='bottom', fontsize=10, color='gray')
+
+# def add_statistical_annotation_hues(ax, data, x, y, group, test=None, p_threshold=0.05):
+#     '''
+#     will perform a test between hues of a graph i.e. group
+#     input: axis to plot, df, x axis column name, y axis column name, group to compare column name
+#     output: calculates and plots stars above x value where hue is significantly different 
+    
+#     '''
+#     if test == 'paired_ttest':
+#         treatments = data[x].unique()
+#         for treatment in treatments:
+#             pre_data = data[(data[group] == 'PRE') & (data[x] == treatment)][y]
+#             post_data = data[(data[group] == 'POST') & (data[x] == treatment)][y]
+#             if len(pre_data) > 0 and len(post_data) > 0:
+#                 stat, p_value = stats.ttest_rel(pre_data, post_data)
                 
-                if p_value < 0.001:
-                    sig_marker = '***'
-                elif p_value < 0.01:
-                    sig_marker = '**'
-                elif p_value < p_threshold:
-                    sig_marker = '*'
-                else:
-                    continue  # No significant difference
+#                 if p_value < 0.001:
+#                     sig_marker = '***'
+#                 elif p_value < 0.01:
+#                     sig_marker = '**'
+#                 elif p_value < p_threshold:
+#                     sig_marker = '*'
+#                 else:
+#                     continue  # No significant difference
                 
-                x_pos = list(treatments).index(treatment)
-                y_pos = max(pre_data.max(), post_data.max())
-                ax.text(x_pos, y_pos, sig_marker, ha='center', va='bottom', fontsize=20)
+#                 x_pos = list(treatments).index(treatment)
+#                 y_pos = max(pre_data.max(), post_data.max())
+#                 ax.text(x_pos, y_pos, sig_marker, ha='center', va='bottom', fontsize=20)
+
+
+
+
 
 
 

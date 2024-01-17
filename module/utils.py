@@ -172,6 +172,9 @@ def saveAP_PhasePlotFig(fig, identifier):
 def saveFP_HistogramFig(fig, identifier):
     saveFigure(fig, identifier, 'FP_Histograms')
 
+def saveAPP_HistogramFig(fig, identifier):
+    saveFigure(fig, identifier, 'APP_Histograms')
+
 def saveAP_PCAFig(fig, identifier):
     saveFigure(fig, identifier, 'PCA_APs')
 

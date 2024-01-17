@@ -127,10 +127,10 @@ def updateAPPStats(filename, rows):
     APP_stats_df = getAPPStats(filename)
     
     # Create a unique identifier 
-    APP_stats_df['unique_id'] = APP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", "pre_app_wash"]]), axis=1)
+    APP_stats_df['unique_id'] = APP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure",  "treatment", "pre_app_wash"]]), axis=1)
     
     for row in rows:
-        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", "pre_app_wash"]])
+        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure",  "treatment", "pre_app_wash"]])
         data_row = pd.DataFrame([row])
         data_row['unique_id'] = unique_id
 
@@ -321,10 +321,11 @@ def buildAPPStatsDf(filename):
             "cell_type",
             "cell_id",
             "measure",
+            # "measure_hue", # may to I_set 
             "treatment",
             "pre_app_wash",
             "value",
-            "sem",
+            "sem", # makes sense only for measure == inpur_R , RMP 
         ]
     )
 

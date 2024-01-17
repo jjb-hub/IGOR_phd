@@ -12,7 +12,8 @@ from module.plotters import (
     getorbuildAP_HistogramFig, 
     getorbuildAP_PhasePlotFig, 
     getorbuildAP_PCAFig,
-    quick_plot_file 
+    quick_plot_file,
+    build_APP_histogram_figures 
 )
 
 from module.utils import (
