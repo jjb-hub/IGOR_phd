@@ -9,7 +9,9 @@ from module.action_potential_functions import (
     ap_characteristics_extractor_main,
     tau_analyser,
     pAD_detection,
-    sag_current_analyser 
+    sag_current_analyser,
+    mean_inputR_APP_calculator,
+    mean_RMP_APP_calculator, 
     )
 
 import pandas as pd
@@ -231,8 +233,16 @@ def _handleFile(row):
             print(row.folder_file)        
             
             #input_R #DJ THIS IS WHERE THE FUNVTION WOULD BE IMPLIMENTED 
-            # input_R_PRE, input_R_APP, input_R_wash = mean_inputR_APP(V_df, I_df, row.drug_in, row.drug_out)
-            # mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP(V_df, I_df, row.drug_in, row.drug_out)
+            input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_df, I_df, row.drug_in, row.drug_out) #sweep means
+            mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_df, I_df, row.drug_in, row.drug_out)
+
+            row['inputR_PRE'] = input_R_PRE
+            row['inputR_APP'] = input_R_APP
+            row['inputR_WASH'] = input_R_WASH
+            row['RMP_PRE'] = mean_RMP_PRE
+            row['RMP_APP'] = mean_RMP_APP
+            row['RMP_WASH'] = mean_RMP_WASH
+
 
             #modular functions that will exist in both: 
             #       v_array=spike_remover(v_array)
