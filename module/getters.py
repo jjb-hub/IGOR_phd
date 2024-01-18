@@ -232,8 +232,10 @@ def _handleFile(row):
             print("AP type file")
             print(row.folder_file)        
             
-            #input_R #DJ THIS IS WHERE THE FUNVTION WOULD BE IMPLIMENTED 
-            input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_df, I_df, row.drug_in, row.drug_out) #sweep means
+            #input_R 
+            if I_df: #if I_df exists
+                input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_df, I_df, row.drug_in, row.drug_out) #sweep means?
+                
             mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_df, I_df, row.drug_in, row.drug_out)
 
             row['inputR_PRE'] = input_R_PRE
