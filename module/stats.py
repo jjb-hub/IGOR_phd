@@ -70,12 +70,15 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
     if data_type == 'AP':
         
         #measure == input_R / RMP
-
+        columns_with_lists = ['inputR_PRE', 'RMP_PRE',
+                            'inputR_APP', 'RMP_APP', 
+                            'inputR_WASH', 'RMP_WASH']
+        
 
         #measure == AP_count_type and AP_count
-        columns_to_count = ['WASH_Somatic_AP_locs', 'WASH_pAD_AP_locs',
+        columns_to_count = ['PRE_Somatic_AP_locs', 'PRE_pAD_AP_locs',
                             'APP_Somatic_AP_locs', 'APP_pAD_AP_locs', 
-                            'PRE_Somatic_AP_locs', 'PRE_pAD_AP_locs']
+                            'WASH_Somatic_AP_locs', 'WASH_pAD_AP_locs']
         
         for index, row in df.iterrows():  # Looping over each cell_id
             cell_id = row['cell_id'] 
@@ -108,6 +111,19 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
                     "sem": np.nan
                 }
                 update_rows.append(total_count_row)
+            for list_col in columns_with_lists:
+                measure, pre_app_wash = list_col.split('_')[0], list_col.split('_')[1]
+                mean_row = {
+                    "cell_type": cell_type,
+                    "cell_id": cell_id,
+                    "measure": measure,
+                    "treatment": drug,
+                    "pre_app_wash": pre_app_wash,
+                    "value": np.nanmean(row[list_col]),
+                    "sem": stats.sem(row[list_col], nan_policy='omit')
+                }
+                update_rows.append(mean_row)
+
         updateAPPStats(filename, update_rows) 
 
     else:

@@ -34,6 +34,8 @@ unit_dict = {'max_firing': 'Firing_(Hz)',
             'AP_count':'AP_count',
             'AP_count_Somatic':'AP_count_Somatic',
             'AP_count_pAD':'AP_count_pAD',
+            'inputR': 'input R (Ohm)',
+            'RMP':'membrane potentiam (mV)'
             }
 
 n_minimum = 3 
