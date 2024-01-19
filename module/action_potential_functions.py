@@ -24,6 +24,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 from scipy.signal import find_peaks
+import numpy as np
 
 ########## USER ?
 #FIX ME POU IN RIGHT PLACE
@@ -130,35 +131,40 @@ def fit_sigmoid(xdata, ydata, maxfev = 5000, visualise = False):
 
     return xfit, yfit , popt 
 
-def steady_state_value(voltage_trace, current_trace, step_current_val,  avg_window = 0.5):
-
+def steady_state_value(V_sweep, I_sweep, step_current_val=None,  avg_window = 0.5):
     ''' 
     Takes in the following 
-    voltage_trace:  a single voltage trace so 1d time series 
-    current_trace: its corresponding current trace (again 1d timeseries) 
-    step_current_val: step current value so a scalar float 
-    avg_window: what fraction of step current duration do we average? 
+    V_sweep:  a single voltage trace so 1d time series (single sweep)
+    I_sweep: its corresponding current trace (again 1d timeseries) (single sweep)
+    step_current_val: step current value so a scalar float (value in pA)
+    avg_window: what fraction of step current duration do we average? how do you chose which 50%?
 
     Returns: 
     asym_current: the steady state value from any step current injection
     hyper : boolen value     indicating whether step current is hyperpolarising  or not 
     first_current_point = first timeframe (so integer) of step current injection 
     '''
+    if step_current_val == None:
+        if np.count_nonzero(I_sweep) > 0:
+            step_current_val = np.unique(I_sweep[I_sweep != 0])[0]
+        else:
+            print("Multiple I values in step, unable to calculate steady state.")
+            return
 
     if step_current_val >= 0: #note that 0pA of I injected is not hyperpolarising 
         hyper = False
-        first_current_point = np.where(current_trace == np.max(current_trace) )[0][0] 
-        last_current_point = np.where(current_trace == np.max(current_trace) )[0][-1]
+        first_current_point = np.where(I_sweep == np.max(I_sweep) )[0][0] 
+        last_current_point = np.where(I_sweep == np.max(I_sweep) )[0][-1]
 
     elif step_current_val < 0 : 
         hyper = True 
-        first_current_point = np.where(current_trace == np.min(current_trace) )[0][0] 
-        last_current_point = np.where(current_trace == np.min(current_trace) )[0][-1]
+        first_current_point = np.where(I_sweep == np.min(I_sweep) )[0][0] 
+        last_current_point = np.where(I_sweep == np.min(I_sweep) )[0][-1]
 
 
     current_avg_duration = int(avg_window*(last_current_point - first_current_point))
 
-    asym_current  = np.mean(voltage_trace[ last_current_point - current_avg_duration : last_current_point  ])
+    asym_current  = np.mean(V_sweep[ last_current_point - current_avg_duration : last_current_point  ])
     
 
     return asym_current , hyper  , first_current_point, last_current_point
@@ -1314,8 +1320,178 @@ def extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True):
 
     return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
 
+def replace_nan_with_mean(array):
+        '''
+        Replaces nan values in an array with the mean of the column (for 2D arrays)
+        or with the mean of the array (for 1D arrays).
+        '''
+        if array.ndim == 1:
+            # For a 1D array, replace NaNs with the mean of the array
+            array_mean = np.nanmean(array)
+            array = np.where(np.isnan(array), array_mean, array)
+        else:
+            # For a 2D array, replace NaNs in each column with the mean of that column
+            nan_indices = np.isnan(array)
+            column_means = np.nanmean(array, axis=0)
+            array[nan_indices] = np.take(column_means, np.where(nan_indices)[1])
+
+        return array
 
 
+def spike_remover(array):
+    '''
+    removes points >2SD from the mean of any column in array
+    input: V_array (1d / 2d)
+    returns: V_array_cleaned (identical shape as input with spikes removed) 
+    '''
+    array_cleaned  = array.copy()
+    #
+    if array.ndim == 1:
+        #  1D array 
+        array_cleaned[array > np.mean(array) + 2 * np.std(array)] = np.nan
+
+        # array_diff_abs = np.abs(np.diff(array)) # OLD CODE USING DIFF
+        # threshold = np.mean(array_diff_abs) + 2 * np.std(array_diff_abs)
+        # spikes = array_diff_abs > threshold
+        # array_cleaned = array.copy()
+        # array_cleaned[:-1][spikes] = np.nan #slicing here to align lengths
+        # array_cleaned = replace_nan_with_mean(array_cleaned)
+
+    else: # 2D array case
+        
+        if array.shape[0] <= 1:
+            print('Voltage array has 1 or fewer points. MISSING DATA!')
+            return array_cleaned
+
+        # array_diff_abs = np.abs(np.diff(array, axis = 0)) #diff between consecutive points # OLD CODE USING DIFF
+        # array_diff_abs = np.vstack([array_diff_abs, np.mean(array_diff_abs, axis  = 0 ).reshape(1,-1) ])
+        # array_cleaned[array_diff_abs > np.mean(array_diff_abs , axis = 0 ) + 2*np.std(array_diff_abs , axis =  0 )] = np.nan
+
+        array_cleaned[array > np.mean(array , axis = 0 ) + 2*np.std(array, axis =  0 )] = np.nan
+        
+    array_cleaned = replace_nan_with_mean(array_cleaned)
+    return array_cleaned  
+
+def APP_splitter(V_array_or_list, drug_in, drug_out):
+    '''
+    inputs: V_array_or_list  :  voltage np.array, shape: length x num_sweeps
+            drug_in  :  integer , sweep number when drug was applied (included in APP)
+            drug_out :  integer , sweep number when drug was washed out (included in WASH)
+
+    Returns: list_PRE, list_APP, list_WASH : each a list of input file values for that condition. 
+    '''
+    if isinstance(V_array_or_list, list):
+        V_PRE  = V_array_or_list[:drug_in-1]
+        V_APP  = V_array_or_list[drug_in-1:drug_out-1]
+        V_WASH = V_array_or_list[drug_out-1:]
+
+    elif isinstance(V_array_or_list, np.ndarray):
+        V_PRE  = V_array_or_list[:, 0:drug_in-1]
+        V_APP  = V_array_or_list[:, drug_in-1:drug_out-1]
+        V_WASH = V_array_or_list[:, drug_out-1:]
+
+    return V_PRE, V_APP, V_WASH 
 
 
+def mean_RMP_APP_calculator(V_array, drug_in, drug_out, I_array=None):
+    '''
+    inputs: V_array (2D array of V_df),
+            drug_in  :  integer , sweep number when drug was applied (included in APP)
+            drug_out :  integer , sweep number when drug was washed out (included in WASH)
 
+    return: input_R_PRE, input_R_APP, input_R_WASH
+            lists of mean RMP for each sweep in PRE APP or WASH
+    
+    '''
+    V_array_cleaned  = spike_remover(V_array) #NOT WORKING JJB210427/t8
+
+    if I_array is None or (I_array == 0).all() :
+        print(" No I injected or no I data, taking RMP as all.")
+        # list of means of every column
+        mean_RMP_sweep_list  = list(np.mean(V_array_cleaned  , axis = 0))
+        
+    else: # I step in I_array
+        print('I step detected, averaging V when no I injected for each sweep.')
+        I_array_adj, V_array_adj = I_array_to_match_V (V_array, I_array)
+        zero_current_mask = (I_array_adj == 0) #boolian mask where I == 0
+        V_masked = np.where(zero_current_mask, V_array_adj, np.nan) # V where I -- 0
+        mean_RMP_sweep_list = np.nanmean(V_masked, axis=0).tolist()
+        
+
+    mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = APP_splitter(mean_RMP_sweep_list, drug_in, drug_out)
+    return mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH
+
+def mean_inputR_APP_calculator(V_array, I_array, drug_in, drug_out):
+    '''
+    input:      V_array, I_array (2D array of df shape)
+                drug_in  :  integer , sweep number when drug was applied (included in APP)
+                drug_out :  integer , sweep number when drug was washed out (included in WASH)
+
+    returns :   input_R_PRE, input_R_APP, input_R_WASH 
+                input R for each sweep = current injected / change in V in a list/array 
+    '''
+
+    I_sweep = getI_array_sweep(I_array)
+
+    input_R_ohms_V_array = []
+    
+    for index, V_sweep in enumerate(V_array.T):  # Transpose V_array to iterate over columns/sweeps
+        # print(input_R_ohms_V_array)
+        #skip first 3 sweeps as often holding I was being set or cell was not stabelised
+        if index < 2:
+            input_R_ohms_V_array.append(np.nan) #preserve sweeps for APP_splitter
+            # print(f"Appended NaN for index {index}.")
+            continue
+
+        V_sweep, I_sweep =normalise_array_length(V_sweep, I_sweep)
+
+        V_cleaned  = spike_remover(V_sweep) #remove spiking 
+
+        #fetch delta_V
+        steady_state , hyper  , first_current_point, last_current_point= steady_state_value(V_sweep, I_sweep)  #with I injection
+        rmp = np.nanmean(V_cleaned[I_sweep == 0]) #without I injection
+        delta_V_mV = abs(steady_state - rmp)
+        #fetch I injected 
+        delta_I_pA = abs(np.unique(I_sweep[I_sweep != 0])[0])
+        # fectch sweep input R (ohm)
+        delta_I_A = delta_I_pA * 1e-12  #  picoamperes to amperes
+        delta_V_V = delta_V_mV * 1e-3  # millivolts to volts
+
+        sweep_input_R_ohms = (delta_V_V / delta_I_A) 
+        input_R_ohms_V_array.append(sweep_input_R_ohms)
+        # print(f"Appended value for index {index}. ")
+
+    input_R_PRE, input_R_APP, input_R_WASH =APP_splitter(input_R_ohms_V_array, drug_in, drug_out)
+
+    return input_R_PRE, input_R_APP, input_R_WASH 
+
+
+def normalise_array_length(V_array, I_array):
+    '''
+    takes two arrays (1d / 2d) and sets the length (rows) to be same as shortest
+    '''
+    #ensure V_sweep and I_sweep are the same length
+    if len(V_array) != len(I_array):
+        # print(f"Length of V_sweep: {len(V_sweep)}, Length of I_sweep: {len(I_sweep)}") #V is usaly 400001 and I 400000
+        V_adj = V_array[:min(len(V_array), len(I_array))]
+        I_adj = I_array[:min(len(V_array), len(I_array))]
+        return V_adj, I_adj
+
+def getI_array_sweep(I_array):
+    if I_array.shape[1] > 1: 
+    # Check if all columns in I_array are identical
+        if not np.all(I_array == I_array[:, [0]]):
+            raise ValueError("Columns in I_array are not identical.")
+        I_sweep = I_array[:, 0]  # Use the first column if they are identical
+    else:
+        I_sweep = I_array[:, 0] # only 1 column
+    return I_sweep
+
+def I_array_to_match_V (V_array, I_array):
+    I_sweep = getI_array_sweep(I_array)
+    #set rows the same 
+    V_array_adj, I_sweep_adj = normalise_array_length(V_array, I_sweep)
+    #duplicate I_sweep
+    I_sweep_adj = I_sweep_adj[:, np.newaxis]
+    I_array_adj = np.tile(I_sweep_adj, (1, V_array_adj.shape[1])) 
+    return I_array_adj, V_array_adj
