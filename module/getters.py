@@ -198,6 +198,8 @@ def _handleFile(row):
         I_list, I_df = igor_exporter(path_I)
         I_array      = np.array(I_df)
     except FileNotFoundError:
+        I_list, I_df = None, None
+        I_array      = None
         print('I file not found, path:', path_I)
 
     try:
@@ -233,23 +235,27 @@ def _handleFile(row):
             print(row.folder_file)        
             
             #input_R 
-            if I_df: #if I_df exists
-                input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_df, I_df, row.drug_in, row.drug_out) #sweep means?
+            if I_array is not None: #if I exists
+                if (I_array[:, 0] != 0).any(): #all columns are the same so check column 1 for non 0 value
+                    print(f"I injected, calculating inputR ...")
+                    input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
+                    row['inputR_PRE'] = input_R_PRE
+                    row['inputR_APP'] = input_R_APP
+                    row['inputR_WASH'] = input_R_WASH
+                    pass_I_array = I_array
+                else:
+                    print("No I injected, cannot calculate input_R.")
+                    pass_I_array = None
+            else:
+                print("I_df does not exist, cannot calculate input_R.")
+                pass_I_array = None
                 
-            mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_df, I_df, row.drug_in, row.drug_out)
-
-            row['inputR_PRE'] = input_R_PRE
-            row['inputR_APP'] = input_R_APP
-            row['inputR_WASH'] = input_R_WASH
+            mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array) #with current (I) data 
             row['RMP_PRE'] = mean_RMP_PRE
             row['RMP_APP'] = mean_RMP_APP
             row['RMP_WASH'] = mean_RMP_WASH
 
 
-            #modular functions that will exist in both: 
-            #       v_array=spike_remover(v_array)
-            #       list_PRE, list_APP, list_WASH=APP_splitter(v_df, drug_in, drug_out) #ALSO WOULD LIKE TO USE BELLOW FOR pAD list of APs
-        
             # pAD classification
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
             print('pAD detection complete .... ')
