@@ -404,7 +404,7 @@ def buildApplicationFig(color_dict, cell_id=None, folder_file=None, I_set=None, 
     pAD_plot_pre_window = 50
     pAD_plot_post_window = 50
     
-    if pAD_locs is None: 
+    if pAD_locs is True: 
         # Get pAD_locs
         peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(df_V) 
         
