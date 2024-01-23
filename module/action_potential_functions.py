@@ -1,6 +1,7 @@
 
 #change name to something more appropriate later 
 
+import warnings
 import numpy as np 
 import matplotlib.pyplot as plt 
 from scipy.ndimage import gaussian_filter1d
@@ -449,6 +450,8 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
     sampling_rate    = input_sampling_rate
     sec_to_ms        = 1e3 
     ap_spike_min_height =  0 # if value if less than 0 mV - very unhealthy spike  
+    ap_width_min      = 0.1 # in ms minimum width of AP to be considered biologically plasuible
+    ap_width_max      = 2   # in ms maximum width of AP to be considered biologically plasuible
 
     ## Outputs on Peak Statistics 
 
@@ -533,7 +536,7 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         
         upshoot_loc_array = np.where(x_  <  0)[0]   # define array where the dip / upshoot happens 
         
-        #print(v_temp) 
+         
         v_peak   = np.where(v_temp == np.max(v_temp))[0][0]
 
         
@@ -555,9 +558,21 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         peak_latencies  += [ peak_latency_ ]
         
         #NEW CORRECTION
-        derivative_at_upshoot = np.diff(v_array[upshoot_locs[peak_idx] - 1 : upshoot_locs[peak_idx] + 1])[0] # dV is in ms
-        dt = sec_to_ms / sampling_rate                      # in ms should be 0.1 
-        peak_slope      += [ derivative_at_upshoot / dt ]   # in mV  / ms or V / s 
+
+        smoothed_v_array = gaussian_filter1d(v_array, 20)
+        smoothed_gradient = np.gradient(smoothed_v_array)
+
+        # Check if derivative is positive
+        if smoothed_gradient[upshoot_loc] <= 0:
+            warnings.warn("Derivative at upshoot_loc is not positive")
+            peak_slope += [0]
+        else:
+            # Calculate derivative at upshoot_loc
+            derivative_at_upshoot = smoothed_gradient[upshoot_loc]
+
+            dt = sec_to_ms / sampling_rate                      # in ms should be 0.1 
+            peak_slope      += [ derivative_at_upshoot / dt ]   # in mV  / ms or V / s 
+        
         
         # Calculation of AP widths : use a linear fit for now  - really an exponential fit be the best, and since we use a linear fit, not a problem to calculate full width rather than half width  
 
@@ -590,13 +605,13 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
             first_x  = first_x_[0]     
 
         peak_fw_ =  sec_to_ms *  (return_x  - first_x)    / sampling_rate 
-        print("peak_fw_ value:", peak_fw_)
-        if peak_fw_ < 0 : 
+        
+        if peak_fw_    < ap_width_min : 
             print('AP width negative, setting FWHM approx. as latency!!') #FIXME
-            peak_fw_ = peak_latency_
-        elif peak_fw_ > 2 : # a bit of a hack to then have a simpler calculation for the widths FIXME
+            peak_fw_   = peak_latency_
+        elif peak_fw_  > ap_width_max : # a bit of a hack to then have a simpler calculation for the widths FIXME
             print('AP width too large, setting FWHM approx. as latency!!')
-            peak_fw_ = peak_latency_        
+            peak_fw_   = peak_latency_        
         peak_fw       += [ peak_fw_ ]
 
     return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
@@ -656,9 +671,7 @@ def ap_characteristics_extractor_main(V_dataframe, critical_num_spikes = 4, all_
     
     for sweep_num in sweep_indices: 
         
-        if method == "linear": 
-            peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_slope_ , peak_fw_  =  ap_characteristics_extractor_subroutine_linear(V_dataframe, sweep_num)
-        elif method == "derivative":
+        if method == "derivative":
             peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_slope_ , peak_fw_  =  ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_num)
         else:
             print("Invalid thresholding method")
@@ -682,296 +695,28 @@ def ap_characteristics_extractor_main(V_dataframe, critical_num_spikes = 4, all_
     return peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all 
 
 
-
-#DJ: this is here so we do not lose your plotting settings for pca, kmeans and his even tho they wont run for me - each needs to be its own simple func like buildMeanAPFig()
-#and they should be in plotters
-def pAD_detection_old(V_dataframe, pca_plotting = False , kmeans_plotting = False , histogram_plotting=False):
-
-    '''
-    Input : 
-            V_dataframe   : np.array : Voltage dataframe as  np array
-            
-    Output : 
-            ap_slopes     : list of lists containing action_potential slopes (num 0f spikes x sweeps analysed)
-            ap_thresholds : list of lists containing ap_thresholds or turning points of the spike (num 0f spikes x sweeps analysed)
-            ap_width      :  
-            ap_height     :
-    '''
-
-    peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_dataframe, all_sweeps =True)
+########################      pAD DETECTION FUNCTION(S)  ####################
+ 
     
-    # Create Dataframe and append values
-    
-    pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold', 'AP_height' , 'AP_latency'])
-    
-    
-    non_nan_locs =  np.where(np.isnan(v_thresholds_all_) == False)[0] 
-    
-    if len (non_nan_locs) == 0 : 
-        pAD_df["AP_loc"] = peak_locs_corr_ 
-        pAD_df["AP_threshold"] =  v_thresholds_all_
-        pAD_df["AP_slope"] = peak_slope_all_
-        pAD_df["AP_latency"] = peak_latencies_all_
-        pAD_df["AP_height"] =  peak_heights_all_ 
-        pAD_df['AP_sweep_num'] = sweep_indices_all_
-        pAD_df["pAD"] = ""
-        pAD_df["pAD_count"] = np.nan 
-        
-        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  peak_heights_all_ , pAD_df, None
-        
-        
-    
-    
-    peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
-    v_thresholds_all   = np.array(v_thresholds_all_ )[non_nan_locs]
-    peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
-    peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
-    upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
-    peak_heights_all   = np.array(peak_heights_all_)[non_nan_locs]
-    peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
-    peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
-    sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
-    
-    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) == len(peak_heights_all) == len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) 
-    
-    
-        
-        
-    
-    
-    pAD_df["AP_loc"] = peak_locs_corr 
-    pAD_df["AP_threshold"] =  v_thresholds_all 
-    pAD_df["AP_slope"] = peak_slope_all 
-    pAD_df["AP_latency"] = peak_latencies_all
-    pAD_df["AP_height"] =  peak_heights_all 
-    pAD_df['AP_sweep_num'] = sweep_indices_all
-    pAD_class_labels = np.array(["pAD" , "Somatic"] )
-    
-    
-    
-    if len (peak_locs_corr) == 0 :
-        print("No APs found in trace")
-        pAD_df["pAD"] = ""
-        pAD_df["pAD_count"] = np.nan 
-        
-        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, None 
-    elif len (peak_locs_corr) == 1 : 
-        if v_thresholds_all[0]  < -65.0 :
-            # pAD 
-            pAD_df["pAD"] = "pAD"
-            pAD_df["pAD_count"] = 1 
-        else: 
-            pAD_df["pAD"]       = "Somatic"
-            pAD_df["pAD_count"] = 0 
-        return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df, None
-    else : 
-        pass
-
-def beta_pAD_detection(V_dataframe):
-    '''
-    Input : 
-            V_dataframe   : np.array : Voltage dataframe as  np array
-            
-    Output : 
-            ap_slopes     : list of lists containing action_potential slopes (num 0f spikes x sweeps analysed)
-            ap_thresholds : list of lists containing ap_thresholds or turning points of the spike (num 0f spikes x sweeps analysed)
-            ap_width      :  
-            ap_height     :
-    '''
-    
-    #  ESTABLISHED CONVENTION:  !!! pAD label == 1   !!!    
-    
-    
-    ### STEP 1 :  Get the action potential (AP) values and create pAD dataframe with columns and values 
-        
-    peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_dataframe, all_sweeps =True)
-    
-    # Create Dataframe and append values
-    pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold', 'AP_height' , 'AP_latency'])
-    
-    non_nan_locs =  np.where(np.isnan(v_thresholds_all_) == False)[0] 
-    
-    if len (non_nan_locs) == 0 : 
-        pAD_df["AP_loc"] = peak_locs_corr_ 
-        pAD_df["AP_threshold"] =  v_thresholds_all_
-        pAD_df["AP_slope"] = peak_slope_all_
-        pAD_df["AP_latency"] = peak_latencies_all_
-        pAD_df["AP_height"] =  peak_heights_all_ 
-        pAD_df['AP_sweep_num'] = sweep_indices_all_
-        pAD_df['upshoot_loc']  = upshoot_locs_all_ 
-        pAD_df["pAD"] = ""
-        pAD_df["pAD_count"] = np.nan 
-        
-        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  peak_heights_all_ , pAD_df
-        
-
-    peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
-    v_thresholds_all   = np.array(v_thresholds_all_ )[non_nan_locs]
-    peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
-    peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
-    upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
-    peak_heights_all   = np.array(peak_heights_all_)[non_nan_locs]
-    peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
-    peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
-    sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
-    
-    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) == len(peak_heights_all) == len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) 
-    
-    pAD_df["AP_loc"] = peak_locs_corr 
-    pAD_df["upshoot_loc"] =  upshoot_locs_all   
-    pAD_df["AP_threshold"] =  v_thresholds_all 
-    pAD_df["AP_slope"] = peak_slope_all 
-    pAD_df["AP_latency"] = peak_latencies_all
-    pAD_df["AP_height"] =  peak_heights_all 
-    pAD_df['AP_sweep_num'] = sweep_indices_all
-    pAD_class_labels = np.array(["pAD" , "Somatic"] )
-    
-    if len (peak_locs_corr) == 0 :
-        print("No APs found in trace")
-        pAD_df["pAD"] = ""
-        pAD_df["pAD_count"] = np.nan 
-        
-        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df
-    elif len (peak_locs_corr) == 1 : 
-        if v_thresholds_all[0]  < -65.0 :
-            # pAD 
-            pAD_df["pAD"] = "pAD"
-            pAD_df["pAD_count"] = 1 
-        else: 
-            pAD_df["pAD"]       = "Somatic"
-            pAD_df["pAD_count"] = 0 
-        return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df
-    else : 
-        pass
-    
-    
-    
-    # STEP 2 : Make all labels for upshoot potential < -65 mV   = pAD  
-    
-    pAD_df_pAD_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  < -65.0 ]
-    pAD_df_uncertain_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  > -65.0 ]
-    
-    pAD_df_mod = pd.concat([ pAD_df_pAD_via_threshold , pAD_df_uncertain_via_threshold] , axis = 0) 
-
-    #pAD_df["AP_loc"][np.where(pAD_df["AP_threshold"] < - 65)[0]]
-
-    # Data for fitting procedure
-    
-    X = pAD_df_mod[["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
-    
-    # Check if 2 clusters are better than 1 
-    
-    kmeans_1 = KMeans(n_clusters=1, n_init = 1).fit(X)
-    kmeans_2 = KMeans(n_clusters=2, n_init = 1 ).fit(X)
-    
-    wcss_1 = kmeans_1.inertia_
-    wcss_2 = kmeans_2.inertia_
-    
-    
-    true_labels_combined = None 
-    
-    #print(type(kmeans_2.labels_))
-    #print(wcss_1, wcss_2)
-
-    if wcss_2 < wcss_1 :
-        true_labels_combined = kmeans_2.labels_
-        # 2 CLUSTERS  are a better fit than 1  
-        # Append label column to type 
-        #print("Mean Voltage Threshold of Cluster 1")
-        #print(np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 0] ))
-        #print("Mean Voltage Threshold of Cluster 2")
-        #print(np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ))
-        #print(np.nanmean( peak_slope_all  [kmeans_2.labels_ == 0] ) , np.nanmean( peak_slope_all  [kmeans_2.labels_ == 1] ))
-        
-        if np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 0] )  < np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ):
-            pAD_df["pAD"] = pAD_class_labels[np.array(kmeans_2.labels_)]
-            pAD_df["pAD_count"] = np.sum(kmeans_2.labels_)
-        else:
-            pAD_df["pAD"] = pAD_class_labels[np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  )]
-            pAD_df["pAD_count"] = np.sum(np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  ))
-              
-        pAD_df["num_ap_clusters"] = 2 
-        
-    else :
-         true_labels_combined = kmeans_1.labels_
-         # JUST 1 CLUSTER
-         if np.nanmean(v_thresholds_all )  <= -65.0 : 
-             print("check file all APs seems pAD")
-             pAD_df["pAD"] = "pAD"
-             pAD_df["pAD_count"] = len(v_thresholds_all)
-         else : 
-          pAD_df["pAD"] = "Somatic"
-         pAD_df["num_ap_clusters"] = 1
-         pAD_df["pAD_count"] = 0 
-         
-    
-    
-    # Do the same but for the uncertain bit 
-         
-    X = pAD_df_uncertain_via_threshold [["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
-    
-    # Check if 2 clusters are better than 1 
-    
-    kmeans_1 = KMeans(n_clusters=1, n_init = 1).fit(X)
-    kmeans_2 = KMeans(n_clusters=2, n_init = 1 ).fit(X)
-    
-    wcss_1 = kmeans_1.inertia_
-    wcss_2 = kmeans_2.inertia_
-    
-    
-    true_labels_split = None 
-    
-    #print(type(kmeans_2.labels_))
-    #print(wcss_1, wcss_2)
-
-    if wcss_2 < wcss_1 :
-        true_labels_split  = kmeans_2.labels_
-        
-    else :
-         true_labels_split = kmeans_1.labels_
-        
-    # Print % overlap 
-    flip = False 
-    
-    if pAD_df_pAD_via_threshold.shape[0] > 0 : 
-        if true_labels_combined[0] == 1 :
-            pass
-        else: 
-            flip = True 
-    
-    true_labels_ = np.hstack((np.ones(pAD_df_pAD_via_threshold.shape[0])  ,  true_labels_split  ) )
-    
-    if flip :
-        true_labels_combined = 1 - true_labels_combined
-    
-    
-    
-    print(sum( true_labels_  == true_labels_combined  )  / len(  true_labels_combined   )   , pAD_df_pAD_via_threshold.shape[0] /  pAD_df.shape[0]  )
-    
-    
-    return true_labels_, true_labels_split, true_labels_combined 
-
-    
-
-
 def pAD_detection(V_dataframe):
     '''
     Input : 
             V_dataframe   : np.array : Voltage dataframe as  np array
             
     Output : 
-            ap_slopes     : list of lists containing action_potential slopes (num 0f spikes x sweeps analysed)
-            ap_thresholds : list of lists containing ap_thresholds or turning points of the spike (num 0f spikes x sweeps analysed)
-            ap_width      :  
-            ap_height     :
+            peak_latencies_all: 
+            v_thresholds_all  : 
+            peak_slope_all    :   
+            pAD_df            : 
+
     '''
-    
+      
     ### STEP 1 :  Get the action potential (AP) values and create pAD dataframe with columns and values 
         
     peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_dataframe, all_sweeps =True)
     
     # Create Dataframe and append values
-    pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold', 'AP_height' , 'AP_latency'])
+    pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold',  'AP_width' , 'AP_latency'])
     
     non_nan_locs =  np.where(np.isnan(v_thresholds_all_) == False)[0] 
     
@@ -980,13 +725,13 @@ def pAD_detection(V_dataframe):
         pAD_df["AP_threshold"] =  v_thresholds_all_
         pAD_df["AP_slope"] = peak_slope_all_
         pAD_df["AP_latency"] = peak_latencies_all_
-        pAD_df["AP_height"] =  peak_heights_all_ 
+        pAD_df["AP_width"] = peak_fw_all_
         pAD_df['AP_sweep_num'] = sweep_indices_all_
         pAD_df['upshoot_loc']  = upshoot_locs_all_ 
         pAD_df["pAD"] = ""
         pAD_df["pAD_count"] = np.nan 
         
-        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  peak_heights_all_ , pAD_df
+        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  pAD_df
         
 
     peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
@@ -994,19 +739,19 @@ def pAD_detection(V_dataframe):
     peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
     peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
     upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
-    peak_heights_all   = np.array(peak_heights_all_)[non_nan_locs]
     peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
     peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
     sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
     
-    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) == len(peak_heights_all) == len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) 
+    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) ==  len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) 
     
     pAD_df["AP_loc"] = peak_locs_corr 
     pAD_df["upshoot_loc"] =  upshoot_locs_all   
     pAD_df["AP_threshold"] =  v_thresholds_all 
     pAD_df["AP_slope"] = peak_slope_all 
     pAD_df["AP_latency"] = peak_latencies_all
-    pAD_df["AP_height"] =  peak_heights_all 
+    pAD_df["AP_width"] = peak_fw_all
+    
     pAD_df['AP_sweep_num'] = sweep_indices_all
     pAD_class_labels = np.array(["pAD" , "Somatic"] )
     
@@ -1015,7 +760,7 @@ def pAD_detection(V_dataframe):
         pAD_df["pAD"] = ""
         pAD_df["pAD_count"] = np.nan 
         
-        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df
+        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  , pAD_df
     elif len (peak_locs_corr) == 1 : 
         if v_thresholds_all[0]  < -65.0 :
             # pAD 
@@ -1024,15 +769,20 @@ def pAD_detection(V_dataframe):
         else: 
             pAD_df["pAD"]       = "Somatic"
             pAD_df["pAD_count"] = 0 
-        return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df
+        return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  pAD_df
     else : 
         pass
     
+
+    # STEP 2 : Make all labels for upshoot potential < -65 mV   = pAD  
     
+    pAD_df_pAD_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  < -65.0 ]    # TRUE pADs
+    pAD_df_uncertain_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  > -65.0 ]
+    pAD_df_pAD_via_threshold["pAD"] = "True pAD"
     
-    # Data for fitting procedure
+    # Data for fitting procedure : Only those that are uncertain go into the classifier 
     
-    X = pAD_df[["AP_slope", "AP_threshold", "AP_height", "AP_latency"]]
+    X = pAD_df_uncertain_via_threshold[["AP_slope", "AP_threshold",  "AP_latency"]]
     
     # Check if 2 clusters are better than 1 
     
@@ -1042,9 +792,7 @@ def pAD_detection(V_dataframe):
     wcss_1 = kmeans_1.inertia_
     wcss_2 = kmeans_2.inertia_
     
-    #print(type(kmeans_2.labels_))
-    #print(wcss_1, wcss_2)
-
+    
     if wcss_2 < wcss_1 :
         # 2 CLUSTERS  are a better fit than 1  
         # Append label column to type 
@@ -1073,8 +821,12 @@ def pAD_detection(V_dataframe):
           pAD_df["pAD"] = "Somatic"
          pAD_df["num_ap_clusters"] = 1
          pAD_df["pAD_count"] = 0 
+
+
+    pAD_df = pd.concat([ pAD_df_pAD_via_threshold , pAD_df] , axis = 0) 
+
     
-    return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  
+    return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,   pAD_df  
 
 
 
