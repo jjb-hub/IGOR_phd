@@ -417,153 +417,6 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 
 ########## ACTION POTENTIAL RETROAXONAL / ANTIDROMIC
 
-#newer DJ 'subroutine functions'
-#DJ check - if i recall this will return AP charecteristics for the first two sweeps wher APs are present ? correct?
-def ap_characteristics_extractor_subroutine_linear(V_dataframe, sweep_index, main_plot = False, input_sampling_rate = 1e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, input_backwards_window = 100 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
-    '''
-    input: 
-    V_dataframe : Voltage dataframe obtained from running igor extractor 
-    sweep_index : integer representing the sweep number of the voltage file. 
-    
-    outputs: 
-    peak_locs_corr : location of exact AP peaks 
-    upshoot_locs   : location of thresholds for AP i.e. where the voltage trace takes the upshoot from   
-    v_thresholds   : voltage at the upshoot point
-    peak_heights   : voltage diff or height from threshold point to peak 
-    peak_latencies : time delay or latency for membrane potential to reach peak from threshold
-    peak_slope     : rate of change of membrane potential 
-    peak_fwhm      : DUMMIES for now, change later: 
-   
-    '''
-    # Other Input Hyperparameters 
-    # need the first two sweeps from 1st spike and 2nd spike. if 1st ap has around 3 spikes (parameter) then only first is good enough otw go to the 2nd trace 
-    
-    ap_backwards_window = input_backwards_window
-    pre_ap_baseline_forwards_window = input_pre_ap_baseline_forwards_window 
-    ap_fwhm_window  = input_ap_fwhm_window
-    gradient_order = input_gradient_order
-    significance_factor = input_significance_factor 
-    plot_window      = input_smoothing_kernel 
-    slide_window     = input_slide_window      # slides 200 frames from the prev. AP  200 frames ~ 20 ms 
-    smoothing_kernel = input_smoothing_kernel
-    main_big_plot    = main_plot
-    inner_loop_plot  = False
-    sampling_rate    = input_sampling_rate
-    sec_to_ms        = 1e3 
-
-    ## Outputs on Peak Statistics 
-
-    peak_locs_corr  = []            #  location of peaks *exact^
-    upshoot_locs    = []            #  location of voltage thresholds 
-    v_thresholds    = []            #  value of voltage thresholds in mV
-    peak_heights    = []            #  peak heights in mV, measured as difference of voltage values at peak and threshold 
-    peak_latencies  = []            #  latency or time delay between peak and threshold points
-    peak_fw         = []            #  width of peak at half maximum
-    peak_slope      = []            #  peak height / peak latency
-
-    # Make np array of dataframe
-
-    df_V_arr = np.array(V_dataframe)
-    sweep_idx = sweep_index
-
-    # Get rough estimate of peak locations 
-
-    v_array = df_V_arr[:,sweep_idx]
-    v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(v_array) 
-
-    for peak_idx in range(len(peak_locs)) : 
-
-
-        # Correct for peak offsets 
-
-        v_max  = np.max(v_array[peak_locs[peak_idx] - ap_backwards_window : peak_locs[peak_idx] + pre_ap_baseline_forwards_window]) 
-        peak_locs_shift = ap_backwards_window - np.where(v_array[peak_locs[peak_idx] - ap_backwards_window: peak_locs[peak_idx] + pre_ap_baseline_forwards_window] == v_max)[0][0]
-
-        peak_locs_corr += [ peak_locs[peak_idx] - peak_locs_shift ]   
-
-
-        if peak_idx == 0 : 
-            start_loc = slide_window
-            
-        else:
-            start_loc = peak_locs_corr[peak_idx - 1 ]  + slide_window
-        end_loc = peak_locs_corr[peak_idx]
-
-        # Get AP slice
-        v_temp = v_array[end_loc - ap_backwards_window: end_loc ]
-
-        # Define x, y for linear regression fit
-        y_all = gaussian_filter1d(v_temp   , smoothing_kernel)        # entire AP slice 
-        y     = gaussian_filter1d(v_temp[0:pre_ap_baseline_forwards_window]   , smoothing_kernel)        # pre AP baseline
-
-        x = np.arange(0, len(y))
-        x_all = np.arange(0, len(y_all))
-        res = stats.linregress(x, y)                # lin reg fit
-        # residual error fit 
-        res_error = abs(y_all - res.intercept + res.slope*x_all) 
-        res_err_mean , res_err_std = np.mean(res_error[0:pre_ap_baseline_forwards_window]) , np.std(res_error[0:pre_ap_baseline_forwards_window])
-        
-        upshoot_loc_array = np.where( res_error > res_err_mean + significance_factor*res_err_std ) [0]# define an array first in case its empty
-        
-        # print(upshoot_loc_array)
-        if len(upshoot_loc_array) ==  0:
-            
-            return [np.nan],[np.nan],[np.nan],[np.nan],[np.nan],[np.nan],[np.nan] #returning nan as was unable to find upshoot from linear method
-        
-        else:
-            upshoot_loc = upshoot_loc_array[0] #location of first AP upshoot
-            
-    
-        if inner_loop_plot: 
-            plt.plot(v_temp)
-            plt.plot(upshoot_loc, v_temp[upshoot_loc], '*')
-            plt.show()
-
-        
-        # Calculate AP metrics here 
-        upshoot_locs += [    peak_locs_corr[peak_idx] - ap_backwards_window + upshoot_loc ]
-        v_thresholds += [v_array[upshoot_locs[peak_idx]]]
-
-
-        peak_heights    += [  v_array[peak_locs_corr[peak_idx]]  - v_array[upshoot_locs[peak_idx]]   ]
-        peak_latencies  += [ sec_to_ms * (peak_locs_corr[peak_idx] - upshoot_locs[peak_idx])  / sampling_rate ]
-        peak_slope      += [ peak_heights[peak_idx]  / peak_latencies[peak_idx] ] 
-        
-        # Calculation of AP widths : use a linear fit for now  - really an exponential fit be the best, and since we use a linear fit, not a problem to calculate full width rather than half width  
-
-        upshoot_x = peak_locs_corr[peak_idx] - ap_backwards_window + upshoot_loc 
-        upshoot_y = v_array[upshoot_locs[peak_idx]]
-
-        peak_x    = peak_locs_corr[peak_idx]
-        peak_y    = v_array[peak_locs_corr[peak_idx]]
-
-        return_x_array   = np.where( v_array <= upshoot_y  )[0] 
-        return_x_ = return_x_array[return_x_array > peak_x]
-        return_x = return_x_[0]
-        return_y  =  v_array[return_x]
-
-
-        
-        peak_fw       += [ sec_to_ms * (return_x  - upshoot_x)  / sampling_rate ]
-
-                       
-    # Plotting Stuff
-    if main_big_plot: 
-        plot_window = 500 
-
-        for idx in range(len(peak_locs_corr)):    
-
-            fig  = plt.figure(figsize = (20,20))
-            plt.plot(v_array[peak_locs_corr[idx] - plot_window : peak_locs_corr[idx] + plot_window    ])
-            plt.plot( upshoot_locs[idx] -  peak_locs_corr[idx] + plot_window , v_array[upshoot_locs[idx]  ]  , '*', label = 'Threshold')
-            plt.plot(  plot_window , v_array[peak_locs_corr[idx]]  , '*', label = 'Peak')
-            plt.legend()
-            plt.show()
-
-    return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
-
-
-
 def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index, main_plot = False, input_sampling_rate = 1e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, input_backwards_window = 100 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
     '''
     input: 
@@ -576,7 +429,7 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
     v_thresholds   : voltage at the upshoot poiny
     peak_heights   : voltage diff or height from threshold point to peak 
     peak_latencies : time delay or latency for membrane potential to reach peak from threshold
-    peak_slope     : rate of change of membrane potential 
+    peak_slope     : Rate of change/derivative of membrane potential AT the upshoot location
     peak_fwhm      : DUMMIES for now, change later: 
    
     '''
@@ -604,7 +457,7 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
     v_thresholds    = []            #  value of voltage thresholds in mV
     peak_heights    = []            #  peak heights in mV, measured as difference of voltage values at peak and threshold 
     peak_latencies  = []            #  latency or time delay between peak and threshold points
-    peak_fw         = []            #  width of peak at half maximum
+    peak_fw         = []            #  width of peak at HALF MAXIMUM (FWHM abbreviated here to fw for brevity)
     peak_slope      = []            #  peak height / peak latency
 
     # Make np array of dataframe
@@ -617,14 +470,13 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
     v_array = df_V_arr[:,sweep_idx]
     v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(v_array) 
     v_deriv_transformed = np.heaviside( -np.diff(v_array)+ np.exp(1), 0 )
+
+
+
     
     if len(peak_locs) == 0 :
         print("no peaks found in trace..")
         return  [] ,   [] ,  []  , [] ,  [] ,  [] , [] 
-    
-    
-    
-       
 
     for peak_idx in range(len(peak_locs)) : 
 
@@ -693,13 +545,19 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         
         
         # Calculate AP metrics here 
-        upshoot_locs += [    peak_locs_corr[peak_idx] - ap_backwards_window + upshoot_loc ]
+        upshoot_loc  =   peak_locs_corr[peak_idx] - ap_backwards_window + upshoot_loc
+        upshoot_locs += [   upshoot_loc  ]
         v_thresholds += [v_array[upshoot_locs[peak_idx]]]
 
 
         peak_heights    += [  v_array[peak_locs_corr[peak_idx]]  - v_array[upshoot_locs[peak_idx]]   ]
-        peak_latencies  += [ sec_to_ms * (peak_locs_corr[peak_idx] - upshoot_locs[peak_idx])  / sampling_rate ]
-        peak_slope      += [ peak_heights[peak_idx]  / peak_latencies[peak_idx] ] 
+        peak_latency_   = sec_to_ms * (peak_locs_corr[peak_idx] - upshoot_locs[peak_idx])  / sampling_rate
+        peak_latencies  += [ peak_latency_ ]
+        
+        #NEW CORRECTION
+        derivative_at_upshoot = np.diff(v_array[upshoot_locs[peak_idx] - 1 : upshoot_locs[peak_idx] + 1])[0] # dV is in ms
+        dt = sec_to_ms / sampling_rate                      # in ms should be 0.1 
+        peak_slope      += [ derivative_at_upshoot / dt ]   # in mV  / ms or V / s 
         
         # Calculation of AP widths : use a linear fit for now  - really an exponential fit be the best, and since we use a linear fit, not a problem to calculate full width rather than half width  
 
@@ -730,8 +588,16 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
             
             return_x = return_x_[0]
             first_x  = first_x_[0]     
-            
-        peak_fw       += [ sec_to_ms * (return_x  - first_x)  / sampling_rate ]
+
+        peak_fw_ =  sec_to_ms *  (return_x  - first_x)    / sampling_rate 
+        print("peak_fw_ value:", peak_fw_)
+        if peak_fw_ < 0 : 
+            print('AP width negative, setting FWHM approx. as latency!!') #FIXME
+            peak_fw_ = peak_latency_
+        elif peak_fw_ > 2 : # a bit of a hack to then have a simpler calculation for the widths FIXME
+            print('AP width too large, setting FWHM approx. as latency!!')
+            peak_fw_ = peak_latency_        
+        peak_fw       += [ peak_fw_ ]
 
     return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
 
