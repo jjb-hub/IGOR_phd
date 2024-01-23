@@ -28,7 +28,7 @@ import numpy as np
 
 ########## USER ?
 #FIX ME POU IN RIGHT PLACE
-## New function DJ : 
+
 def generate_V_pAD_df(folder_file): 
     '''
     Generates pAD_df, V_array  
@@ -55,17 +55,16 @@ def generate_V_pAD_df(folder_file):
 
 def sigmoid_fit_0_0_trim (x,y, zeros_to_keep = 3):
     '''
-    trims 0's in FI x,y data to be consistent for sigmoid fit'
-    Parameters
-    ----------
-    x : list - I values for FI curve 
-    y : list - firing frequency in Hz
-    zeros_to_keep : int - default is 3 - number of 0's to keep for 0APs in a negative I injection steps'
+    Set equal number of 0 values at start of x and y. 
+ 
+    input:
+        x (list): I values for FI curve
+        y (list): Firing frequency in Hz?
+        zeros_to_keep (int): Number of 0 to be kept. Defult = 3.
 
-    Returns
-    -------
-    x_cut : list - trimed data 
-    y_cut : list - trimed data 
+    return:
+        x_cut (list): trimmed x 
+        y_cut (list): trimmed y 
 
     '''
     number_of_0_at_start = np.where(np.diff(y)>0) [0][0] +1
@@ -108,42 +107,63 @@ def trim_after_AP_dropoff(x,y):
                 
 
 def sigmoid(x, L ,x0, k):
-    ''' sigmoid function: 
-    # https://stackoverflow.com/questions/55725139/fit-sigmoid-function-s-shape-curve-to-data-using-python '''
+    ''' 
+    Sigmoid function: y = L / (1 + exp(-k*(x-x0))
+    '''
     y = L / (1 + np.exp(-k*(x-x0))) # +b #b is the y intercept and has been removed as b = 0 for FI curves
     return (y)
 
-def fit_sigmoid(xdata, ydata, maxfev = 5000, visualise = False): 
+def fit_sigmoid(xdata, ydata, maxfev = 5000, visualise = False):
+    """
+    Fits a sigmoid curve to the given data using non-linear least squares. The sigmoid function is defined as y = L / (1 + exp(-k*(x-x0))).
+    input:
+        xdata (array-like): The x-coordinates of the data points.
+        ydata (array-like): The y-coordinates of the data points.
+        maxfev (int, optional): The maximum number of function evaluations (default is 5000).
+        visualise (bool, optional): If True, the function will plot the data points and the fitted curve (default is False).
+
+    output:
+        xfit (numpy.ndarray): The x-values of the fitted sigmoid curve.
+        yfit (numpy.ndarray): The y-values of the fitted sigmoid curve.
+        popt (list): The optimized parameters for the sigmoid curve. Format: [L, x0, k], where:
+                    L is the curve's maximum value,
+                    x0 is the x-value of the sigmoid's midpoint,
+                    k is the steepness of the curve.
+    """ 
     p0 = [max(ydata), np.median(xdata),0] # mandatory initial guess
-    
     popt, pcov = curve_fit(sigmoid, xdata, ydata,p0, method='dogbox', maxfev = maxfev) #popt =  [L ,x0, k] 
     # RuntimeWarning: overflow encountered in exp - 
     # y = L / (1 + np.exp(-k*(x-x0))) 
-
     xfit = np.linspace(min(xdata), max(xdata), 1000)#generate points x and y for function best fit
     yfit = sigmoid(xfit, *popt)
-
     if visualise == True :
         plt.figure()
         plt.plot(xdata, ydata, 'o', label='data')
         plt.plot(xfit,yfit, label='fit')
         plt.legend(loc='best')
-
     return xfit, yfit , popt 
 
 def steady_state_value(V_sweep, I_sweep, step_current_val=None,  avg_window = 0.5):
     ''' 
-    Takes in the following 
-    V_sweep:  a single voltage trace so 1d time series (single sweep)
-    I_sweep: its corresponding current trace (again 1d timeseries) (single sweep)
-    step_current_val: step current value so a scalar float (value in pA)
-    avg_window: what fraction of step current duration do we average? how do you chose which 50%?
+    """
+    Calculates the steady state value of a voltage trace during a current injection step.
 
-    Returns: 
-    asym_current: the steady state value from any step current injection
-    hyper : boolen value     indicating whether step current is hyperpolarising  or not 
-    first_current_point = first timeframe (so integer) of step current injection 
-    '''
+    Input:
+        V_sweep (array-like): A 1D time series representing a single voltage trace (single sweep).
+        I_sweep (array-like): The corresponding 1D time series for the current trace (single sweep).
+        step_current_val (float, optional): The value of the step current injection in pA. If not provided, it is derived from the unique non-zero value in I_sweep.
+        avg_window (float, optional): The fraction of the step current duration used for averaging to determine the steady state value. Default is 0.5.
+
+    Output:
+        asym_current (float): The steady state value of the voltage trace during the step current injection.
+        hyper (bool): Indicates whether the step current is hyperpolarizing (True) or not (False).
+        first_current_point (int): The index of the first timeframe of the step current injection.
+        last_current_point (int): The index of the last timeframe of the step current injection.
+
+    Note:
+        The function determines whether the step current is hyperpolarizing based on the sign of 'step_current_val'.
+        It calculates the steady state value ('asym_current') by averaging the voltage trace over a window at the end of the current injection step.
+  '''
     if step_current_val == None:
         if np.count_nonzero(I_sweep) > 0:
             step_current_val = np.unique(I_sweep[I_sweep != 0])[0]
@@ -161,38 +181,35 @@ def steady_state_value(V_sweep, I_sweep, step_current_val=None,  avg_window = 0.
         first_current_point = np.where(I_sweep == np.min(I_sweep) )[0][0] 
         last_current_point = np.where(I_sweep == np.min(I_sweep) )[0][-1]
 
-
     current_avg_duration = int(avg_window*(last_current_point - first_current_point))
-
     asym_current  = np.mean(V_sweep[ last_current_point - current_avg_duration : last_current_point  ])
-    
 
     return asym_current , hyper  , first_current_point, last_current_point
 
 def array_peak_cleaner(input_array, prominence = 10 , threshold = -55 ,  peak_pre_window = 5 ):
-    
+    '''
+    DEFINED BUT NEVER USED DJ_RESOLVE
+    '''
    
     array_cleaned = input_array.copy()
     
     array_diff_abs = np.diff(input_array) 
     array_diff_abs = np.hstack([array_diff_abs , np.mean(array_diff_abs)   ])
-    
-   
-    
     array_cleaned[array_diff_abs  > np.mean(array_diff_abs) + 2*np.std(array_diff_abs) ] = np.nan
-    array_cleaned = array_cleaned[~np.isnan(array_cleaned) ] 
-     
-    
+    array_cleaned = array_cleaned[~np.isnan(array_cleaned) ]  
     return array_cleaned, None 
 
 def calculate_max_firing(voltage_array, input_sampling_rate=1e4): #HARD CODE sampeling rate
-    '''
-    Function to calculate max firing of given voltage traces in Hz
-    Input : 
-            voltage_array : 2d array containing sweeps of voltage recordings / traces for different step currents
-    Output: 
-            max_firing : float in Hz 
-    '''
+    """
+    Calculates the maximum firing rate (Hz) of action potentials in a series of voltage traces.
+
+    Args:
+        voltage_array (np.ndarray): A 2D array of voltage traces, where each column represents a different sweep.
+        input_sampling_rate (float, optional): The sampling rate of the voltage traces (default: 10000 Hz).
+
+    Returns:
+        max_firing (float): The maximum firing rate in Hz, based on the sweep with the highest number of action potentials.
+    """
     num_aps_all  = np.array(num_ap_finder(voltage_array))           # get num aps from each sweep
     index_max = np.where(num_aps_all == max(num_aps_all)) [0][0]    # get trace number with max aps 
     sampling_rate = input_sampling_rate
@@ -372,18 +389,17 @@ def sag_current_analyser(voltage_array, current_array, input_step_current_values
 
 def ap_finder(voltage_trace, smoothing_kernel = 10):
     '''
-    most basic AP detector for a 1D array of voltage 
-    Parameters
-    ----------
-    voltage_trace : 1D array of Voltage
-    smoothing_kernel : int, optional, default is 10.
-
-    Returns
-    -------
-    v_smooth : array of smoothed points
-    peak_locs : array of peak locations 
-    peak_info : dict scipy auto generatde dictionary not used in this code
-    num_peaks : int the number of peaks in trace 
+    Lowest level AP detector. Detects action potentials in a 1D voltage trace using peak detection.
+    
+    Input:
+        voltage_trace (numpy.ndarray): A 1D array representing a voltage trace.
+        smoothing_kernel (int): Size of the kernel for Gaussian smoothing (default 10).
+    
+    Output:
+        v_smooth (numpy.ndarray): Smoothed voltage trace.
+        peak_locs (numpy.ndarray): Indices of detected peaks (action potentials).
+        peak_info (dict): Scipy dictionary of peak info.
+        num_peaks (int): Number of detected peaks.
     '''
     v_smooth = gaussian_filter1d(voltage_trace , smoothing_kernel)
     peak_locs , peak_info = sg.find_peaks(v_smooth, height = 10 + np.average(v_smooth), distance = 2, 
@@ -396,16 +412,13 @@ def ap_finder(voltage_trace, smoothing_kernel = 10):
 
 def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ explain
     '''
-    takes in as input full voltage array, i.e. single ibw file containing 
+    Counts the number of action potentials in each sweep (column) of a voltage array.
 
-    Parameters
-    ----------
-    voltage_array : 1D array of Voltage
+    input:
+        voltage_array (np.ndarray): A 2D array of voltage traces, where each column represents a sweep.
 
-    Returns
-    -------
-    num_aps_all : int number of all present APs
-
+    output:
+        num_aps_all (list): The number of action potentials in each sweep.
     '''
     num_aps_all = []
     for idx in range(voltage_array.shape[-1]): 
@@ -1087,7 +1100,7 @@ def beta_pAD_detection(V_dataframe):
 
     
 
-
+#ASSUMING THIS IS THE BEST pAD DECTOR (beta_ and  _old also exist and need to be check for useful shit )
 def pAD_detection(V_dataframe):
     '''
     Input : 
@@ -1217,16 +1230,16 @@ def pAD_detection(V_dataframe):
 
 def extract_FI_x_y (path_I, path_V):
     '''
-    Parameters
-    ----------
-    path_I : string - path to I data 
-    path_V : string - path to V data 
+    Extracts data for Frequency-Current (FI) relationship from voltage and current recordings.
 
-    Returns
-    -------
-    x : list - I injectionin pA
-    y : list - AP number  ### currently per sweep but needs to be p in Hz (APs/sec) FIX ME 
-    v_rest : int - V when ni I injected
+    Input:
+        path_I (str): Path to the current (I) data file.
+        path_V (str): Path to the voltage (V) data file.
+
+    Returns:
+        x (list): List of injected current values in picoamperes (pA) for each sweep.
+        y (list): List of action potential counts for each sweep.
+        v_rest (float): Average resting membrane potential (in millivolts) calculated when no current is injected.
     '''
     _, df_V = igor_exporter(path_V) # _ will be the continious wave which is no use here
     _, df_I = igor_exporter(path_I)
@@ -1268,33 +1281,33 @@ def extract_FI_x_y (path_I, path_V):
 
 def extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True):
     '''
-    Takes the x,y data of the FI curve and calculates rheobase (I in pA at x intercept) and the slope of the FI curve either a liniar fit or  the k of a sigmoid
 
-    Parameters
-    ----------
-    x : 1D array (usualy I in pA)
-    y : 1D array (usualy number of APs per sweep )
-    slope_liniar : True / False if false thank than a sigmod fit will be done and the k value taken
+    Calculates the slope of the frequency-current (FI) curve and the rheobase threshold.
 
-    Returns
-    -------
-    slope : int
-    rheobase_threshold : int (in pA)
+    input:
+        x (numpy.ndarray): 1D array representing the current input (usually in pA).
+        y (numpy.ndarray): 1D array representing the number of action potentials per sweep.
+        slope_linear (bool): If True, a linear fit is used to calculate the slope; if False, a sigmoid fit is used, and the slope is determined from the 'k' value of the sigmoid (default True).
+
+    Returns:
+        slope (float): The slope of the FI curve. It's either the linear slope or the 'k' value from the sigmoid fit.
+        rheobase_threshold (float): The calculated rheobase threshold in pA, determined as the x-intercept of the linear fit of the FI curve.
+
 
     '''
-    list_of_non_zero = [i for i, element in enumerate(y) if element!=0]
-    x_threshold = np.array (x[list_of_non_zero[0]:list_of_non_zero[0]+3])# taking the first 3 non zero points to build linear fit
+    list_of_non_zero = [i for i, element in enumerate(y) if element!=0] #indicies of non-0 element in y
+
+    #need to handle pAD here 
+    x_threshold = np.array (x[list_of_non_zero[0]:list_of_non_zero[0]+3])# taking the first 3 non zero points to build linear fit corisponsing to the first 3 steps with APs
     y_threshold = np.array(y[list_of_non_zero[0]:list_of_non_zero[0]+3])
     
-    #liniar_FI_slope
+    # rehobased threshold with linear
     coef = np.polyfit(x_threshold,y_threshold,1) #coef = m, b #rheobase: x when y = 0 (nA) 
     rheobase_threshold = -coef[1]/coef[0] #-b/m
-    
+    #liniar_FI_slope
     if slope_liniar == True:
-        FI_slope_linear = coef[0]
-        
-    else:
-    #sigmoid_FI_slope
+        FI_slope_linear = coef[0]  
+    else: #sigmoid_FI_slope
         x_sig, y_sig = trim_after_AP_dropoff(x,y) #remove data after depolarisation block/AP dropoff
         x_sig, y_sig = sigmoid_fit_0_0_trim ( x_sig, y_sig, zeros_to_keep = 3) # remove excessive (0,0) point > 3 preceeding first AP
         x_fit, y_fit , popt = fit_sigmoid( x_sig, y_sig, maxfev = 1000000, visualise = False) #calculate sigmoid best fit #popt =  [L ,x0, k]  
