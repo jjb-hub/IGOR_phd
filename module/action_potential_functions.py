@@ -573,7 +573,7 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
         # Check if derivative is positive
         if smoothed_gradient[upshoot_loc] <= 0:
             warnings.warn("Derivative at upshoot_loc is not positive")
-            peak_slope += [0]
+            peak_slope += [np.nan] # FIXME : negative peak slopes should not occur, if they do, need more smoothing
         else:
             # Calculate derivative at upshoot_loc
             derivative_at_upshoot = smoothed_gradient[upshoot_loc]
@@ -618,7 +618,8 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
             print('AP width negative, setting FWHM approx. as latency!!') #FIXME
             peak_fw_   = peak_latency_
         elif peak_fw_  > ap_width_max : # a bit of a hack to then have a simpler calculation for the widths FIXME
-            print('AP width too large, setting FWHM approx. as latency!!')
+            # FIXME : happens way too often so hid the print out, needs to be fixed
+            #print('AP width too large, setting FWHM approx. as latency!!')
             peak_fw_   = peak_latency_        
         peak_fw       += [ peak_fw_ ]
 
