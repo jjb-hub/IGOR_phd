@@ -776,14 +776,29 @@ def pAD_detection(V_dataframe):
 
     # STEP 2 : Make all labels for upshoot potential < -65 mV   = pAD  
     
-    pAD_df_pAD_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  < -65.0 ]    # TRUE pADs
+    # Label those rows of pAD_df as pAD
+    pAD_df.loc[pAD_df["AP_threshold"] < -65, "pAD"] = "True pAD"
+
+    # df of all APs that are not certain pADs so we need a classifier 
+    
     pAD_df_uncertain_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  > -65.0 ]
+    
+    # We can use a clustering on the certain/true pADs to get a better estimate on accuracy of the classifier
+    pAD_df_pAD_via_threshold = pAD_df[pAD_df[ "AP_threshold"]  < -65.0 ]    # TRUE pADs
+    
     pAD_df_pAD_via_threshold["pAD"] = "True pAD"
     
     # Data for fitting procedure : Only those that are uncertain go into the classifier 
     
     X = pAD_df_uncertain_via_threshold[["AP_slope", "AP_threshold",  "AP_latency"]]
     
+    # Check that there are enough APs to do a clustering
+
+    if len(X) < 2 :
+        print("Not enough APs to do a clustering")
+        pAD_df["pAD_count"] = pAD_df["pAD"].apply(lambda x: np.sum(x == "True pAD"))
+        
+        return peak_latencies_all , v_thresholds_all  , peak_slope_all  , pAD_df
     # Check if 2 clusters are better than 1 
     
     kmeans_1 = KMeans(n_clusters=1, n_init = 1).fit(X)
@@ -795,18 +810,13 @@ def pAD_detection(V_dataframe):
     
     if wcss_2 < wcss_1 :
         # 2 CLUSTERS  are a better fit than 1  
-        # Append label column to type 
-        #print("Mean Voltage Threshold of Cluster 1")
-        #print(np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 0] ))
-        #print("Mean Voltage Threshold of Cluster 2")
-        #print(np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ))
-        #print(np.nanmean( peak_slope_all  [kmeans_2.labels_ == 0] ) , np.nanmean( peak_slope_all  [kmeans_2.labels_ == 1] ))
-        
-        if np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 0] )  < np.nanmean( v_thresholds_all  [kmeans_2.labels_ == 1] ):
-            pAD_df["pAD"] = pAD_class_labels[np.array(kmeans_2.labels_)]
+        v_thresholds_all_uncertain = np.array(pAD_df_uncertain_via_threshold["AP_threshold"])
+        if np.nanmean( v_thresholds_all_uncertain [kmeans_2.labels_ == 0] )  < np.nanmean( v_thresholds_all_uncertain  [kmeans_2.labels_ == 1] ):
+            
+            pAD_df.loc[pAD_df["AP_threshold"] > -65, "pAD"] = pAD_class_labels[np.array(kmeans_2.labels_)]
             pAD_df["pAD_count"] = np.sum(kmeans_2.labels_)
         else:
-            pAD_df["pAD"] = pAD_class_labels[np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  )]
+            pAD_df.loc[pAD_df["AP_threshold"] > -65, "pAD"]  = pAD_class_labels[np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  )]
             pAD_df["pAD_count"] = np.sum(np.mod( np.array( kmeans_2.labels_ + 1 )     , 2  ))
               
         pAD_df["num_ap_clusters"] = 2 
@@ -821,10 +831,6 @@ def pAD_detection(V_dataframe):
           pAD_df["pAD"] = "Somatic"
          pAD_df["num_ap_clusters"] = 1
          pAD_df["pAD_count"] = 0 
-
-
-    pAD_df = pd.concat([ pAD_df_pAD_via_threshold , pAD_df] , axis = 0) 
-
     
     return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,   pAD_df  
 
