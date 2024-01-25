@@ -416,23 +416,34 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 
 ########## ACTION POTENTIAL RETROAXONAL / ANTIDROMIC
 
-def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index, main_plot = False, input_sampling_rate = 1e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, input_backwards_window = 100 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
+def ap_characteristics_extractor_subroutine_derivative(df_V_arr, sweep_index, main_plot = False, input_sampling_rate = 1e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, input_backwards_window = 100 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
     '''
-    Subroutine to extract AP characteristics from a given voltage trace.
+    Extracts detailed characteristics of action potentials (APs) from voltage data within a specified sweep.
 
-    input: 
-    V_dataframe : Voltage dataframe obtained from running igor extractor 
-    sweep_index : integer representing the sweep number of the voltage file. 
-    
-    outputs: 
-    peak_locs_corr : location of exact AP peaks 
-    upshoot_locs   : location of thresholds for AP i.e. where the voltage trace takes the upshoot from   
-    v_thresholds   : voltage at the upshoot poiny
-    peak_heights   : voltage diff or height from threshold point to peak 
-    peak_latencies : time delay or latency for membrane potential to reach peak from threshold
-    peak_slope     : Rate of change/derivative of membrane potential AT the upshoot location
-    peak_fwhm      : AP width at half maximum, # FIX ME currently has error that values are too large and are then set to latency 
-   
+    Input:
+        df_V_arr (2d array): A pandas DataFrame containing voltage data from electrophysiological recordings. cols == sweeps
+        sweep_index (int): The index of the sweep in the DataFrame from which AP characteristics are to be extracted.
+
+                main_plot (bool, optional): If set to True, generates a main plot. Defaults to False.
+                input_sampling_rate (float, optional): The sampling rate of the data in Hz. Defaults to 10000 Hz.
+                input_smoothing_kernel (float, optional): The size of the smoothing kernel to apply to the voltage data. Defaults to 1.5.
+                input_plot_window (int, optional): The window size for plotting the data. Defaults to 500.
+                input_slide_window (int, optional): The sliding window size for analyzing APs. Defaults to 200.
+                input_gradient_order (int, optional): The order of the gradient used in derivative calculation. Defaults to 1.
+                input_backwards_window (int, optional): The window size used for searching backward from a peak to find the AP upshoot. Defaults to 100.
+                input_ap_fwhm_window (int, optional): The window size for calculating the full width at half maximum (FWHM) of APs. Defaults to 100.
+                input_pre_ap_baseline_forwards_window (int, optional): The window size for determining the baseline before an AP upshoot. Defaults to 50.
+                input_significance_factor (float, optional): A factor used to determine the significance of AP characteristics. Defaults to 8.
+
+    Returns:
+        peak_locs_corr (list): Corrected locations of AP peaks.
+        upshoot_locs (list): Locations of AP thresholds, where the voltage trace begins to rise steeply.
+        v_thresholds (list): Voltage values at each AP upshoot (mV).
+        peak_heights (list): Differences in voltage between each AP's peak and its threshold (mV).
+        peak_latencies (list): Time delays between the AP threshold and its peak (ms).
+        peak_slope (list): Rate of change of the membrane potential at the AP upshoot location (mV/ms).
+        peak_fw (list): Full width at half maximum (FWHM) of each AP, if <0 set as peak_latency (ms).
+           
     '''
     # Other Input Hyperparameters 
     # need the first two sweeps from 1st spike and 2nd spike. if 1st ap has around 3 spikes (parameter) then only first is good enough otw go to the 2nd trace 
@@ -465,11 +476,10 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
 
     # Make np array of dataframe
 
-    df_V_arr = np.array(V_dataframe)
+    # df_V_arr = np.array(V_dataframe)
     sweep_idx = sweep_index
 
     # Get rough estimate of peak locations 
-
     v_array = df_V_arr[:,sweep_idx]
     v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(v_array) 
     v_deriv_transformed = np.heaviside( -np.diff(v_array)+ np.exp(1), 0 )
@@ -617,19 +627,33 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
 
 
 
-def ap_characteristics_extractor_main(V_dataframe, critical_num_spikes = 4, all_sweeps = False, method = "derivative"): 
+def ap_characteristics_extractor_main(V_array, critical_num_spikes = 1, all_sweeps = False, method = "derivative"): 
     '''
-    Main function that calls the ap_characteristics_extractor_subroutine. Separated into main for future flexibility/adaptability. 
+      Main function for extracting action potential (AP) characteristics across multiple sweeps of electrophysiological data. 
+      It iteratively calls the 'ap_characteristics_extractor_subroutine_derivative' for each selected sweep.
 
-    Input  : V_dataframe         : pandas dataframe : voltage dataframe containing all sweeps of given Igor run 
-           : critical_num_spikes : int : critical num of spikes that we want beyond which intrinsic properties are probably way off
-           : all_sweeps          : boolean : whether or not we analyse all current injection sweeps
+    Input:
+        V_array (2d array): A pandas DataFrame containing voltage data from electrophysiological recordings.
+        critical_num_spikes (int, optional): The minimum number of spikes required in a sweep to consider it for analysis. Defaults to 1.
+        all_sweeps (bool, optional): If True, analyzes all sweeps; otherwise, selects sweeps based on the number of spikes. Defaults to False.
+        method (str, optional): The method used for extracting AP characteristics. Currently, only "derivative" is supported. Defaults to "derivative".
 
-    Output : output of lists as generated by subroutine iterated over chosen sweeps AND analysed sweeps
+    Returns:
+        peak_latencies_all (list):  AP latency across all analyzed sweeps (ms).
+        v_thresholds_all (list):  AP Voltage thresholds across all analyzed sweeps (mV).
+        peak_slope_all (list):  AP slope rates of change upshoot locations across all analyzed sweeps (mV/ms).
+        peak_locs_corr_all (list):  Corrected locations of AP peaks across all analyzed sweeps.
+        upshoot_locs_all (list):  Locations of AP thresholds across all analyzed sweeps.
+        peak_heights_all (list): AP height (peak to threshold) across all analyzed sweeps (mV).
+        peak_fw_all (list):  AP full widths at half maximum (FWHM) of each AP across all analyzed sweeps, if <0 set as peak_latency (ms).
+        peak_indices_all (list): Indices of the peaks within the aggregated list.
+        sweep_indices_all (list): Indices of the sweeps corresponding to each peak in the aggregated list.
+        
+
     '''
 
-    v_array       = np.array(V_dataframe)
-    num_aps_all   = np.array(num_ap_finder(v_array))
+    # V_array       = np.array(V_dataframe)
+    num_aps_all   = np.array(num_ap_finder(V_array))
     sweep_indices = None 
     min_spikes    = critical_num_spikes 
     # Find which trace has first spiking and if that is more than min_spikes just take the first, else take first two sweeps with spiking
@@ -670,7 +694,7 @@ def ap_characteristics_extractor_main(V_dataframe, critical_num_spikes = 4, all_
     for sweep_num in sweep_indices: 
         
         if method == "derivative":
-            peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_slope_ , peak_fw_  =  ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_num)
+            peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_slope_ , peak_fw_  =  ap_characteristics_extractor_subroutine_derivative(V_array, sweep_num)
         else:
             print("Invalid thresholding method")
             sys.exit(1)
@@ -696,7 +720,7 @@ def ap_characteristics_extractor_main(V_dataframe, critical_num_spikes = 4, all_
 ########################      pAD DETECTION FUNCTION(S)  ####################
  
     
-def pAD_detection(V_dataframe):
+def pAD_detection(V_array):
     '''
     Main pAD detection algorithm that first applies a pAD filter to  those APs with threshold < -65 mV and then uses a classifier to classify the remaining APs as pAD or not.
     Clustering algorithm is a KNN classifier with at most 2 clusters, but can be later changed to better account for outlier or noise variability. 
@@ -713,13 +737,12 @@ def pAD_detection(V_dataframe):
       
     ### STEP 1 :  Get the action potential (AP) values and create pAD dataframe with columns and values 
         
-    peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_dataframe, all_sweeps =True)
+    peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_locs_corr_, upshoot_locs_all_ , peak_heights_all_  , peak_fw_all_ ,  peak_indices_all_, sweep_indices_all_  =  ap_characteristics_extractor_main(V_array, all_sweeps =True)
     
     # Create Dataframe and append values
     pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold',  'AP_width' , 'AP_latency'])
     
     # V_threshold nans
-
     non_nan_locs =  np.where(np.isnan(v_thresholds_all_) == False)[0] 
     
     if len (non_nan_locs) == 0 : 
@@ -728,12 +751,13 @@ def pAD_detection(V_dataframe):
         pAD_df["AP_slope"] = peak_slope_all_
         pAD_df["AP_latency"] = peak_latencies_all_
         pAD_df["AP_width"] = peak_fw_all_
+        pAD_df["AP_height"] = peak_heights_all_ #JJB added
         pAD_df['AP_sweep_num'] = sweep_indices_all_
         pAD_df['upshoot_loc']  = upshoot_locs_all_ 
         pAD_df["pAD"] = ""
         pAD_df["pAD_count"] = np.nan 
         
-        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  pAD_df
+        return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  , peak_heights_all_,   pAD_df #JJB added
         
 
     peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
@@ -741,12 +765,12 @@ def pAD_detection(V_dataframe):
     peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
     peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
     upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
+    peak_heights_all   = np.array(peak_heights_all_)[non_nan_locs] #JJB added
     peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
     peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
     sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
 
     # peak slope nans 
-
     non_nan_locs =  np.where(np.isnan(peak_slope_all) == False)[0] 
 
     # remove those nan values from the dataframe
@@ -756,17 +780,19 @@ def pAD_detection(V_dataframe):
     peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
     peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
     upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
+    peak_heights_all   = np.array(peak_heights_all_)[non_nan_locs] #JJB added
     peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
     peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
     sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
     
-    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) ==  len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) 
+    assert len(peak_latencies_all) == len(peak_slope_all) == len(v_thresholds_all) == len(peak_locs_corr) == len(upshoot_locs_all) ==  len(peak_fw_all) == len(peak_indices_all)== len(sweep_indices_all) == len(peak_heights_all) #JJB added
     
     pAD_df["AP_loc"] = peak_locs_corr 
     pAD_df["upshoot_loc"] =  upshoot_locs_all   
     pAD_df["AP_threshold"] =  v_thresholds_all 
     pAD_df["AP_slope"] = peak_slope_all 
     pAD_df["AP_latency"] = peak_latencies_all
+    pAD_df["AP_height"] =  peak_heights_all #JJB added
     pAD_df["AP_width"] = peak_fw_all
     
     pAD_df['AP_sweep_num'] = sweep_indices_all
@@ -777,7 +803,7 @@ def pAD_detection(V_dataframe):
         pAD_df["pAD"] = ""
         pAD_df["pAD_count"] = np.nan 
         
-        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  , pAD_df
+        return   peak_latencies_all , v_thresholds_all  , peak_slope_all  , peak_heights_all ,  pAD_df #JJB added
     elif len (peak_locs_corr) == 1 : 
         if v_thresholds_all[0]  < -65.0 :
             # pAD 
@@ -786,7 +812,7 @@ def pAD_detection(V_dataframe):
         else: 
             pAD_df["pAD"]       = "Somatic"
             pAD_df["pAD_count"] = 0 
-        return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  pAD_df
+        return peak_latencies_all , v_thresholds_all  , peak_slope_all  , peak_heights_all , pAD_df #JJB added
     else : 
         pass
     
@@ -849,7 +875,7 @@ def pAD_detection(V_dataframe):
          pAD_df["num_ap_clusters"] = 1
          pAD_df["pAD_count"] = 0 
     
-    return peak_latencies_all , v_thresholds_all  , peak_slope_all  ,   pAD_df  
+    return peak_latencies_all , v_thresholds_all  , peak_slope_all  , peak_heights_all ,   pAD_df  
 
 
 
