@@ -699,6 +699,7 @@ def ap_characteristics_extractor_main(V_dataframe, critical_num_spikes = 4, all_
 def pAD_detection(V_dataframe):
     '''
     Main pAD detection algorithm that first applies a pAD filter to  those APs with threshold < -65 mV and then uses a classifier to classify the remaining APs as pAD or not.
+    Clustering algorithm is a KNN classifier with at most 2 clusters, but can be later changed to better account for outlier or noise variability. 
     Input : 
             V_dataframe   : np.array : Voltage dataframe of the trace to be analysed
             
@@ -717,6 +718,8 @@ def pAD_detection(V_dataframe):
     # Create Dataframe and append values
     pAD_df = pd.DataFrame(columns=['pAD', 'AP_loc', 'AP_sweep_num', 'AP_slope', 'AP_threshold',  'AP_width' , 'AP_latency'])
     
+    # V_threshold nans
+
     non_nan_locs =  np.where(np.isnan(v_thresholds_all_) == False)[0] 
     
     if len (non_nan_locs) == 0 : 
@@ -732,6 +735,21 @@ def pAD_detection(V_dataframe):
         
         return peak_latencies_all_ , v_thresholds_all_  , peak_slope_all_  ,  pAD_df
         
+
+    peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
+    v_thresholds_all   = np.array(v_thresholds_all_ )[non_nan_locs]
+    peak_slope_all     = np.array(peak_slope_all_  )[non_nan_locs]
+    peak_locs_corr     = np.array(peak_locs_corr_ )[non_nan_locs]
+    upshoot_locs_all   = np.array(upshoot_locs_all_)[non_nan_locs]
+    peak_fw_all        = np.array(peak_fw_all_)[non_nan_locs]
+    peak_indices_all    = np.array(peak_indices_all_)[non_nan_locs]
+    sweep_indices_all  = np.array(sweep_indices_all_)[non_nan_locs]
+
+    # peak slope nans 
+
+    non_nan_locs =  np.where(np.isnan(peak_slope_all) == False)[0] 
+
+    # remove those nan values from the dataframe
 
     peak_latencies_all = np.array(peak_latencies_all_)[non_nan_locs]
     v_thresholds_all   = np.array(v_thresholds_all_ )[non_nan_locs]
