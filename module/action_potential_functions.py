@@ -185,19 +185,6 @@ def steady_state_value(V_sweep, I_sweep, step_current_val=None,  avg_window = 0.
 
     return asym_current , hyper  , first_current_point, last_current_point
 
-def array_peak_cleaner(input_array, prominence = 10 , threshold = -55 ,  peak_pre_window = 5 ):
-    '''
-    DEFINED BUT NEVER USED DJ_RESOLVE
-    '''
-   
-    array_cleaned = input_array.copy()
-    
-    array_diff_abs = np.diff(input_array) 
-    array_diff_abs = np.hstack([array_diff_abs , np.mean(array_diff_abs)   ])
-    array_cleaned[array_diff_abs  > np.mean(array_diff_abs) + 2*np.std(array_diff_abs) ] = np.nan
-    array_cleaned = array_cleaned[~np.isnan(array_cleaned) ]  
-    return array_cleaned, None 
-
 def calculate_max_firing(voltage_array, input_sampling_rate=1e4): #HARD CODE sampeling rate
     """
     Calculates the maximum firing rate (Hz) of action potentials in a series of voltage traces.
@@ -431,6 +418,8 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 
 def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index, main_plot = False, input_sampling_rate = 1e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, input_backwards_window = 100 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
     '''
+    Subroutine to extract AP characteristics from a given voltage trace.
+
     input: 
     V_dataframe : Voltage dataframe obtained from running igor extractor 
     sweep_index : integer representing the sweep number of the voltage file. 
@@ -442,7 +431,7 @@ def ap_characteristics_extractor_subroutine_derivative(V_dataframe, sweep_index,
     peak_heights   : voltage diff or height from threshold point to peak 
     peak_latencies : time delay or latency for membrane potential to reach peak from threshold
     peak_slope     : Rate of change/derivative of membrane potential AT the upshoot location
-    peak_fwhm      : DUMMIES for now, change later: 
+    peak_fwhm      : AP width at half maximum, # FIX ME currently has error that values are too large and are then set to latency 
    
     '''
     # Other Input Hyperparameters 
@@ -709,14 +698,15 @@ def ap_characteristics_extractor_main(V_dataframe, critical_num_spikes = 4, all_
     
 def pAD_detection(V_dataframe):
     '''
+    Main pAD detection algorithm that first applies a pAD filter to  those APs with threshold < -65 mV and then uses a classifier to classify the remaining APs as pAD or not.
     Input : 
-            V_dataframe   : np.array : Voltage dataframe as  np array
+            V_dataframe   : np.array : Voltage dataframe of the trace to be analysed
             
     Output : 
-            peak_latencies_all: 
-            v_thresholds_all  : 
-            peak_slope_all    :   
-            pAD_df            : 
+            peak_latencies_all: list : List of peak latencies of all APs in the trace
+            v_thresholds_all  : list: List of voltage thresholds of all APs in the trace
+            peak_slope_all    : list: List of peak slopes of all APs in the trace 
+            pAD_df            :  pandas dataframe : Dataframe containing all AP characteristics and pAD classification
 
     '''
       
