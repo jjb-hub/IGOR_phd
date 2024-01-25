@@ -29,7 +29,7 @@ import numpy as np
 
 ########## USER ?
 #FIX ME POU IN RIGHT PLACE
- 
+
 def generate_V_pAD_df(folder_file): 
     '''
     Generates pAD_df, V_array  
@@ -184,6 +184,7 @@ def steady_state_value(V_sweep, I_sweep, step_current_val=None,  avg_window = 0.
     asym_current  = np.mean(V_sweep[ last_current_point - current_avg_duration : last_current_point  ])
 
     return asym_current , hyper  , first_current_point, last_current_point
+
 
 def calculate_max_firing(voltage_array, input_sampling_rate=1e4): #HARD CODE sampeling rate
     """
@@ -849,7 +850,6 @@ def pAD_detection(V_array):
     
     wcss_1 = kmeans_1.inertia_
     wcss_2 = kmeans_2.inertia_
-    
     
     if wcss_2 < wcss_1 :
         # 2 CLUSTERS  are a better fit than 1  
