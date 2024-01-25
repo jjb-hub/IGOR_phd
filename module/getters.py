@@ -217,7 +217,7 @@ def _handleFile(row):
             row["rheobased_threshold"] = rheobase_threshold
             row["FI_slope"] = FI_slope
 
-            peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(V_df)
+            peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(V_array, critical_num_spikes=4)
             row["voltage_threshold"] = v_thresholds_all 
             row["AP_height"] = peak_heights_all
             row["AP_width"] = peak_fw_all
