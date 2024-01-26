@@ -386,14 +386,15 @@ def buildApplicationFig(color_dict, cell_id=None, folder_file=None, I_set=None, 
     else:
         plot_color = color_dict[drug]
     path_V, path_I = make_path(folder_file)
-    array_V, df_V = igor_exporter(path_V) # df_y each sweep is a column
+    array_V, V_df = igor_exporter(path_V) # df_y each sweep is a column
+    V_array      = np.array(V_df) 
     try:
         array_I, df_I = igor_exporter(path_I) #df_I has only 1 column and is the same as array_I
     except FileNotFoundError: #if no I file exists 
         print(f"no I file found for {cell_id}, I setting used was: {I_set}")
-        array_I = np.zeros(len(df_V)-1)
+        array_I = np.zeros(len(V_df)-1)
     #scale data
-    x_scaler_drug_bar = len(df_V[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
+    x_scaler_drug_bar = len(V_df[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
     x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
     x_I = np.arange(len(array_I))*0.00005 #20kHz igor 
     #plot 
@@ -406,7 +407,7 @@ def buildApplicationFig(color_dict, cell_id=None, folder_file=None, I_set=None, 
     
     if pAD_locs is True: 
         # Get pAD_locs
-        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(df_V) 
+        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array) 
         
         # pAD subdataframe and indices
         pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
@@ -418,8 +419,8 @@ def buildApplicationFig(color_dict, cell_id=None, folder_file=None, I_set=None, 
     
         for pAD_spike_idx in range(len(pAD_ap_indices)):
             pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
-            v_temp = np.array(array_V[sweep_num*df_V.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
-            time_temp = np.linspace((sweep_num*df_V.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*df_V.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
+            v_temp = np.array(array_V[sweep_num*V_df.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*V_df.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
+            time_temp = np.linspace((sweep_num*V_df.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*V_df.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
             ax1.plot(time_temp, v_temp, c  = 'red', lw = 2, alpha=0.5 )
             
     
