@@ -218,7 +218,7 @@ def add_statistical_annotation_hues(ax, data, x, y, group, x_order, hue_order, t
                         y_pos = max(base_group_data.max(), comp_data.max()) + 0.1
 
                         ax.text(x_pos, y_pos, sig_marker, ha='center', va='bottom', fontsize=14, fontweight='bold')
-                        group_annotation = f"{base_group} vs {comp_group} " #for {treatment}
+                        group_annotation = f"{base_group} vs {comp_group} for {treatment}"
                         # print(f"annotating {group_annotation}")
                         ax.text(x_pos, y_pos - 0.05, group_annotation, ha='center', va='bottom', fontsize=10, color='gray')
 

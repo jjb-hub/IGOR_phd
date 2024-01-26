@@ -303,6 +303,7 @@ def _handleFile(row):
         print(f'{row.cell_id} traceback: {error_traceback}')
     else:
         row['error'] = 'ran'
+        row['traceback'] = None
 
     return row
 

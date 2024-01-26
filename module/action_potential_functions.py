@@ -409,6 +409,7 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
     '''
     num_aps_all = []
     for idx in range(voltage_array.shape[-1]): 
+
         _, _, _,  num_peaks  = ap_finder(voltage_array[:, idx])
         num_aps_all += [num_peaks]
     return num_aps_all
