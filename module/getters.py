@@ -74,7 +74,7 @@ def getorbuildSubselectExpandedDF(filename, identifier, builder_cb, cell_type, f
         print(f'BUILDING "{identifier}"')    
 
         df_raw = getRawDf(filename)
-        df_cell_type = df_raw[df_raw['cell_type']== cell_type]
+        df_cell_type = df_raw[df_raw['cell_type']== cell_type].copy() #JJB NEW
         
         df = builder_cb(df_cell_type) # buildExpandedDF will be the builder_cb
         cache(filename_no_extension, identifier, df)
@@ -103,10 +103,10 @@ def updateFPStats(filename, rows):
     FP_stats_df = getFPStats(filename)
     
     # Create a unique identifier in the existing DataFrame
-    FP_stats_df['unique_id'] = FP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", "pre_post"]]), axis=1)
+    FP_stats_df['unique_id'] = FP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment",'protocol', "pre_post"]]), axis=1)
     
     for row in rows:
-        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", "pre_post"]])
+        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", 'protocol', "pre_post"]])
         data_row = pd.DataFrame([row])
         data_row['unique_id'] = unique_id
 
@@ -129,10 +129,10 @@ def updateAPPStats(filename, rows):
     APP_stats_df = getAPPStats(filename)
     
     # Create a unique identifier 
-    APP_stats_df['unique_id'] = APP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure",  "treatment", "pre_app_wash"]]), axis=1)
+    APP_stats_df['unique_id'] = APP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure",  "treatment",'protocol', "pre_app_wash"]]), axis=1)
     
     for row in rows:
-        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure",  "treatment", "pre_app_wash"]])
+        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure",  "treatment", 'protocol', "pre_app_wash"]])
         data_row = pd.DataFrame([row])
         data_row['unique_id'] = unique_id
 
@@ -149,11 +149,12 @@ def updateAPPStats(filename, rows):
 
 ############ BUILDERS ##########
 
+
 #row handeler for expandDF
 def buildExpandedDF(filename_or_df): 
     '''
     input: filename or df (to allow subsetting)
-    output: expanded df with aditional columns 'mouseline', 
+    output: expanded df with aditional columns 'mouseline' # pandas.errors.SettingWithCopyWarning:
     '''
     if not isinstance(filename_or_df, pd.DataFrame):
         print('fetchig raw df')
@@ -162,10 +163,16 @@ def buildExpandedDF(filename_or_df):
         df=filename_or_df
         print ('expanding on provided df')
 
+    # df=propagate_I_set(df)
     og_columns = df.columns.copy() #origional column order
-    df['mouseline'] = df.cell_id.str[:3]
+    
+    # df['mouseline'] = df.cell_id.str[:3]
+    # df.loc[:, 'mouseline'] = df['cell_id'].str[:3]
+    # pandas.errors.SettingWithCopyWarning: 
+    # A value is trying to be set on a copy of a slice from a DataFrame.
+    # Try using .loc[row_indexer,col_indexer] = value instead
 
-    df = df.apply(lambda row: _handleFile(row), axis=1) #chat gpt but dont get why ?
+    df = df.apply(lambda row: _handleFile(row), axis=1) # np.find_common_type is deprecated used in .apply check versions
 
     #ORDERING DF internal: like this new columns added will appear at the end of the df in the order they were created in _handelfile()
     all_cur_columns = df.columns.copy()
@@ -212,21 +219,26 @@ def _handleFile(row):
             #extraction funcs 
             row["max_firing"] = calculate_max_firing(V_array)
             
-            x, y, v_rest = extract_FI_x_y (path_I, path_V) # x = current injected, y = number of APs, v_rest = the steady state voltage (no I injected)
-            FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True) #TODO handel pAD APs better slope fit
+            # get AP data 
+            peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(V_array, all_sweeps=True)
+            # take first 10 APs #pAD check would be cool
+            row["voltage_threshold"] = v_thresholds_all[:10]
+            row["AP_height"] = peak_heights_all [:10]
+            row["AP_width"] = peak_fw_all[:10]
+            row["AP_slope"] = peak_slope_all [:10]
+            row["AP_latency"] = peak_latencies_all[:10]
+
+            # x, y for FI curve i.e. step_current_values, ap_counts (on I step)
+            step_current_values, ap_counts, V_rest = extract_FI_x_y (V_array, I_array, peak_locs_corr_all, sweep_indices_all) 
+            FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(step_current_values, ap_counts, slope_liniar = True) #TODO handel pAD APs better slope fit
             row["rheobased_threshold"] = rheobase_threshold
             row["FI_slope"] = FI_slope
 
-            peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(V_array, critical_num_spikes=4)
-            row["voltage_threshold"] = v_thresholds_all 
-            row["AP_height"] = peak_heights_all
-            row["AP_width"] = peak_fw_all
-            row["AP_slope"] = peak_slope_all 
-            row["AP_latency"] = peak_latencies_all
+            # [  tau (ms)  ,  steady_state_I  ,  I_injected  ,  RMP  ]
+            row["tau_rc"] = tau_analyser(V_array, I_array, step_current_values, ap_counts)
+            # [  sag (%)  ,  steady_state_I  ,  I_injected  ,  RMP  ]
+            row["sag"]    = sag_current_analyser(V_array, I_array, step_current_values, ap_counts)
 
-            # lists of lists i.e. [[value, steady_state_I, I_injected, RMP], [...] ]
-            row["tau_rc"] = tau_analyser(V_array, I_array, x, plotting_viz= False, analysis_mode = 'max')
-            row["sag"]    = sag_current_analyser(V_array, I_array, x)
 
         # APP handeling
         elif row.data_type == "AP":
@@ -258,22 +270,55 @@ def _handleFile(row):
 
             # pAD classification
             peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
-            print('pAD detection complete .... ')
+            
+            if isinstance(pAD_df, pd.DataFrame):
+                if len(pAD_df["pAD_count"]) == 0:
+                    # Situation 1: pAD_df is a DataFrame but has no rows
+                    row["pAD_count"] = []
+                    row["AP_locs"] = []
+                else:
+                    # Situation 2: pAD_df is a DataFrame with data
+                    if pAD_df["pAD_count"].sum() == 0:
+                        # Situation 3: pAD_df exists but pAD_count is all 0
+                        row["pAD_count"] = []
+                        row["AP_locs"] = pAD_df["AP_loc"].ravel()
+                    else:
+                        # Situation 4: pAD_df exists and pAD_count is non-zero
+                        row["pAD_count"] = pAD_df["pAD_count"].iloc[0]  # Extract the value from the first row
+                        row["AP_locs"] = pAD_df["AP_loc"].ravel()
 
-            if len(pAD_df["pAD_count"]) == 0:  #if there are no APs of any kind detected
-                row["pAD_count"] =  np.nan
-                row["AP_locs"]   =  pAD_df["AP_loc"].ravel()   # getlocations of ALL? APs : AP_lcos 
+                        # Lists of positions of action potentials: pAD_true, pAD_possible, and Somatic
+                        row['PRE_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
+                        row['APP_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
+                        row['WASH_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
+
+                        row['PRE_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
+                        row['APP_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
+                        row['WASH_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
+
+                        row['PRE_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
+                        row['APP_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
+                        row['WASH_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
+            
             else:
-                row["pAD_count"] =  pAD_df["pAD_count"][0]     #  need to make count not series / ERROR HERE  
-                row["AP_locs"]   =  pAD_df["AP_loc"].ravel()    
+                # Situation 5: pAD_df is not a DataFrame (e.g., it's np.nan), assign empty lists
+                row["pAD_count"] = []
+                row["AP_locs"] = []
 
-                #lists of positions of action potential 
-                row['PRE_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
-                row['APP_Somatic_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
-                row['WASH_Somatic_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'Somatic') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
-                row['PRE_pAD_AP_locs'] = pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
-                row['APP_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
-                row['WASH_pAD_AP_locs'] =pAD_df.loc[(pAD_df['pAD'] == 'pAD') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
+            # if pAD_df is None:
+            #     # no action potentials in trace
+            #     row["pAD_count"] = []
+            #     row["AP_locs"] = []
+
+            # if len(pAD_df["pAD_count"]) == 0:  
+            #     # no pAD_true AP_type detected
+            #     row["pAD_count"] =  []
+            #     row["AP_locs"]   =  pAD_df["AP_loc"].ravel()   # all AP locations
+            # else:
+            #     row["pAD_count"] = pAD_df["pAD_count"].values[0]     
+            #     row["AP_locs"]   =  pAD_df["AP_loc"].ravel()    
+
+                
             pass
         
         elif row.data_type == "pAD":
@@ -327,6 +372,7 @@ def buildFPStatsDf(filename):
             "cell_id",
             "measure",
             "treatment",
+            'protocol', 
             "pre_post",
             "mean_value",
             "file_values",
@@ -340,8 +386,8 @@ def buildAPPStatsDf(filename):
             "cell_type",
             "cell_id",
             "measure",
-            # "measure_hue", # may to I_set 
             "treatment",
+            "protocol",             #I_set
             "pre_app_wash",
             "value",
             "sem", # makes sense only for measure == inpur_R , RMP 

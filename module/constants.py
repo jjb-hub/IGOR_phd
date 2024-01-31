@@ -32,8 +32,9 @@ unit_dict = {'max_firing': 'Firing_(Hz)',
             'tau_rc':'ms',
             'sag':'%',
             'AP_count':'AP_count',
-            'AP_count_Somatic':'AP_count_Somatic',
-            'AP_count_pAD':'AP_count_pAD',
+            'AP_count_Somatic_AP':'AP_count_Somatic',
+            'AP_count_pAD_True':'AP_count_pAD_True',
+            'AP_count_pAD_Possible':'AP_count_pAD_Posible',
             'inputR': 'input R (Ohm)',
             'RMP':'membrane potentiam (mV)'
             }

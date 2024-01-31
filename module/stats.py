@@ -33,13 +33,20 @@ from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict, n_min
 
 
 ########## WORKING WITH EXPANDED DF ###########
-
+def propagate_I_set(df):
+    # Create a dictionary with 'cell_id' as keys and 'I_set' as values
+    # for rows where 'data_type' is 'AP' and 'application_order' is 1
+    ap_I_set = df[(df['data_type'] == 'AP') & (df['application_order'] == 1) & (~df['I_set'].isna())].set_index('cell_id')['I_set'].to_dict()
+    # Apply the I_set value to rows where it's NaN, without affecting rows where 'data_type' is 'AP'
+    df['I_set'] = df.apply(lambda row: ap_I_set.get(row['cell_id'], row['I_set']) if pd.isna(row['I_set']) else row['I_set'], axis=1)
+    return df
 
 def loop_stats(filename_or_df):
 
     df, filename = getExpandedDfIfFilename(filename_or_df)
+    df = propagate_I_set(df) 
     df_row_order = df['folder_file'].tolist()  # save origional row order
-
+    
     combinations = [
                     (["cell_type", "cell_id", "data_type"], _update_FP_stats),
                     (["cell_type", "data_type", "drug"], _update_APP_stats), 
@@ -76,22 +83,23 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
         
 
         #measure == AP_count_type and AP_count
-        columns_to_count = ['PRE_Somatic_AP_locs', 'PRE_pAD_AP_locs',
-                            'APP_Somatic_AP_locs', 'APP_pAD_AP_locs', 
-                            'WASH_Somatic_AP_locs', 'WASH_pAD_AP_locs']
+        columns_to_count = ['PRE_Somatic_AP_locs', 'PRE_pAD_Possible_AP_locs', 'PRE_pAD_True_AP_locs',
+                            'APP_Somatic_AP_locs', 'PRE_pAD_Possible_AP_locs', 'APP_pAD_True_AP_locs',
+                            'WASH_Somatic_AP_locs', 'PRE_pAD_Possible_AP_locs', 'WASH_pAD_True_AP_locs']
         
         for index, row in df.iterrows():  # Looping over each cell_id
             cell_id = row['cell_id'] 
             ap_count_by_condition = {'PRE': 0, 'APP': 0, 'WASH': 0}  # Initialize AP counts for each condition
 
             for col_name in columns_to_count:  # Looping over PRE, APP, WASH
-                pre_app_wash, AP_type = col_name.split('_')[0], col_name.split('_')[1]
+                pre_app_wash, AP_type = col_name.split('_')[0], "_".join(col_name.split('_')[1:3])
                 value_len = len(row[col_name]) if isinstance(row[col_name], list) else 0
                 update_row = {
                     "cell_type": cell_type,
                     "cell_id": cell_id,
                     "measure": f"AP_count_{AP_type}",
                     "treatment": drug,
+                    'protocol':row['I_set'],
                     "pre_app_wash": pre_app_wash,
                     "value": value_len,
                     "sem": np.nan
@@ -106,6 +114,7 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
                     "cell_id": cell_id,
                     "measure": "AP_count",
                     "treatment": drug,
+                    'protocol':row['I_set'],
                     "pre_app_wash": condition,
                     "value": total_count,
                     "sem": np.nan
@@ -118,6 +127,7 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
                     "cell_id": cell_id,
                     "measure": measure,
                     "treatment": drug,
+                    'protocol':row['I_set'],
                     "pre_app_wash": pre_app_wash,
                     "value": np.nanmean(row[list_col]),
                     "sem": stats.sem(row[list_col], nan_policy='omit')
@@ -146,6 +156,7 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
         treatment = ', '.join(df[df['drug'] != 'PRE']['drug'].unique())
         for drug, pre_post_df in df.groupby('drug'):
             pre_post = 'PRE' if 'PRE' in pre_post_df['drug'].values else 'POST'
+            I_setting =  pre_post_df['I_set'].iloc[0] if pre_post_df['I_set'].nunique() == 1 else "Not all values are the same."
 
             for measure in ['max_firing', 
                             'voltage_threshold',
@@ -160,6 +171,7 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
                     "cell_id": cell_id,
                     "measure": measure,
                     "treatment": treatment,
+                    'protocol': I_setting , #JJB doubt this will work as nan unless data_type=AP
                     "pre_post": pre_post,
                     "mean_value": mean_value,
                     "file_values": file_values

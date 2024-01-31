@@ -15,10 +15,14 @@ from IPython.display import display
 import seaborn as sns
 
 
+
 ########## BASE PLOTTERS ##########
 
-#  plots any waveform based off fold_file
+
 def quick_plot_file(filename, folder_file):
+    '''
+    Plots any waveform based off fold_file.
+    '''
     df=getRawDf(filename)
     path_V, path_I = make_path(folder_file)
     listV, dfV = igor_exporter(path_V)
@@ -39,7 +43,55 @@ def quick_line_plot(plotlist, plottitle):
     plt.title(plottitle)
     plt.show()
 
+    
+from scipy.ndimage import gaussian_filter1d
+def plot_ap_window(v_array, threshold_index, input_sampling_rate, sec_to_ms, derivative_included=True):
+    """
+    Plot the action potential (AP) window centered around the threshold index, showing both
+    the original and smoothed voltage traces. Optionally includes the derivative at each point
+    in the window to assess the rate of voltage change.
 
+    Input:
+        v_array (numpy.ndarray): The array containing voltage data for a single sweep.
+        threshold_index (int): The index in v_array corresponding to the AP threshold.
+        input_sampling_rate (float): The sampling rate at which the data was recorded (in Hz).
+        sec_to_ms (float): Conversion factor from seconds to milliseconds.
+        derivative_included (bool): Flag to indicate if derivative points should be plotted.
+    """
+    # Smoothing the voltage trace
+    smoothed_v_array = gaussian_filter1d(v_array, 5)
+
+    # Calculating the derivative
+    smoothed_gradient = np.gradient(smoothed_v_array)
+
+    # Focusing on a narrow window around the threshold for derivative calculation
+    narrow_window_size = 10 # Adjust as needed
+    window_start = max(0, threshold_index - narrow_window_size)
+    window_end = min(len(v_array), threshold_index + narrow_window_size)
+
+    # Extracting the actual time points for the window of interest
+    time_points = np.arange(len(v_array)) / input_sampling_rate * sec_to_ms  # convert indices to time (ms)
+    window_time_points = time_points[window_start:window_end]
+
+    # Plotting the voltage trace and derivative within the window
+    plt.figure(figsize=(10, 6))
+    plt.plot(window_time_points, v_array[window_start:window_end], label='Original Voltage Trace', color='blue')
+    plt.plot(window_time_points, smoothed_v_array[window_start:window_end], label='Smoothed Voltage Trace', color='orange')
+    plt.axvline(time_points[threshold_index], color='red', linestyle='--', label='Threshold')
+
+    if derivative_included:
+        # Plotting the derivative as points
+        plt.scatter(window_time_points, smoothed_gradient[window_start:window_end], color='green', label='Derivative', zorder=3)
+        derivative_curve = smoothed_gradient[window_start:window_end]
+        plt.plot(window_time_points, derivative_curve, color='green', label='Derivative', zorder=3)
+
+
+    plt.xlabel('Time (ms)')
+    plt.ylabel('Voltage (mV)')
+    plt.title('Voltage Trace and Derivative Calculation at Threshold')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
 
 
 
@@ -165,8 +217,15 @@ def build_APP_histogram_figures(filename):
 
         subset['value'] = pd.to_numeric(subset['value'], errors='coerce') #for add_statistical_annotation_hues 
         n_by_treatment = subset.groupby('treatment')['cell_id'].nunique()  # Calculate 'n' for each treatment
-
         order = [t for t in color_dict.keys() if t in subset['treatment'].unique()]
+        #protocol tracking
+        unique_protocols = subset['protocol'].unique()
+        markers = ['o', 's', 'D', '^', 'v', '<', '>']
+        legend_handles_labels = {}
+
+        
+
+
         Fig, ax = plt.subplots(figsize=(20, 10))
         sns.barplot(
                 x='treatment',
@@ -180,23 +239,50 @@ def build_APP_histogram_figures(filename):
                 order=order,
                 ax=ax,
                 )
-        sns.stripplot( #stripplot or swarmplot
+        for i, protocol in enumerate(unique_protocols):
+            marker = markers[i % len(markers)]  # Cycle through markers if more protocols than markers
+            protocol_subset = subset[subset['protocol'] == protocol]
+            
+            sns.stripplot(
                 x='treatment',
                 y='value',
                 hue='pre_app_wash',
                 hue_order=['PRE', 'APP', 'WASH'],
-                data=subset,
+                data=protocol_subset,
                 palette='Set2',
                 order=order,
                 edgecolor='k',
                 linewidth=1,
                 linestyle="-",
                 dodge=True,
-                ax=ax, 
+                ax=ax,
                 legend=False,
                 size=4,
-                # marker='D',
+                marker=marker,  # Assign marker based on protocol
             )
+
+            # Add protocol to legend dictionary
+            legend_handles_labels[protocol] = plt.Line2D(
+                [0], [0], marker=marker, color='w', label=protocol
+            )
+
+        # sns.stripplot( #stripplot or swarmplot
+        #         x='treatment',
+        #         y='value',
+        #         hue='pre_app_wash',
+        #         hue_order=['PRE', 'APP', 'WASH'],
+        #         data=subset,
+        #         palette='Set2',
+        #         order=order,
+        #         edgecolor='k',
+        #         linewidth=1,
+        #         linestyle="-",
+        #         dodge=True,
+        #         ax=ax, 
+        #         legend=False,
+        #         size=4,
+        #         # marker='D',
+        #     )
 
         
         # Add significance annotations for paired t-test PRE vs APP/WASH
@@ -219,6 +305,7 @@ def build_APP_histogram_figures(filename):
         ax.set_xlabel('')
         ax.set_ylabel(unit_dict[measure], fontsize=14)  # Adjust font size as needed
         ax.set_title(f'{cell_type} {measure} ', fontsize=16)  # Adjust font size as needed
+        ax.legend(handles=legend_handles_labels.values(), labels=legend_handles_labels.keys()) #legend for protocols
 
         # Optionally, adjust the font size of the tick labels
         ax.tick_params(axis='x', labelsize=12)  # Adjust font size for x-axis tick labels
@@ -247,14 +334,13 @@ def loopbuildAplicationFigs(filename):
         application_order = row['application_order']
         pAD_locs = row['APP_pAD_AP_locs']
 
-        buildApplicationFig(color_dict, cell_id=cell_id, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
+        buildApplicationFig(cell_id=cell_id, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
         plt.close()
     return
 
 ## GETTERS ##
 
 def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
-    # color_dict = getColors(filename) 
     if not isinstance(cell_id_or_cell_df, pd.DataFrame):
         expanded_df = getExpandedDf(filename)
         cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
@@ -273,7 +359,7 @@ def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
             drug_out = row['drug_out']
             application_order = row['application_order']
             print(f'BUILDING "{cell_id} Application {application_order} Figure"') #Build useing callback otherwise and cache result
-            fig = buildApplicationFig(color_dict, cell_id=cell_id, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
+            fig = buildApplicationFig(cell_id=cell_id, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=True)
             saveAplicationFig(fig, f'{cell_id}_application_{application_order}')
             plt.close(fig)
             
@@ -378,13 +464,17 @@ def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
         fig.show()
 
 ## BUILDERS ##
-def buildApplicationFig(color_dict, cell_id=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, application_order=None, pAD_locs=None):
-    #load raw data 
-    color_dict = {"pAD":"orange","Somatic":"blue","WASH":"lightsteelblue", "PRE":"black", "CONTROL": 'grey', "TCB2":'green', "DMT":"teal", "PSIL":"orange", "LSD":"purple", "MDL":'blue', 'I_display':'cornflowerblue'} 
+def buildApplicationFig( cell_id=None, folder_file=None, I_set=None, drug=None, drug_in=None, drug_out=None, application_order=None, pAD_locs=None):
+    #color for faw voltage trace
     if drug is None:
         plot_color = 'k'
     else:
         plot_color = color_dict[drug]
+    # colors for APs 
+    colors = {'pAD_true': 'salmon', 'pAD_possible': 'orange', 'somatic': 'cornflowerblue'}
+
+
+    #fectch data from folder_file
     path_V, path_I = make_path(folder_file)
     array_V, V_df = igor_exporter(path_V) # df_y each sweep is a column
     V_array      = np.array(V_df) 
@@ -393,38 +483,47 @@ def buildApplicationFig(color_dict, cell_id=None, folder_file=None, I_set=None, 
     except FileNotFoundError: #if no I file exists 
         print(f"no I file found for {cell_id}, I setting used was: {I_set}")
         array_I = np.zeros(len(V_df)-1)
+
     #scale data
     x_scaler_drug_bar = len(V_df[0]) * 0.0001 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
     x_V = np.arange(len(array_V)) * 0.0001 #sampeling at 10KHz will give time in seconds
     x_I = np.arange(len(array_I))*0.00005 #20kHz igor 
+
     #plot 
     fig = plt.figure(figsize = (12,9))
     ax1 = plt.subplot2grid((11, 8), (0, 0), rowspan = 8, colspan =11) #(nrows, ncols)
     ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
     ax1.plot(x_V, array_V, c = plot_color, lw=1, alpha=0.8) #voltage trace plot # "d", markevery=pAD_locs
+
+    
     pAD_plot_pre_window = 50
     pAD_plot_post_window = 50
+    legend_handles = []
     
     if pAD_locs is True: 
         # Get pAD_locs
         peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array) 
-        
-        # pAD subdataframe and indices
-        pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
-        pAD_ap_indices = pAD_sub_df[["upshoot_loc", "AP_sweep_num", "AP_loc"]].values
 
-        # Somatic subdataframe and indices
-        Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
-        Somatic_ap_indices = Somatic_sub_df[["AP_loc", "AP_sweep_num", "AP_loc"]].values
+        if np.all(np.isnan(peak_latencies_all)) == False: #if APs detected
+
+            # Plot pADs and Somatics and create legend handles
+            for ap_type in pAD_df['AP_type'].unique():
+                ap_sub_df = pAD_df[pAD_df.AP_type == ap_type]
+                ap_indices = ap_sub_df[['upshoot_loc', 'AP_sweep_num', 'AP_loc']].values
+
+                # Plot each AP
+                for ap_idx in range(len(ap_indices)):
+                    ap_upshoot_loc, sweep_num, ap_loc = ap_indices[ap_idx]
+                    v_temp = np.array(array_V[sweep_num * len(V_df) + ap_upshoot_loc - pAD_plot_pre_window:sweep_num * len(V_df) + ap_loc + pAD_plot_post_window])
+                    time_temp = np.linspace((sweep_num * len(V_df) + ap_upshoot_loc - pAD_plot_pre_window) * 0.0001, (sweep_num * len(V_df) + ap_loc + pAD_plot_post_window) * 0.0001, len(v_temp))
+                    label = ' '.join([word.title() if word != 'pAD' else 'pAD' for word in ap_type.split('_')])
+                    ax1.plot(time_temp, v_temp, c=colors[ap_type], lw=2, alpha=0.5, label=label if ap_idx == 0 else "")
+
+            # Add the legend to the plot
+            ax1.legend(loc='upper right')
+
     
-        for pAD_spike_idx in range(len(pAD_ap_indices)):
-            pAD_upshoot_loc , sweep_num , pAD_AP_loc =  pAD_ap_indices[pAD_spike_idx][0], pAD_ap_indices[pAD_spike_idx][1], pAD_ap_indices[pAD_spike_idx][2]
-            v_temp = np.array(array_V[sweep_num*V_df.shape[0] +  pAD_upshoot_loc - pAD_plot_pre_window : sweep_num*V_df.shape[0] +  pAD_AP_loc + pAD_plot_post_window  ] )
-            time_temp = np.linspace((sweep_num*V_df.shape[0] +  pAD_upshoot_loc  - pAD_plot_pre_window )*0.0001 , (sweep_num*V_df.shape[0] +  pAD_AP_loc + pAD_plot_post_window  )*0.0001 , len(v_temp) )  
-            ax1.plot(time_temp, v_temp, c  = 'red', lw = 2, alpha=0.5 )
-            
-    
-    ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )#label=
+    ax2.plot(x_I, array_I, label = I_set, color=color_dict['I_display'] )
     ax2.legend()
     # ax2.axis('off')
     ax1.spines['top'].set_visible(False) # 'top', 'right', 'bottom', 'left'
@@ -438,104 +537,164 @@ def buildApplicationFig(color_dict, cell_id=None, folder_file=None, I_set=None, 
     ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
     ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
     ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
-    #ax1.set_title(cell_id + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
+    ax1.set_title(cell_id + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
     plt.tight_layout()
     plt.show()
     return fig
 
-def buildAP_MeanFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100):
-
-    # Rename vars: 
-    pAD_df = pAD_dataframe
-    V      = V_array  
-    plot_forwards_window        =  input_plot_forwards_window  
-    plot_backwards_window       =  input_plot_backwards_window
-    plot_window = plot_forwards_window + plot_backwards_window
-    sampling_rate               = 1e4 
-    sec_to_ms                   = 1e3
+########## AP MATRICS PLOTTERS
+def buildAP_MeanFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window=50, input_plot_backwards_window=100):
+    # Initialize necessary variables
+    plot_window = input_plot_forwards_window + input_plot_backwards_window
+    sampling_rate = 1e4 
+    sec_to_ms = 1e3
+    AP_types = ['pAD_true', 'pAD_possible', 'somatic']
+    colors = {'pAD_true': 'salmon', 'pAD_possible': 'orange', 'somatic': 'cornflowerblue'}
     
-    # pAD subdataframe and indices
-    pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
-    pAD_ap_indices = pAD_sub_df[["upshoot_loc" , "AP_loc", "AP_sweep_num"]].values
+    # Prepare the spike array for each AP type
+    spike_arrays = {AP_type: [] for AP_type in AP_types}
 
-    # Somatic subdataframe and indices
-    Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
-    Somatic_ap_indices = Somatic_sub_df[["upshoot_loc" , "AP_loc", "AP_sweep_num"]].values
+    # Iterate over each AP type to populate spike_arrays
+    for AP_type in AP_types:
+        ap_indices = pAD_dataframe[pAD_dataframe['AP_type'] == AP_type][["upshoot_loc", "AP_sweep_num"]].values
+        for idx in range(len(ap_indices)):
+            lower_bound = max(0, ap_indices[idx, 0] - input_plot_backwards_window)
+            upper_bound = ap_indices[idx, 0] + input_plot_forwards_window
+            spike_arrays[AP_type].append(V_array[lower_bound:upper_bound, ap_indices[idx, 1]])
 
-    pAD_spike_array = np.zeros([len(pAD_ap_indices), plot_window  ])
-    Somatic_spike_array = np.zeros([len(Somatic_ap_indices), plot_window ])
-    
-    # Plotter for pAD and Somatic Spikes 
+    # Generate the plot
     fig, ax = plt.subplots()
-    lines  = []  # initialise empty line list 
+    for AP_type in AP_types:
+        if spike_arrays[AP_type]:
+            mean_spike = np.mean(np.array(spike_arrays[AP_type]), axis=0)
+            time_ = sec_to_ms * np.arange(0, len(mean_spike)) / sampling_rate
+            ax.plot(time_, mean_spike, color=colors[AP_type], label=f'{AP_type} Mean')
 
-    for idx in range(len(pAD_ap_indices)): 
-        if plot_backwards_window >=   pAD_ap_indices[:,0][idx]:
-            plot_backwards_window_ = 0
-            plot_forwards_window_  = plot_forwards_window + plot_backwards_window  
-        else: 
-            plot_backwards_window_ = plot_backwards_window
-            plot_forwards_window_  = plot_forwards_window
-        
-        
-        pAD_spike_array[idx,:] = V[ pAD_ap_indices[:,0][idx] - plot_backwards_window_ :  pAD_ap_indices[:,0][idx] +  plot_forwards_window_  ,  pAD_ap_indices[:,-1][idx]    ]
-        time_                       = sec_to_ms* np.arange(0, len(pAD_spike_array[idx,:])) / sampling_rate  
-        line, = ax.plot(time_, pAD_spike_array[idx,:] , color = 'salmon', alpha=0.05)
-        lines.append(line)
-        #plt.plot(pAD_spike_array[idx,:], color ='grey', label = 'pAD')
-    
-    if pAD_spike_array.shape[0] > 0 :
-        line, = ax.plot(time_, np.mean(pAD_spike_array , axis = 0)  , color = 'red')
-        lines.append(line)
-    else : # no spikes to plot
-        pass
-
-    
-    for idx_ in range(len(Somatic_ap_indices)): 
-        
-        if plot_backwards_window >=   Somatic_ap_indices[:,0][idx_]:
-            plot_backwards_window_ = 0
-            plot_forwards_window_  = plot_forwards_window + plot_backwards_window  
-        else: 
-            plot_backwards_window_ = plot_backwards_window
-            plot_forwards_window_  = plot_forwards_window
-            
-        Somatic_spike_array[idx_,:] = V[ Somatic_ap_indices[:,0][idx_] - plot_backwards_window_ :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window_   ,  Somatic_ap_indices[:,-1][idx_]    ]
-        time_                       = sec_to_ms* np.arange(0, len(Somatic_spike_array[idx_,:])) / sampling_rate  
-        line, = ax.plot(time_,Somatic_spike_array[idx_,:] , color = 'cornflowerblue', alpha=0.05)
-        lines.append(line)
-    if pAD_spike_array.shape[0] > 0 :
-        line, = ax.plot(time_, np.mean(Somatic_spike_array , axis = 0)  , c = 'blue')
-        lines.append(line)
-    else : # no spikes to plot
-        pass
-
-    # Create the custom legend with the correct colors
-    legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble', alpha=0.2),
-                       Line2D([0], [0], color='red', lw=2, label= 'pAD Mean'),
-                       Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble', alpha=0.2),
-                       Line2D([0], [0], color='blue', lw=2, label='Somatic Mean')]
-
-    # Set the legend with the custom elements
-    ax.legend(handles=legend_elements)
-
-        
-    #plt.plot(np.mean(Somatic_spike_array, axis = 0 ) , c = 'blue', label = 'Somatic Mean')
+    # Set plot attributes and show
+    ax.legend()
     plt.title(cell_id)
     plt.ylabel('Membrane Potential (mV)')
     plt.xlabel('Time (ms)')
     plt.tight_layout()
     plt.show()    
-    return fig 
-    
+    return fig
 
+# #OLD DJ
+# def buildAP_MeanFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100):
+#     # Rename vars: 
+#     pAD_df = pAD_dataframe
+#     V      = V_array  
+#     plot_forwards_window        =  input_plot_forwards_window  
+#     plot_backwards_window       =  input_plot_backwards_window
+#     plot_window = plot_forwards_window + plot_backwards_window
+#     sampling_rate               = 1e4 
+#     sec_to_ms                   = 1e3
+    
+#     # pAD subdataframe and indices
+#     pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
+#     pAD_ap_indices = pAD_sub_df[["upshoot_loc" , "AP_loc", "AP_sweep_num"]].values
+
+#     # Somatic subdataframe and indices
+#     Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
+#     Somatic_ap_indices = Somatic_sub_df[["upshoot_loc" , "AP_loc", "AP_sweep_num"]].values
+
+#     pAD_spike_array = np.zeros([len(pAD_ap_indices), plot_window  ])
+#     Somatic_spike_array = np.zeros([len(Somatic_ap_indices), plot_window ])
+    
+#     # Plotter for pAD and Somatic Spikes 
+#     fig, ax = plt.subplots()
+#     lines  = []  # initialise empty line list 
+
+#     for idx in range(len(pAD_ap_indices)): 
+#         if plot_backwards_window >=   pAD_ap_indices[:,0][idx]:
+#             plot_backwards_window_ = 0
+#             plot_forwards_window_  = plot_forwards_window + plot_backwards_window  
+#         else: 
+#             plot_backwards_window_ = plot_backwards_window
+#             plot_forwards_window_  = plot_forwards_window
+        
+#         pAD_spike_array[idx,:] = V[ pAD_ap_indices[:,0][idx] - plot_backwards_window_ :  pAD_ap_indices[:,0][idx] +  plot_forwards_window_  ,  pAD_ap_indices[:,-1][idx]    ]
+#         time_                       = sec_to_ms* np.arange(0, len(pAD_spike_array[idx,:])) / sampling_rate  
+#         line, = ax.plot(time_, pAD_spike_array[idx,:] , color = 'salmon', alpha=0.05)
+#         lines.append(line)
+#         #plt.plot(pAD_spike_array[idx,:], color ='grey', label = 'pAD')
+    
+#     if pAD_spike_array.shape[0] > 0 :
+#         line, = ax.plot(time_, np.mean(pAD_spike_array , axis = 0)  , color = 'red')
+#         lines.append(line)
+#     else : # no spikes to plot
+#         pass
+
+#     for idx_ in range(len(Somatic_ap_indices)): 
+        
+#         if plot_backwards_window >=   Somatic_ap_indices[:,0][idx_]:
+#             plot_backwards_window_ = 0
+#             plot_forwards_window_  = plot_forwards_window + plot_backwards_window  
+#         else: 
+#             plot_backwards_window_ = plot_backwards_window
+#             plot_forwards_window_  = plot_forwards_window
+            
+#         Somatic_spike_array[idx_,:] = V[ Somatic_ap_indices[:,0][idx_] - plot_backwards_window_ :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window_   ,  Somatic_ap_indices[:,-1][idx_]    ]
+#         time_                       = sec_to_ms* np.arange(0, len(Somatic_spike_array[idx_,:])) / sampling_rate  
+#         line, = ax.plot(time_,Somatic_spike_array[idx_,:] , color = 'cornflowerblue', alpha=0.05)
+#         lines.append(line)
+#     if pAD_spike_array.shape[0] > 0 :
+#         line, = ax.plot(time_, np.mean(Somatic_spike_array , axis = 0)  , c = 'blue')
+#         lines.append(line)
+#     else : # no spikes to plot
+#         pass
+
+#     # Create the custom legend with the correct colors
+#     legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble', alpha=0.2),
+#                        Line2D([0], [0], color='red', lw=2, label= 'pAD Mean'),
+#                        Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble', alpha=0.2),
+#                        Line2D([0], [0], color='blue', lw=2, label='Somatic Mean')]
+    # # Set the legend with the custom elements
+    # ax.legend(handles=legend_elements)
+        
+    # #plt.plot(np.mean(Somatic_spike_array, axis = 0 ) , c = 'blue', label = 'Somatic Mean')
+    # plt.title(cell_id)
+    # plt.ylabel('Membrane Potential (mV)')
+    # plt.xlabel('Time (ms)')
+    # plt.tight_layout()
+    # plt.show()    
+    # return fig 
+
+def buildAP_PhasePlotFig(cell_id, pAD_dataframe, V_array):
+    # Initialize necessary variables
+    plot_forwards_window = 50
+    voltage_max = 60.0
+    voltage_min = -120.0
+    AP_types = ['pAD_true', 'pAD_possible', 'somatic']
+    colors = {'pAD_true': 'salmon', 'pAD_possible': 'orange', 'somatic': 'cornflowerblue'}
+
+    # Generate the plot
+    fig, ax = plt.subplots()
+    for AP_type in AP_types:
+        ap_indices = pAD_dataframe[pAD_dataframe['AP_type'] == AP_type][["upshoot_loc", "AP_sweep_num"]].values
+        for idx in range(len(ap_indices)):
+            v_temp = V_array[ap_indices[idx, 0]: ap_indices[idx, 0] + plot_forwards_window, ap_indices[idx, 1]]
+            dv_temp = np.diff(v_temp)
+            if max(v_temp) <= voltage_max and min(v_temp) >= voltage_min:
+                ax.plot(v_temp[:-1], dv_temp, color=colors[AP_type], alpha=0.05, label=f'{AP_type} Ensemble')
+
+    # Set plot attributes and show
+    plt.title(cell_id)
+    plt.ylabel('dV (mV)')
+    plt.xlabel('Membrane Potential (mV)')
+    plt.legend(handles=[Line2D([0], [0], color=color, lw=2, label=f'{AP_type} Ensemble') for AP_type, color in colors.items()])
+    plt.tight_layout()
+    plt.show()
+    return fig
+
+# DJ OLD
 def buildAP_PhasePlotFig(cell_id, pAD_dataframe, V_array) :
     '''
     Input pAD_dataframe corresponding to cell_id and V_array
     '''
     # Rename vars: 
     pAD_df = pAD_dataframe
-    V      = V_array  
+    # V      = V_array  
     plot_forwards_window = 50 
     voltage_max = 60.0 
     voltage_min = -120.0
@@ -557,7 +716,7 @@ def buildAP_PhasePlotFig(cell_id, pAD_dataframe, V_array) :
         
         
         
-        v_temp = V[ pAD_upshoot_indices[:,0][idx] :  pAD_upshoot_indices[:,0][idx] +  plot_forwards_window  ,  pAD_upshoot_indices[:,1][idx]    ]
+        v_temp = V_array[ pAD_upshoot_indices[:,0][idx] :  pAD_upshoot_indices[:,0][idx] +  plot_forwards_window  ,  pAD_upshoot_indices[:,1][idx]    ]
         dv_temp = np.diff(v_temp) 
         
         if max(v_temp) > voltage_max or min(v_temp) < voltage_min:             # don't plot artifacts
@@ -569,7 +728,7 @@ def buildAP_PhasePlotFig(cell_id, pAD_dataframe, V_array) :
     for idx_ in range(len(Somatic_upshoot_indices)): 
         
         
-        v_temp = V[ Somatic_upshoot_indices[:,0][idx_]  :  Somatic_upshoot_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_upshoot_indices[:,1][idx_]    ]
+        v_temp = V_array[ Somatic_upshoot_indices[:,0][idx_]  :  Somatic_upshoot_indices[:,0][idx_] + plot_forwards_window   ,  Somatic_upshoot_indices[:,1][idx_]    ]
         dv_temp = np.diff(v_temp) 
         
         if max(v_temp) > voltage_max or min(v_temp) < voltage_min:             # don't plot artifacts
