@@ -53,7 +53,7 @@ def function_tester_all_files(feature_df, test_function = None):
                 buildMeanAPFig(cell_id, pAD_df, V_array)
             elif test_function == 'beta_pAD': 
                 pAD_df, V_array = generate_V_pAD_df(folder_file)
-                action_potential_functions.beta_pAD_detection(V_array)
+                action_potential_functions.pAD_detection(folder_file, V_array)
                 
     return None 
 

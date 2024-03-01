@@ -163,7 +163,8 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
                             'AP_height',
                             'AP_slope',
                             'AP_width',
-                            'AP_latency']:
+                            'AP_latency',
+                            'AP_dvdt_max']:
 
                 mean_value, file_values = fetchMeans(pre_post_df, measure)
                 update_row = {

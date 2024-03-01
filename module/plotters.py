@@ -27,16 +27,16 @@ def quick_plot_file(filename, folder_file):
     path_V, path_I = make_path(folder_file)
     listV, dfV = igor_exporter(path_V)
     V_array = np.array(dfV)
+
+    display(df[df['folder_file']==folder_file]) # show file info 
+    quick_line_plot(listV, f'Voltage trace for {folder_file}')
     try:
         listI, dfI = igor_exporter(path_I)
         I_array = np.array(dfI)
+        quick_line_plot(listI, f'Current (I) trace for {folder_file}')
     except:
         print('no I file found', path_I)
-
-    display(df[df['folder_file']==folder_file]) # show file info 
-
-    quick_line_plot(listV, f'Voltage trace for {folder_file}')
-    quick_line_plot(listI, f'Current (I) trace for {folder_file}')
+    
 
 def quick_line_plot(plotlist, plottitle):
     plt.plot( range(len(plotlist)), plotlist, marker='o', linestyle='-')
@@ -385,7 +385,7 @@ def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
+            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig = buildAP_MeanFig(cell_id, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
@@ -408,7 +408,7 @@ def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
+            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_PhasePlotFig(cell_id, pAD_df, V_array)
@@ -432,7 +432,7 @@ def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
+            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_PCAFig(cell_id, pAD_df, V_array)
@@ -455,7 +455,7 @@ def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array)
+            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_HistogramFig(cell_id, pAD_df, V_array)
@@ -502,7 +502,7 @@ def buildApplicationFig( cell_id=None, folder_file=None, I_set=None, drug=None, 
     
     if pAD_locs is True: 
         # Get pAD_locs
-        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(V_array) 
+        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array) 
 
         if np.all(np.isnan(peak_latencies_all)) == False: #if APs detected
 

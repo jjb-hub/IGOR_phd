@@ -3,6 +3,7 @@ import os, shutil, itertools, json, time, functools, pickle
 import pandas as pd
 import igor2 as igor
 import os
+import numpy as np
 import matplotlib.pyplot as plt
 
 #takes filename reads excel as pandas.dataframe
@@ -10,11 +11,6 @@ def getRawDF(filename):
     df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int}, engine='openpyxl')
     df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
     return (df)
-
-def RawDFRow_unpacker(df, row_index):
-    folder_file, cell_id, data_type, drug, conc_uM, replication_no, application_order, drug_in, drug_out, I_set, R_series, R_tip, cell_type, cell_subtype, sex, offset, weight, P_age, Bistable, pAD  = df.iloc(0)[row_index][['folder_file', 'cell_id', 'data_type', 'drug', 'conc_uM', 'replication_no', 'application_order', 'drug_in', 'drug_out', 'I_set', 'R_series', 'R_tip', 'cell_type', 'cell_subtype', 'sex', 'offset', 'weight', 'P_age', 'Bistable', 'pAD']]
-
-    return folder_file, cell_id, data_type, drug, conc_uM, replication_no, application_order, drug_in, drug_out, I_set, R_series, R_tip, cell_type, cell_subtype, sex, offset, weight, P_age, Bistable, pAD  
 
 
 ######### IGOR ##########
@@ -33,7 +29,11 @@ def make_path(folder_file):
     extension_V = "Soma.ibw" #HARD CODE  
     extension_I = "Soma_outwave.ibw" 
     path_V = data_path + folder_file + extension_V
-    path_I = data_path + folder_file + extension_I
+    try:
+        path_I = data_path + folder_file + extension_I
+    except:
+        path_I = np.nan 
+        
     return path_V, path_I
 
 

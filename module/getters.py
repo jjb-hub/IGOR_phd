@@ -217,27 +217,29 @@ def _handleFile(row):
             print(row.folder_file)
 
             #extraction funcs 
-            row["max_firing"] = calculate_max_firing(V_array)
+            row["max_firing"] = calculate_max_firing(V_array) #seperate as depol block causes issues for ap_characteristics_extractor_main
             
             # get AP data 
-            peak_latencies_all  , v_thresholds_all  , peak_slope_all  , peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(V_array, all_sweeps=True)
+            
+            peak_latencies_all  , v_thresholds_all  , peak_slope_all  ,AP_max_dvdt_all, peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(row.folder_file, V_array, all_sweeps=True)
             # take first 10 APs #pAD check would be cool
             row["voltage_threshold"] = v_thresholds_all[:10]
             row["AP_height"] = peak_heights_all [:10]
             row["AP_width"] = peak_fw_all[:10]
             row["AP_slope"] = peak_slope_all [:10]
             row["AP_latency"] = peak_latencies_all[:10]
+            row["AP_dvdt_max"] = AP_max_dvdt_all[:10]
 
             # x, y for FI curve i.e. step_current_values, ap_counts (on I step)
-            step_current_values, ap_counts, V_rest = extract_FI_x_y (V_array, I_array, peak_locs_corr_all, sweep_indices_all) 
+            step_current_values, ap_counts, V_rest = extract_FI_x_y (row.folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all) 
             FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(step_current_values, ap_counts, slope_liniar = True) #TODO handel pAD APs better slope fit
             row["rheobased_threshold"] = rheobase_threshold
             row["FI_slope"] = FI_slope
 
             # [  tau (ms)  ,  steady_state_I  ,  I_injected  ,  RMP  ]
-            row["tau_rc"] = tau_analyser(V_array, I_array, step_current_values, ap_counts)
+            row["tau_rc"] = tau_analyser(row.folder_file, V_array, I_array, step_current_values, ap_counts)
             # [  sag (%)  ,  steady_state_I  ,  I_injected  ,  RMP  ]
-            row["sag"]    = sag_current_analyser(V_array, I_array, step_current_values, ap_counts)
+            row["sag"]    = sag_current_analyser(row.folder_file, V_array, I_array, step_current_values, ap_counts)
 
 
         # APP handeling
@@ -269,7 +271,7 @@ def _handleFile(row):
 
 
             # pAD classification
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
+            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(row.folder_file, V_array)
             
             if isinstance(pAD_df, pd.DataFrame):
                 if len(pAD_df["pAD_count"]) == 0:
@@ -292,6 +294,7 @@ def _handleFile(row):
                         row['APP_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
                         row['WASH_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
 
+                        # less than -65mV voltage threshold
                         row['PRE_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
                         row['APP_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
                         row['WASH_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
@@ -326,7 +329,7 @@ def _handleFile(row):
 
         else:
             raise NotADirectoryError(f"Didn't handle data type: {row.data_type}") # data_type can be AP, FP_AP or FP 
-    
+
     # docuument errors
     except Exception as e:
         error_type = type(e).__name__
