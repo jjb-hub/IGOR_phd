@@ -288,9 +288,13 @@ def _handleFile(row):
             peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  =   pAD_detection(row.folder_file, V_array)
             
             #pAD check for file
-            if any(value <= -65 for value in v_thresholds_all):
+            if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
                 row['pAD'] = True
-                row['pAD_locs'] = [peak_locs_corr_all[i] for i in range(len(v_thresholds_all)) if v_thresholds_all[i] <= -65]
+                row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+            #old
+            # if any(value <= -65 for value in v_thresholds_all):
+            #     row['pAD'] = True
+            #     row['pAD_locs'] = [peak_locs_corr_all[i] for i in range(len(v_thresholds_all)) if v_thresholds_all[i] <= -65]
 
 
             if isinstance(pAD_df, pd.DataFrame):
