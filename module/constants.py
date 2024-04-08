@@ -25,13 +25,15 @@ color_dict = { #drugs
 
 unit_dict = {'max_firing': 'Firing_(Hz)', 
             'voltage_threshold':'Voltage_Threshold_(mV)', 
+            'rheobased_threshold': 'Rheobase_Threshold_(pA)',
+            'FI_slope': 'Firing_Frequency_/_Current_(pA)',
             'AP_height': ' AP_Height_(mV)', 
             'AP_slope': 'AP_slope_(V_s^-1)',
             'AP_width': 'AP_width_(s) ',
             'AP_latency': 'AP_latency_(ms)',
             'tau_rc':'ms',
             'sag':'%',
-            'AP_count':'AP_count',
+            'AP_count_AP_locs':'AP_count', #ODD TODO 
             'AP_count_Somatic_AP':'AP_count_Somatic',
             'AP_count_pAD_True':'AP_count_pAD_True',
             'AP_count_pAD_Possible':'AP_count_pAD_Posible',

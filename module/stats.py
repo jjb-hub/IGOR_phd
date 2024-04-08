@@ -26,7 +26,7 @@ from statsmodels.formula.api import ols
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 import matplotlib.lines as mlines
 import matplotlib.transforms as mtransforms
-
+from collections import Counter
 #CONSTANTS   
 from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict, n_minimum,  p_value_threshold
 
@@ -48,7 +48,7 @@ def loop_stats(filename_or_df):
     df_row_order = df['folder_file'].tolist()  # save origional row order
     
     combinations = [
-                    (["cell_type", "cell_id", "data_type"], _update_FP_stats),
+                    (["cell_type", "cell_id", "data_type"], _update_FP_stats), #APPLYING FP stats to AP files also and visa versa #TODO this is inefficient 
                     (["cell_type", "data_type", "drug"], _update_APP_stats), 
                
                     # (["cell_type", "drug", "data_type"], _plot_pAD)
@@ -82,10 +82,10 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
                             'inputR_WASH', 'RMP_WASH']
         
 
-        #measure == AP_count_type and AP_count
-        columns_to_count = ['PRE_Somatic_AP_locs', 'PRE_pAD_Possible_AP_locs', 'PRE_pAD_True_AP_locs',
-                            'APP_Somatic_AP_locs', 'PRE_pAD_Possible_AP_locs', 'APP_pAD_True_AP_locs',
-                            'WASH_Somatic_AP_locs', 'PRE_pAD_Possible_AP_locs', 'WASH_pAD_True_AP_locs']
+        #measure == pAD_True_AP_count and AP_count 
+        columns_to_count = ['PRE_AP_locs', 'PRE_pAD_True_AP_locs', #, 'PRE_pAD_Possible_AP_locs' , 'PRE_Somatic_AP_locs'
+                            'APP_AP_locs', 'APP_pAD_True_AP_locs', #, 'PRE_pAD_Possible_AP_locs', 'APP_Somatic_AP_locs'
+                            'WASH_AP_locs', 'WASH_pAD_True_AP_locs'] #, 'PRE_pAD_Possible_AP_locs', 'WASH_Somatic_AP_locs'
         
         for index, row in df.iterrows():  # Looping over each cell_id
             cell_id = row['cell_id'] 
@@ -95,6 +95,7 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
                 pre_app_wash, AP_type = col_name.split('_')[0], "_".join(col_name.split('_')[1:3])
                 value_len = len(row[col_name]) if isinstance(row[col_name], list) else 0
                 update_row = {
+                    "folder_file": row['folder_file'],
                     "cell_type": cell_type,
                     "cell_id": cell_id,
                     "measure": f"AP_count_{AP_type}",
@@ -107,51 +108,119 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
                 update_rows.append(update_row)
                 ap_count_by_condition[pre_app_wash] += value_len  # Accumulate total AP count
 
+            # OLD NOW HAVE 
             # Add total AP count rows after processing all columns for a cell_id
-            for condition, total_count in ap_count_by_condition.items():
-                total_count_row = {
-                    "cell_type": cell_type,
-                    "cell_id": cell_id,
-                    "measure": "AP_count",
-                    "treatment": drug,
-                    'protocol':row['I_set'],
-                    "pre_app_wash": condition,
-                    "value": total_count,
-                    "sem": np.nan
-                }
-                update_rows.append(total_count_row)
+            # for condition, total_count in ap_count_by_condition.items():
+            #     total_count_row = {
+            #         "folder_file": df['folder_file'],
+            #         "cell_type": cell_type,
+            #         "cell_id": cell_id,
+            #         "measure": "AP_count",
+            #         "treatment": drug,
+            #         'protocol':row['I_set'],
+            #         "pre_app_wash": condition,
+            #         "value": total_count,
+            #         "sem": np.nan
+            #     }
+            #     update_rows.append(total_count_row)
             for list_col in columns_with_lists:
                 measure, pre_app_wash = list_col.split('_')[0], list_col.split('_')[1]
                 mean_row = {
+                    "folder_file": row['folder_file'],
                     "cell_type": cell_type,
                     "cell_id": cell_id,
                     "measure": measure,
                     "treatment": drug,
                     'protocol':row['I_set'],
                     "pre_app_wash": pre_app_wash,
-                    "value": np.nanmean(row[list_col]),
-                    "sem": stats.sem(row[list_col], nan_policy='omit')
+                    "value": safe_mean(row[list_col]),
+                    "sem": safe_sem(row[list_col])
                 }
                 update_rows.append(mean_row)
 
         updateAPPStats(filename, update_rows) 
-
     else:
         pass
     return df
 
+def safe_mean(arr):
+    '''
+    Calculate the mean of an array while handling NaN values and empty slices.
+    Parameters:
+        arr (array_like): Input array for which to calculate the mean.
+    Returns:
+        float: The mean of non-NaN values in the array, or NaN if the array is empty or contains only NaN values.
+    '''
+    if len(arr) <= 1 or np.all(np.isnan(arr)):
+        return np.nan
+    else:
+        return np.nanmean(arr)
+    
+def safe_sem(arr):
+    '''
+    Calculate the standard error of the mean (SEM) of an array while handling NaN values and empty slices.
+    Parameters:
+        arr (array_like): Input array for which to calculate the SEM.
+
+    Returns:
+        float: The SEM of non-NaN values in the array, or NaN if the array is empty or contains only NaN values.
+    '''
+    if isinstance(arr, list) and len(arr) <= 1:
+        return np.nan
+    else:
+        return stats.sem(arr, nan_policy='omit')
+    
+
+def get_common_val_PRE_DRUG(df, col_with_list, sort_by_list_idx):
+    """
+    Get the common 'I injected' value from two distinct groups in a DataFrame.
+
+    Parameters:
+        df (DataFrame): The DataFrame containing the data.
+        col_with_list (str): The name of the column containing lists.
+        sort_by_list_idx (int): The index of the list element to sort by.
+
+    Returns:
+        int: The most common 'I injected' value between the two groups, or np.nan if there are no overlapping values.
+    """
+    # Exclude rows with NaN values in the relevant column
+    df_filtered = df.dropna(subset=[col_with_list])
+
+    # Split DataFrame into two groups based on the 'drug' column
+    pre_group = df_filtered[df_filtered['drug'] == 'PRE']
+    other_group = df_filtered[df_filtered['drug'] != 'PRE']
+
+    # Extract 'I injected' values for each group
+    pre_injected_values = [row[col_with_list][sort_by_list_idx] for idx, row in pre_group.iterrows()]
+    other_injected_values = [row[col_with_list][sort_by_list_idx] for idx, row in other_group.iterrows()]
+
+    # Find intersection of 'I injected' values between the two groups
+    common_injected_values = set(pre_injected_values).intersection(other_injected_values)
+
+    if not common_injected_values:
+        return np.nan
+
+    # Count occurrences of each common value
+    common_value_counts = Counter(common_injected_values)
+
+    # Return the most common value as an integer
+    return int(max(common_value_counts, key=common_value_counts.get))
+
+
+
 def _update_FP_stats(filename, celltype_cellid_datatype, df):
     '''
     input: single cell FP expanded df
-    output: updates FP_stats with a mean pre and post for each cell_id and measure per treatment_group (cell_type/drug)
+    output: updated FP_stats with a mean pre and post for each cell_id and measure per treatment_group (cell_type/drug)
     '''
     cell_type, cell_id, data_type = celltype_cellid_datatype
     df=df[df['application_order'] <= 1] #remove second aplication data 
     update_rows = []
     if data_type == 'FP':
-        # normalised tau and sag by v difference / I injected (pA) #TODO
-        # df['tau_rc_v_diff'] = df['tau_rc'].apply(lambda x: [abs(item[1] - item[3]) for item in x])
-        # df['sag_v_diff'] = df['sag'].apply(lambda x: [abs(item[1] - item[3]) for item in x])
+        #NORMALISE 
+        #compensation change (access) 20%
+        # number of FP PRE vs POST folder_files ?
+
 
         treatment = ', '.join(df[df['drug'] != 'PRE']['drug'].unique())
         for drug, pre_post_df in df.groupby('drug'):
@@ -159,6 +228,8 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
             I_setting =  pre_post_df['I_set'].iloc[0] if pre_post_df['I_set'].nunique() == 1 else "Not all values are the same."
 
             for measure in ['max_firing', 
+                            'rheobased_threshold',
+                            'FI_slope',
                             'voltage_threshold',
                             'AP_height',
                             'AP_slope',
@@ -166,7 +237,7 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
                             'AP_latency',
                             'AP_dvdt_max']:
 
-                mean_value, file_values = fetchMeans(pre_post_df, measure)
+                mean_value, file_values, folder_files = fetchMeans(pre_post_df, measure)
                 update_row = {
                     "cell_type": cell_type,
                     "cell_id": cell_id,
@@ -175,26 +246,72 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
                     'protocol': I_setting , #JJB doubt this will work as nan unless data_type=AP
                     "pre_post": pre_post,
                     "mean_value": mean_value,
-                    "file_values": file_values
+                    "file_values": file_values, 
+                    "folder_files": folder_files, 
+                    "R_series": list(pre_post_df['R_series']),
                 }
                 # Append the dictionary to the list
                 update_rows.append(update_row)
+
+            for unnormalised_measure in ['tau_rc', 'sag']:
+                normalised_current = get_common_val_PRE_DRUG(df, unnormalised_measure, 2)
+                if pd.notna(normalised_current):
+                    pre_post_df_clean = pre_post_df.dropna(subset=[unnormalised_measure])
+                    idx_normalised =[idx for idx, row in pre_post_df_clean.iterrows() if row[unnormalised_measure][2] == normalised_current]
+                    file_values =  list(df.loc[idx_normalised, unnormalised_measure].apply(lambda x: x[0]))
+                    update_row = {
+                        "cell_type": cell_type,
+                        "cell_id": cell_id,
+                        "measure": unnormalised_measure,
+                        "treatment": treatment,
+                        'protocol': I_setting , #JJB doubt this will work as nan unless data_type=AP
+                        "pre_post": pre_post,
+                        "mean_value": np.mean(file_values),
+                        "file_values": file_values, 
+                        "folder_files": list(df.loc[idx_normalised, 'folder_file']), 
+                    }
+                    # Append the dictionary to the list
+                    update_rows.append(update_row)
+                else:
+                    print(f"{unnormalised_measure} for {cell_id} has no common FP current injected.")
+                    
 
         updateFPStats(filename, update_rows)
     else:
         pass
     return df
 
-def fetchMeans(pre_post_df, measure):
-    column=pre_post_df[measure]
-    if all(isinstance(value, list) for value in column): #list comprehansion 
-        file_values = [np.mean(value) for value in column]
-        mean_value = np.mean(file_values)
-    else: #single value comprehension
-        file_values = column.tolist()  
-        mean_value = np.mean(file_values)
-    return mean_value, file_values
+#OLD doesnt handle missing values i.e. JJB230207/t25
+# def fetchMeans(pre_post_df, measure):
+#     column=pre_post_df[measure]
+#     if all(isinstance(value, list) for value in column): #list comprehansion 
+#         file_values = [np.mean(value) for value in column]
+#         mean_value = np.mean(file_values)
+#     else: #single value comprehension
+#         file_values = column.tolist()  
+#         mean_value = np.mean(file_values)
+#     return mean_value, file_values
 
+
+def fetchMeans(pre_post_df, measure):
+    column = pre_post_df[measure]
+    folder_files = pre_post_df['folder_file']
+    valid_file_values = [] # single value for each folder_file
+    valid_folder_files = []
+    
+    for folder_file, value in zip(folder_files, column): # loop folder_files
+               
+        if (isinstance(value, list) and len(value) == 0) or (isinstance(value, (float, np.floating)) and np.isnan(value)):  # if the value is empty list or NaN   
+            print(f"Missing {measure} data in folder_file: {folder_file}")
+            valid_file_values.append(np.nan)
+            valid_folder_files.append(np.nan)
+       
+        else:  #add mean or float to valid_file_values
+            valid_file_values.extend([np.mean(value)] if isinstance(value, list) else [value])
+            valid_folder_files.append(folder_file)
+   
+    mean_value = np.mean(valid_file_values)  # mean of all files
+    return mean_value, valid_file_values, valid_folder_files
 
 
 ######## CALCULATE / PLOT STATS

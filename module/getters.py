@@ -129,10 +129,10 @@ def updateAPPStats(filename, rows):
     APP_stats_df = getAPPStats(filename)
     
     # Create a unique identifier 
-    APP_stats_df['unique_id'] = APP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure",  "treatment",'protocol', "pre_app_wash"]]), axis=1)
+    APP_stats_df['unique_id'] = APP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment",'protocol', "pre_app_wash"]]), axis=1)
     
     for row in rows:
-        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure",  "treatment", 'protocol', "pre_app_wash"]])
+        unique_id = '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment", 'protocol', "pre_app_wash"]])
         data_row = pd.DataFrame([row])
         data_row['unique_id'] = unique_id
 
@@ -220,9 +220,9 @@ def _handleFile(row):
             row["max_firing"] = calculate_max_firing(V_array) #seperate as depol block causes issues for ap_characteristics_extractor_main
             
             # get AP data 
-            
-            peak_latencies_all  , v_thresholds_all  , peak_slope_all  ,AP_max_dvdt_all, peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(row.folder_file, V_array, all_sweeps=True)
-            # take first 10 APs #pAD check would be cool
+            peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_slope_all  ,AP_max_dvdt_all, peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all , sweep_indices , sweep_indices_all  = ap_characteristics_extractor_main(row.folder_file, V_array, all_sweeps=True)
+            # take first 10 APs 
+            row['AP_peak_voltages'] = peak_voltages_all[:10]
             row["voltage_threshold"] = v_thresholds_all[:10]
             row["AP_height"] = peak_heights_all [:10]
             row["AP_width"] = peak_fw_all[:10]
@@ -230,9 +230,17 @@ def _handleFile(row):
             row["AP_latency"] = peak_latencies_all[:10]
             row["AP_dvdt_max"] = AP_max_dvdt_all[:10]
 
+            #pAD check for file
+            # if any(value <= -65 for value in v_thresholds_all):
+            if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+                row['pAD'] = True
+                row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+                # row['pAD_locs'] = [peak_locs_corr_all[i] for i in range(len(v_thresholds_all)) if v_thresholds_all[i] <= -65]
+            
+
             # x, y for FI curve i.e. step_current_values, ap_counts (on I step)
             step_current_values, ap_counts, V_rest = extract_FI_x_y (row.folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all) 
-            FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(step_current_values, ap_counts, slope_liniar = True) #TODO handel pAD APs better slope fit
+            FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(row.folder_file, step_current_values, ap_counts) #TODO handel pAD APs better slope fit
             row["rheobased_threshold"] = rheobase_threshold
             row["FI_slope"] = FI_slope
 
@@ -259,9 +267,15 @@ def _handleFile(row):
                     pass_I_array = I_array
                 else:
                     print("No I injected, cannot calculate input_R.")
+                    row['inputR_PRE'] = []
+                    row['inputR_APP'] = []
+                    row['inputR_WASH'] = []
                     pass_I_array = None
             else:
                 print("I_df does not exist, cannot calculate input_R.")
+                row['inputR_PRE'] = []
+                row['inputR_APP'] = []
+                row['inputR_WASH'] = []
                 pass_I_array = None
                 
             mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array) #with current (I) data 
@@ -271,37 +285,48 @@ def _handleFile(row):
 
 
             # pAD classification
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(row.folder_file, V_array)
+            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  =   pAD_detection(row.folder_file, V_array)
             
+            #pAD check for file
+            if any(value <= -65 for value in v_thresholds_all):
+                row['pAD'] = True
+                row['pAD_locs'] = [peak_locs_corr_all[i] for i in range(len(v_thresholds_all)) if v_thresholds_all[i] <= -65]
+
+
             if isinstance(pAD_df, pd.DataFrame):
-                if len(pAD_df["pAD_count"]) == 0:
-                    # Situation 1: pAD_df is a DataFrame but has no rows
+                if len(pAD_df["pAD_count"]) == 0:  #  No APs detected
                     row["pAD_count"] = []
                     row["AP_locs"] = []
                 else:
-                    # Situation 2: pAD_df is a DataFrame with data
-                    if pAD_df["pAD_count"].sum() == 0:
-                        # Situation 3: pAD_df exists but pAD_count is all 0
+                    
+                    if pAD_df["pAD_count"].sum() == 0:  # pAD_count is 0
                         row["pAD_count"] = []
                         row["AP_locs"] = pAD_df["AP_loc"].ravel()
                     else:
                         # Situation 4: pAD_df exists and pAD_count is non-zero
                         row["pAD_count"] = pAD_df["pAD_count"].iloc[0]  # Extract the value from the first row
+                        # row['pAD_locs'] = 
                         row["AP_locs"] = pAD_df["AP_loc"].ravel()
+                        row['pAD'] = True
 
                         # Lists of positions of action potentials: pAD_true, pAD_possible, and Somatic
-                        row['PRE_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
-                        row['APP_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
-                        row['WASH_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
+                        row['PRE_AP_locs'] = pAD_df.loc[(pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
+                        row['APP_AP_locs'] = pAD_df.loc[(pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
+                        row['WASH_AP_locs'] = pAD_df.loc[(pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
 
-                        # less than -65mV voltage threshold
+                        # less than -65mV voltage threshold == pAD_True
                         row['PRE_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
                         row['APP_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
                         row['WASH_pAD_True_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_true') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
 
-                        row['PRE_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
-                        row['APP_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
-                        row['WASH_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
+                        #OLD UNUSED CONCEPT - will need fo rAP sorting later  
+                        # row['PRE_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
+                        # row['APP_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
+                        # row['WASH_Somatic_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'somatic') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
+
+                        # row['PRE_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] < row.drug_in), 'AP_loc'].tolist()
+                        # row['APP_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] >= row.drug_in) & (pAD_df['AP_sweep_num'] <= row.drug_out), 'AP_loc'].tolist()
+                        # row['WASH_pAD_Possible_AP_locs'] = pAD_df.loc[(pAD_df['AP_type'] == 'pAD_possible') & (pAD_df['AP_sweep_num'] > row.drug_out), 'AP_loc'].tolist()
             
             else:
                 # Situation 5: pAD_df is not a DataFrame (e.g., it's np.nan), assign empty lists
@@ -379,6 +404,8 @@ def buildFPStatsDf(filename):
             "pre_post",
             "mean_value",
             "file_values",
+            "folder_files",
+            "R_series",
         ]
     )
 
@@ -386,6 +413,7 @@ def buildFPStatsDf(filename):
 def buildAPPStatsDf(filename):
     return pd.DataFrame(
         columns=[
+            "folder_file",
             "cell_type",
             "cell_id",
             "measure",

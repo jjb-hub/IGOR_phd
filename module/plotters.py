@@ -17,85 +17,109 @@ import seaborn as sns
 
 
 ########## BASE PLOTTERS ##########
-
-
-def quick_plot_file(filename, folder_file):
+def quick_plot_file(filename, folder_file, stacked=False):
     '''
-    Plots any waveform based off fold_file.
+    Plots any waveform based off folder_file.
+    Stacked will plot each column on top of each other, defaults to False.
     '''
-    df=getRawDf(filename)
+    df = getRawDf(filename)
     path_V, path_I = make_path(folder_file)
-    listV, dfV = igor_exporter(path_V)
+    
+    # Plot Voltage Trace
+    _, dfV = igor_exporter(path_V)
     V_array = np.array(dfV)
-
-    display(df[df['folder_file']==folder_file]) # show file info 
-    quick_line_plot(listV, f'Voltage trace for {folder_file}')
+    display(df[df['folder_file'] == folder_file])  # Show file info
+    quick_line_plot(V_array, f'Voltage trace for {folder_file}', stacked=stacked)
+    
+    # Attempt to Plot Current Trace
     try:
-        listI, dfI = igor_exporter(path_I)
+        _, dfI = igor_exporter(path_I)
         I_array = np.array(dfI)
-        quick_line_plot(listI, f'Current (I) trace for {folder_file}')
-    except:
-        print('no I file found', path_I)
+        quick_line_plot(I_array, f'Current (I) trace for {folder_file}', stacked=stacked)
+    except FileNotFoundError:
+        print('No I file found', path_I)
+
+def quick_line_plot(plot_array, plottitle, stacked=False):
+    '''
+    Plots line plot for given array without adding a legend for stacked plots.
+    
+    Parameters:
+        plot_array (numpy.ndarray): 2D array to plot, where each column is a sweep.
+        plottitle (str): Title for the plot.
+        stacked (bool): If True, plots each sweep stacked. If False, concatenates sweeps.
+    '''
+    plt.figure()
+    num_sweeps = plot_array.shape[1]
+    
+    if stacked:
+        for i in range(num_sweeps):
+            plt.plot(plot_array[:, i])  # Plot each sweep
+    else:
+        # Concatenate sweeps for continuous plotting
+        continuous_plot = plot_array.ravel(order='F')  # Flatten array in column-major order
+        plt.plot(continuous_plot)  # Plot continuous
+    
+    plt.title(plottitle)
+    plt.xlabel('Time in ms')
+    plt.ylabel('Current in pA')
+    plt.show()
+    
+# OLD PRE STACKED 
+# def quick_plot_file(filename, folder_file, stacked='False'):
+#     '''
+#     Plots any waveform based off folder_file.
+#     Stacked will plot each column on top of eachother, defults to False.
+#     '''
+#     df=getRawDf(filename)
+#     path_V, path_I = make_path(folder_file)
+#     listV, dfV = igor_exporter(path_V)
+#     V_array = np.array(dfV)
+
+#     display(df[df['folder_file']==folder_file]) # show file info 
+#     quick_line_plot(V_array, f'Voltage trace for {folder_file}', stacked=False)
+#     try:
+#         listI, dfI = igor_exporter(path_I)
+#         I_array = np.array(dfI)
+#         quick_line_plot(listI, f'Current (I) trace for {folder_file}')
+#     except:
+#         print('no I file found', path_I)
     
 
-def quick_line_plot(plotlist, plottitle):
-    plt.plot( range(len(plotlist)), plotlist, marker='o', linestyle='-')
-    plt.title(plottitle)
-    plt.show()
-
+# # def quick_line_plot(plotlist, plottitle):
+# #     plt.plot( range(len(plotlist)), plotlist, marker='o', linestyle='-')
+# #     plt.title(plottitle)
+# #     plt.show()
+# def quick_line_plot(plot_array, plottitle, stacked=False):
+#     '''
+#     Plots line plot for given array.
+    
+#     Parameters:
+#         plot_array (numpy.ndarray): 2D array to plot, where each column is a sweep.
+#         plottitle (str): Title for the plot.
+#         stacked (bool): If True, plots each sweep stacked on top of each other.
+#     '''
+#     num_sweeps = plot_array.shape[1]
+#     fig, ax = plt.subplots()
+    
+#     if stacked:
+#         for i in range(num_sweeps):
+#             # Adding an offset for each sweep to stack them
+#             offset = i * plot_array.max() * 1.1  # 1.1 to ensure a little space between plots
+#             ax.plot(plot_array[:, i] + offset, label=f'Sweep {i+1}')
+#     else:
+#         for i in range(num_sweeps):
+#             ax.plot(plot_array[:, i], label=f'Sweep {i+1}')
+    
+#     ax.set_title(plottitle)
+#     ax.legend()
+#     plt.show()
     
 from scipy.ndimage import gaussian_filter1d
-def plot_ap_window(v_array, threshold_index, input_sampling_rate, sec_to_ms, derivative_included=True):
-    """
-    Plot the action potential (AP) window centered around the threshold index, showing both
-    the original and smoothed voltage traces. Optionally includes the derivative at each point
-    in the window to assess the rate of voltage change.
-
-    Input:
-        v_array (numpy.ndarray): The array containing voltage data for a single sweep.
-        threshold_index (int): The index in v_array corresponding to the AP threshold.
-        input_sampling_rate (float): The sampling rate at which the data was recorded (in Hz).
-        sec_to_ms (float): Conversion factor from seconds to milliseconds.
-        derivative_included (bool): Flag to indicate if derivative points should be plotted.
-    """
-    # Smoothing the voltage trace
-    smoothed_v_array = gaussian_filter1d(v_array, 5)
-
-    # Calculating the derivative
-    smoothed_gradient = np.gradient(smoothed_v_array)
-
-    # Focusing on a narrow window around the threshold for derivative calculation
-    narrow_window_size = 10 # Adjust as needed
-    window_start = max(0, threshold_index - narrow_window_size)
-    window_end = min(len(v_array), threshold_index + narrow_window_size)
-
-    # Extracting the actual time points for the window of interest
-    time_points = np.arange(len(v_array)) / input_sampling_rate * sec_to_ms  # convert indices to time (ms)
-    window_time_points = time_points[window_start:window_end]
-
-    # Plotting the voltage trace and derivative within the window
-    plt.figure(figsize=(10, 6))
-    plt.plot(window_time_points, v_array[window_start:window_end], label='Original Voltage Trace', color='blue')
-    plt.plot(window_time_points, smoothed_v_array[window_start:window_end], label='Smoothed Voltage Trace', color='orange')
-    plt.axvline(time_points[threshold_index], color='red', linestyle='--', label='Threshold')
-
-    if derivative_included:
-        # Plotting the derivative as points
-        plt.scatter(window_time_points, smoothed_gradient[window_start:window_end], color='green', label='Derivative', zorder=3)
-        derivative_curve = smoothed_gradient[window_start:window_end]
-        plt.plot(window_time_points, derivative_curve, color='green', label='Derivative', zorder=3)
-
-
-    plt.xlabel('Time (ms)')
-    plt.ylabel('Voltage (mV)')
-    plt.title('Voltage Trace and Derivative Calculation at Threshold')
-    plt.legend()
-    plt.grid(True)
-    plt.show()
 
 
 
-def build_FP_figs(filename):
+
+def build_FP_figs(filename, compensation_variance=None):
     '''
     Fetches FP_stats df for filename - plots with paired student t PRE vs POST for each cell_type and FP measure (i.e. max_firing)
     input: filename
@@ -104,9 +128,9 @@ def build_FP_figs(filename):
     df=getFPStats(filename)
     insufficient_data_tracking=getOrBuildDataTracking(filename)
 
-    for (cell_type, measure), subset in df.groupby(['cell_type', 'measure']):
+    for (cell_type, measure), subset_raw in df.groupby(['cell_type', 'measure']):
         print (f"plotting {measure} for {cell_type}")
-
+        subset = subset_raw.copy()
         #track groups with n < n_minimum 
         # insufficient_data_tracking = {}
         
@@ -137,14 +161,41 @@ def build_FP_figs(filename):
         saveDataTracking(filename, insufficient_data_tracking)
         order = [t for t in color_dict.keys() if t in subset['treatment'].unique()]
 
+        filtered_df = pd.DataFrame()
+        if compensation_variance:
+            # check R_series pre and post and include only diff smaller than compensation_variance
+            for (cell_id, measure), df_group in subset.groupby(['cell_id', 'measure']):
+                pre_mean = df_group[df_group['pre_post'] == 'PRE']['R_series'].explode().mean()
+                post_mean = df_group[df_group['pre_post'] == 'POST']['R_series'].explode().mean()
+                percent_diff = ((post_mean - pre_mean) / pre_mean) if pre_mean else np.nan
+
+                if pd.isna(pre_mean) or pd.isna(post_mean) or abs(percent_diff) > compensation_variance:
+                    # print(f"{cell_id} does not satisfy R_series conditions, compensation_variance : {percent_diff}. Removed.")
+                    continue  
+                if abs(percent_diff) < compensation_variance:
+                    filtered_df = pd.concat([filtered_df, df_group])            
+
+            if filtered_df.empty:
+                print(f"No data meets this requirement, plotting all.")
+                subset_to_plot = subset.copy()
+                legend = 'NO FILTER on data based on access.'
+            elif not filtered_df.empty:
+                subset_to_plot = filtered_df
+                removed_cells = set(subset['cell_id'].unique()) - set(subset_to_plot['cell_id'].unique())
+                legend = f'Filtered for access change < {compensation_variance}, {len(removed_cells)} out of {len(subset["cell_id"].unique())} cells removed.'
+
+        else:
+            subset_to_plot = subset.copy()
+            legend = 'NO FILTER on data based on access.'
         
+    
         Fig, ax = plt.subplots(figsize=(20, 10))
         sns.barplot(
             x='treatment',
             y='mean_value',
             hue='pre_post',
             hue_order=['PRE', 'POST'],
-            data=subset,
+            data=subset_to_plot,
             errorbar=('ci', 68),
             palette='Set2',
             edgecolor="k",
@@ -156,7 +207,7 @@ def build_FP_figs(filename):
             y='mean_value',
             hue='pre_post',
             hue_order=['PRE', 'POST'],
-            data=subset,
+            data=subset_to_plot,
             palette='Set2',
             order=order,
             edgecolor="k",
@@ -174,6 +225,8 @@ def build_FP_figs(filename):
         ax.set_xlabel('Treatment', fontsize=14)  # Adjust font size as needed
         ax.set_ylabel(unit_dict[measure], fontsize=14)  # Adjust font size as needed
         ax.set_title(f'{cell_type} - {measure}', fontsize=16)  # Adjust font size as needed
+        ax.text(0.01, 0.01, legend, transform=ax.transAxes, fontsize=12, verticalalignment='bottom', 
+                bbox=dict(facecolor='white', alpha=0.9))
 
         # Optionally, adjust the font size of the tick labels
         ax.tick_params(axis='x', labelsize=12)  # Adjust font size for x-axis tick labels
@@ -385,7 +438,7 @@ def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array)
+            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig = buildAP_MeanFig(cell_id, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
@@ -408,7 +461,7 @@ def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array)
+            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_PhasePlotFig(cell_id, pAD_df, V_array)
@@ -432,7 +485,7 @@ def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array)
+            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_PCAFig(cell_id, pAD_df, V_array)
@@ -455,7 +508,7 @@ def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array)
+            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_HistogramFig(cell_id, pAD_df, V_array)
@@ -502,7 +555,7 @@ def buildApplicationFig( cell_id=None, folder_file=None, I_set=None, drug=None, 
     
     if pAD_locs is True: 
         # Get pAD_locs
-        peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  = pAD_detection(folder_file,V_array) 
+        peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array) 
 
         if np.all(np.isnan(peak_latencies_all)) == False: #if APs detected
 

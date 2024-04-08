@@ -39,10 +39,11 @@ def generate_V_pAD_df(folder_file):
     path_V, path_I = make_path(folder_file)
     V_list, V_df = igor_exporter(path_V)
     V_array      = np.array(V_df) 
-    peak_latencies_all , v_thresholds_all  , peak_slope_all  ,  peak_heights_all , pAD_df  =   pAD_detection(V_array)
+    peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  =   pAD_detection(V_array)
     return pAD_df , V_array
 
 from scipy.ndimage import gaussian_filter1d
+
 def plot_ap_window(folder_file, v_array, peak_location, upshoot_location, threshold_voltage, latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms):
     """
     Plot the action potential (AP) window centered around the upshoot location, including the slope and the point of maximum derivative (dV/dt).
@@ -422,7 +423,7 @@ def tau_analyser(folder_file, V_array, I_array, step_current_values, ap_counts, 
         start_index = changes[0] + 1  # The index after the first change
         end_index = changes[1]  # The index before the second change
     else:
-        print('Unexpected number of steps in the current trace.')
+        print(f'Unexpected number of steps in the current trace: {len(changes)}.')
         return [np.nan, np.nan, np.nan, RMP]
 
     # Use only the portion of the voltage trace where the current is applied
@@ -630,12 +631,14 @@ def sag_current_analyser(folder_file, voltage_array, current_array, step_current
             # Calculate sag ratio
             sag_ratio = (asym_current - min_sag_voltage) / (RMP - min_sag_voltage)
 
-            if not 0<= sag_ratio <=0.45: #HARD CODE
-                print (f"Sag calculated {sag_ratio} is outside physiological bound 4% to 45%.")
+            if  0<= sag_ratio <=0.45: #HARD CODE
+                return [sag_ratio, asym_current, step_current, RMP]
+            else:
+                print (f"Sag calculated {sag_ratio} is outside physiological bound 0% to 45%.")
                 return np.nan
                 # plot_sag(folder_file, V_sweep[first_current_point:last_current_point], np.arange(first_current_point, last_current_point) / 1000, RMP, asym_current, min_sag_voltage, sag_ratio)
 
-            return [sag_ratio, asym_current, step_current, RMP]
+            
         
     print("No sweep found with negative current injecttion and without action potentials, unable to calculate sag.")
     return [np.nan, np.nan, np.nan, np.nan]
@@ -739,6 +742,23 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 
 ########## ACTION POTENTIAL RETROAXONAL / ANTIDROMIC
 
+def calculate_derivative(voltage_array, sampling_rate):
+    """
+    Calculates the derivative of the voltage array with respect to time.
+    
+    Parameters:
+    - voltage_array (1D numpy array): The array containing voltage data.
+    - sampling_rate (float): The sampling rate of the data.
+    
+    Returns:
+    - derivative (1D numpy array): The derivative of the voltage data.
+    """
+    dt = 1 / sampling_rate
+    derivative = np.diff(voltage_array) / dt
+    return derivative
+
+
+
 def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index, main_plot = False, input_sampling_rate = 1e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, input_backwards_window = 50 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
     '''
     Extracts detailed characteristics of action potentials (APs) from voltage data within a specified sweep.
@@ -780,8 +800,8 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
     ap_width_max = 4 # ms
 
     # initialise output lists
+    AP_peak_voltages              = []            #  voltage at peak of AP
     AP_locations_list            = []            #  corrected location of all peaks detected
-
     valid_AP_locations           = []            #  peak location of ONLY valid APs
     AP_upshoot_locations_list    = []            #  location of upshoots  
     AP_voltage_thresholds_list   = []            #  voltage threshold (mV) - voltage at upshoot
@@ -793,82 +813,90 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
 
 
     V_array = df_V_arr[:,sweep_index] #slice V_array to sweep
-    v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(V_array) #get smoothed peak locs
-    v_deriv_transformed = np.heaviside( -np.diff(V_array)+ np.exp(1), 0 ) #create binary derviitive (0 for negatice derivative)
-    
-    # exit if no APs
+    v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(V_array) #get smoothed peak_locs
+
+
+    # NO APs FOUND
     if len(peak_locs) == 0 :
         # print("No peaks found in sweep.")
-        return  [] ,   [] ,  []  , [] ,  [] ,  [] , [] , []
+        return  [] ,   [] ,  []  , [] ,  [] ,  [] , [] , [], []
     
-    # print (f"Analising {len(peak_locs)} APs in trace.")
-
-    #PEAK LOCATIONS 
+    # PEAK LOCATIONS 
     for peak_idx in range(len(peak_locs)) : 
-        while peak_locs[peak_idx]  < ap_backwards_window: 
-            ap_backwards_window = int(ap_backwards_window - 10) # set backward window
+        while peak_locs[peak_idx]  < ap_backwards_window: # peak_idx at begining of trace 
+            ap_backwards_window = int(ap_backwards_window - 10) # set backward window -10 looping until is < peak_locs[peak_idx]
         
         v_max  = np.max(V_array[peak_locs[peak_idx] - ap_backwards_window : peak_locs[peak_idx] + pre_ap_baseline_forwards_window]) 
         peak_locs_shift = ap_backwards_window - np.where(V_array[peak_locs[peak_idx] - ap_backwards_window: peak_locs[peak_idx] + pre_ap_baseline_forwards_window] == v_max)[0][0]
         AP_locations_list += [ peak_locs[peak_idx] - peak_locs_shift ]  
     
-    #keep only locations with max voltage > ap_peak_voltage
+    #FILTER ON PEAK VOLTAGE > ap_peak_voltage
     ls = list(np.where(V_array[AP_locations_list] >= ap_peak_voltage)[0])
     AP_locations_list  = [AP_locations_list[ls_ ] for ls_ in ls ] # list of accurate AP peak locations
-    # verify peaks exist 
-    if len(AP_locations_list) == 0:
-        print(f"Detected peaks max voltage  < {ap_peak_voltage}.") #catches nois/ EPSPs mostly
-        return [] ,   [] ,  []  , [] ,  [] ,  [] , [] , []
 
-    # redefine ap_backwards_window if inter_spike_interval  < ap_backwards_window
+    # NO VALID APs FOUND 
+    if len(AP_locations_list) == 0:
+        # print(f"Detected peaks max voltage  < {ap_peak_voltage}.") #catches nois/ EPSPs mostly
+        return [] ,   [] ,  []  , [] ,  [] ,  [] , [] , [], []
+
+    # REDEFINE WINDOW ap_backwards_window if inter_spike_interval  < ap_backwards_window
     if len(AP_locations_list) >= 2 : 
         ap_backwards_window = int(min(ap_backwards_window ,  np.mean(np.diff(AP_locations_list))))
 
+    # LOOPING PEAKS
     for peak_location in AP_locations_list:
 
-        # AP UPSHOOT LOCATION
-        # define window v_temp for AP and derivitive in that window v_derivative_temp
-        if ap_backwards_window <  peak_location: 
-            #print('debugging')
-            #print(peak_location - ap_backwards_window,  peak_location )
-            if peak_location - ap_backwards_window ==  peak_location and  peak_location >= 50 :
-                ap_backwards_window = ap_backwards_window 
-                v_temp = V_array[peak_location - ap_backwards_window: peak_location ]
-                v_derivative_temp = v_deriv_transformed[peak_location - ap_backwards_window: peak_location ]
-            else:
-                v_temp = V_array[peak_location - ap_backwards_window: peak_location ]
-                v_derivative_temp = v_deriv_transformed[peak_location - ap_backwards_window: peak_location ]
+        # CHECK AP WINDOW and SLICE V_array
+        if ap_backwards_window <  peak_location: # peak is at least one ap_backwards_window into trace
+            v_temp = V_array[peak_location - ap_backwards_window: peak_location ]
         else: 
             v_temp = V_array[0:peak_location]
-            v_derivative_temp = v_deriv_transformed[0:peak_location]
-        
+
+
+        #CREATE PEAK FREE WINDOW
+        peaks, _ = find_peaks(v_temp) 
+        peaks_off_ap = peaks # peaks above bottem 30% of voltage removed (likely on AP)
+        if len(peaks) > 0:
+            # Filter out peaks+/-1 that are on the top 60% of the voltage values (i.e., likely on AP)
+            peaks_off_ap = [peak for peak in peaks if np.mean([v_temp[peak-1],v_temp[peak+1]])  < np.percentile(v_temp, 40)] #HARD CODE 30 doent catch mini spike at I step onset FP
+
+            if len(peaks_off_ap) > 0 :
+                peak_free_ap_backwards_window = ap_backwards_window - peaks_off_ap[-1] # is there are peaks in bottom 30% of voltage set window from them to peak
+            else:
+                peak_free_ap_backwards_window = ap_backwards_window #peaks are on AP
+
+            peak_free_V_temp = V_array[peak_location - peak_free_ap_backwards_window: peak_location ]
+
+    
         # UPSHOOT LOCATION
+        v_derivative = calculate_derivative (v_temp, sampling_rate) #relic for plotting
+        v_derivative_temp = np.heaviside( -np.diff(v_temp)+ np.exp(1), 0 ) #create binary derviitive (0 = negatice derivative = V decreasing / 1  = positive derivitive = voltage increasing) 
         x_                = np.diff(v_derivative_temp) #dv/dt in AP window
-        upshoot_loc_array = np.where(x_  <  0)[0]   # indices where the values in the x_ array are less than zero, indicating a negative change in derivitive
-        if len(upshoot_loc_array) > 0 : 
-            upshoot_loc_in_window  = np.where(x_  <  0)[0][0]
-            upshoot_location  =   peak_location - ap_backwards_window + upshoot_loc_in_window
+        upshoot_loc_array = np.where(x_  <  0)[0]   # indices where the second derivative is -ive (x_)  indicating a negative change in derivitive .˙. 
 
-        elif len(upshoot_loc_array) == 0 : 
-            # print(f"No upshoot found, analising next peak.") # occures most for depolarisation block spiking can remove 15 spikes
-            # could use folder_file to check is FP data type and sweep in later 50% to check depol block
-            continue        
-        
-        
-        # PEAK VOLTAGE
-        AP_peak_voltage   = V_array[peak_location]        
-        if AP_peak_voltage > 120 :
-            print(f"Artifact detected, index {peak_location}, {AP_peak_voltage:.2f} > 120mV, analising next peak.")
+        if len(upshoot_loc_array) == 0 : 
+            # print(f"No upshoot found, analising next peak.") # occures most for depolarisation block spiking can remove 15 spikes / JJB230207/t25
+            # could use folder_file to check is FP data type and sweep in later 50% to check depol block 
             continue
 
-        # VOLTAGE THRESHOLD
-        voltage_threshold = V_array[upshoot_location]
-        
-        # AP HEIGHT
-        AP_height = V_array[peak_location]  - voltage_threshold
-        if AP_height > 150 or AP_height < 10: #HARD CODE #TODO
-            print(f"Artifact detected, index {peak_location}, AP height of {AP_height:.2f} mV, analising next peak.")
-            continue
+        if len(upshoot_loc_array) == 1 : 
+            upshoot_loc_in_window_bin  = upshoot_loc_array[0] 
+
+        elif len(upshoot_loc_array)>1 and len(peaks) == 0 :
+            upshoot_loc_in_window_bin  = upshoot_loc_array[0]
+
+        elif len(upshoot_loc_array)  > 1 : #if several options use peak_free
+                        peak_free_v_derivative_temp = np.heaviside( -np.diff(peak_free_V_temp)+ np.exp(1), 0 ) #create binary derviitive (0 = negatice derivative = V decreasing / 1  = positive derivitive = voltage increasing) 
+                        peak_free_x_                = np.diff(peak_free_v_derivative_temp) #dv/dt in AP window
+                        peak_free_upshoot_loc_array = np.where(peak_free_x_  <  0)[0]   # indices where the second derivative is -ive (x_)  indicating a negative change in derivitive .˙. 
+                        ap_backwards_window = peak_free_ap_backwards_window #redefine backwards window
+                        if len(peak_free_upshoot_loc_array) ==0 :
+                            print ('fuk')
+                        upshoot_loc_in_window_bin  = peak_free_upshoot_loc_array[0]
+                        upshoot_loc_array = peak_free_upshoot_loc_array
+
+        # UPSHOOT LOCATION in V_array (instead of backward_window)
+        upshoot_location  =   peak_location - ap_backwards_window + upshoot_loc_in_window_bin        
 
         # LATENCY
         AP_latency   = sec_to_ms * (peak_location - upshoot_location)  / sampling_rate
@@ -879,15 +907,53 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
             print("Slope/derivative of AP is negative, setting to nan.")
             # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
             average_slope, max_dvdt, max_dvdt_location  = np.nan , np.nan, np.nan
-            # continue
+
+        #CHECK FOR PAD / BAD UPSHOOT DETECTION
+        # print(f"Verifying upshoot: peak to upshoot / peak to max dvdt {np.diff([peak_location, upshoot_location])} / {np.diff([peak_location, max_dvdt_location])}, {(np.diff([peak_location, upshoot_location])) / (np.diff([peak_location, max_dvdt_location]))}")
+        if not (1<=  ((np.diff([peak_location, upshoot_location])) / (np.diff([peak_location, max_dvdt_location]))) <= 3.5):
+                # print(f'Upshoot uneasonably far from peak relative to max dv/dt. Recalculating...')
+                if max_dvdt_location < upshoot_location : #ratio < 1
+                    upshoot_location = max_dvdt_location # occures on very wide APs wher back window is insufficient - FP late sweeps
+                if len(upshoot_loc_array)>1:
+                    upshoot_location  =   peak_location - ap_backwards_window +  upshoot_loc_array[1] #occures for AP on I step - there sould be a second possible upshoot .˙. take upshoot_loc_array[1]
+                
+                #REDO SLOPE
+                average_slope, max_dvdt, max_dvdt_location = calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, AP_latency, sampling_rate)
+                if average_slope <= 0 or max_dvdt <= 0:
+                    print("Slope/derivative of AP is negative with new upshoot, setting to nan.")
+                    # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
+                    average_slope, max_dvdt, max_dvdt_location  = np.nan , np.nan, np.nan
+                # REDO LATENCY
+                AP_latency   = sec_to_ms * (peak_location - upshoot_location)  / sampling_rate
             
+        # PEAK VOLTAGE
+        AP_peak_voltage   = V_array[peak_location]        
+        if AP_peak_voltage > 120 :
+            print(f"Artifact detected, index {peak_location}, {AP_peak_voltage:.2f} > 120mV, analising next peak.")
+            continue
+
+        # VOLTAGE THRESHOLD
+        voltage_threshold = V_array[upshoot_location]
+
+        # AP HEIGHT
+        AP_height = V_array[peak_location]  - voltage_threshold
+        if AP_height > 150 or AP_height < 10: #HARD CODE #TODO
+            print(f"Artifact detected, index {peak_location}, AP height of {AP_height:.2f} mV, analising next peak.")
+            continue
+
+        # PAD CHECK or TRASH
+        # if voltage_threshold < -65:
+            # print('tell me cunt')
+            # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
+
+
         #WIDTH
         fwhm_ms = calculate_fwhm(folder_file, V_array, peak_location, upshoot_location, sampling_rate, sec_to_ms, ap_width_min, ap_width_max)
         if fwhm_ms < ap_width_min or fwhm_ms > ap_width_max:
             # print(f"Calculated FWHM is {fwhm_ms:.2f}, outside of plausible limits ({ap_width_min} - {ap_width_max} ms).")
             height_to_width_ratio = AP_height/fwhm_ms
             if not 100 < height_to_width_ratio < 40: #HARD CODE #TODO
-                print(f"AP height/width ratio is {height_to_width_ratio}, outside plausable limmits (40 - 100), poor compensation, setting fwhm to nan.")
+                # print(f"AP height/width ratio is {height_to_width_ratio:.2f}, outside plausable limmits (40 - 100), poor compensation, setting fwhm to nan.")
                 fwhm_ms = np.nan
             # else: 
                 # plot_fwhm(folder_file, V_array, upshoot_location, peak_location, sampling_rate, sec_to_ms)
@@ -896,6 +962,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         
         
         #APPEND VALUES TO LIST IF VALID
+        AP_peak_voltages +=              [AP_peak_voltage]
         valid_AP_locations +=           [peak_location]
         AP_upshoot_locations_list +=    [upshoot_location]
         AP_voltage_thresholds_list +=   [voltage_threshold]
@@ -905,7 +972,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         ap_max_dvdt_list +=             [max_dvdt]
         AP_fwhm_list +=                 [fwhm_ms]
 
-    return valid_AP_locations , AP_upshoot_locations_list, AP_voltage_thresholds_list , AP_heights_list , AP_latencies_list , AP_slope_list , AP_fwhm_list, ap_max_dvdt_list
+    return AP_peak_voltages, valid_AP_locations , AP_upshoot_locations_list, AP_voltage_thresholds_list , AP_heights_list , AP_latencies_list , AP_slope_list , AP_fwhm_list, ap_max_dvdt_list
 
 ########## AP EXTRACTOR MODULES
 def get_window_bounds(peak_location, upshoot_location, array_length, isi_multiplier=3):
@@ -1054,8 +1121,8 @@ def calculate_ap_slope_and_max_dvdt(v_array, upshoot_index, latency, sampling_ra
     start_slope_index = upshoot_index + int(latency_samples * 1/10)
     end_slope_index = upshoot_index + int(latency_samples * 9/10)
 
-    # Adjust the window for calculating max_dvdt to start 5ms before the upshoot
-    pre_upshoot_samples = int(5 * sampling_rate / 1000)  # Convert 5ms to samples
+    # Adjust the window for calculating max_dvdt to start 1ms before the upshoot
+    pre_upshoot_samples = int(1 * sampling_rate / 1000)  # Convert 5ms to samples
     start_dvdt_index = max(0, upshoot_index - pre_upshoot_samples)
     end_dvdt_index = upshoot_index + latency_samples  # Extend to the full latency period
     
@@ -1112,6 +1179,7 @@ def ap_characteristics_extractor_main(folder_file, V_array, critical_num_spikes 
     sweep_indices = [i for i in range(V_array.shape[1])]
 
     # Initialise lists 
+    peak_voltages_all = []
     peak_latencies_all  = [] 
     v_thresholds_all    = [] 
     peak_slope_all      = []
@@ -1125,12 +1193,13 @@ def ap_characteristics_extractor_main(folder_file, V_array, critical_num_spikes 
     
     for sweep_index in sweep_indices: 
 
-        peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_slope_ , peak_fw_,  ap_max_dvdt_list  =  ap_characteristics_extractor_subroutine_derivative(folder_file, V_array, sweep_index)
+        peak_voltages_, peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_slope_ , peak_fw_,  ap_max_dvdt_list  =  ap_characteristics_extractor_subroutine_derivative(folder_file, V_array, sweep_index)
 
         if peak_locs_corr_  == [] : # if any list is empty 
             # print(f"No APs in sweep number {sweep_index+1}, index {sweep_index}.")
             pass 
         else: 
+            peak_voltages_all  += peak_voltages_
             peak_locs_corr_all += peak_locs_corr_
             upshoot_locs_all   += upshoot_locs_
             peak_latencies_all += peak_latencies_
@@ -1142,7 +1211,7 @@ def ap_characteristics_extractor_main(folder_file, V_array, critical_num_spikes 
             peak_indices_all   +=  list(np.arange(0, len(peak_locs_corr_all))) 
             sweep_indices_all +=   [sweep_index]*len(peak_locs_corr_)
 
-    return peak_latencies_all  , v_thresholds_all  , peak_slope_all  ,AP_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all 
+    return peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_slope_all  ,AP_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all 
 
 
 ########################      pAD DETECTION FUNCTION(S)  ####################
@@ -1158,12 +1227,12 @@ def pAD_detection(folder_file, V_array):
     '''
 
     # Extract AP characteristics
-    peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array, all_sweeps=True)
+    peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array, all_sweeps=True)
     
     # Early return if no APs found
     if np.all(np.isnan(peak_latencies_all)):
         print (f"No APs detected in voltage trace.")
-        return peak_latencies_all, v_thresholds_all, peak_slope_all, peak_heights_all, np.nan
+        return peak_latencies_all,peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, np.nan
 
     # Create DataFrame
     pAD_df = pd.DataFrame({
@@ -1172,14 +1241,17 @@ def pAD_detection(folder_file, V_array):
         'AP_threshold': v_thresholds_all,
         'AP_slope': peak_slope_all,
         'AP_latency': peak_latencies_all,
+        'AP_turn_around': peak_voltages_all,
         'AP_height': peak_heights_all,
         'AP_width': peak_fw_all,
         'AP_sweep_num': sweep_indices_all,
         'AP_type': 'somatic'  # default to 'somatic'
     })
 
-    # Classify APs as 'pAD_true' if threshold < -60 mV
-    pAD_df.loc[pAD_df['AP_threshold'] < -60, 'AP_type'] = 'pAD_true'
+    # Classify APs as 'pAD_true' if threshold < -65 mV and AP_turn around > 20mV                        #HARD CODE
+    pAD_df.loc[(pAD_df['AP_threshold'] < -60) & (pAD_df['AP_turn_around'] > 20), 'AP_type'] = 'pAD_true'
+    #OLD
+    # pAD_df.loc[pAD_df['AP_threshold'] < -60, 'AP_type'] = 'pAD_true'
     # Count pADs
     pAD_df['pAD_count'] = np.sum(pAD_df['AP_type'] == 'pAD_true')
 
@@ -1187,8 +1259,8 @@ def pAD_detection(folder_file, V_array):
     pAD_df_uncertain = pAD_df[pAD_df['AP_type'] == 'somatic']
 
     if len(pAD_df_uncertain) < 2:
-        print (f"Fewer than 2 APs with voltage threshold > -60mV.")
-        return peak_latencies_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df
+        print (f"Fewer than 2 APs with voltage threshold > -65mV.")
+        return peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df
 
     # # Clustering with KMeans
     # X = pAD_df_uncertain[['AP_slope', 'AP_threshold', 'AP_latency']]
@@ -1204,7 +1276,7 @@ def pAD_detection(folder_file, V_array):
     pAD_df.loc[pAD_df['AP_type'] == 'somatic', 'AP_type'] = np.where(labels == 0, 'pAD_possible', 'somatic')
 
 
-    return peak_latencies_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df
+    return peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df
 
 
 ########## HANDELIN FIRING PROPERTY DATA (FP)  --  FI curves
@@ -1379,63 +1451,165 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
 #         # print("inequal_adjusting")
 #         # print (len(x), len(y))
 
-#     return x, y,  v_rest 
+#     return x, y,  v_rest  
 
 
-
-def extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True):
+def extract_FI_slope_and_rheobased_threshold(folder_file, x, y):
     '''
+    Calculation of the FI slope and rheobase threshold, linear fir of first 3 non zero points, checking for fit quality and bounds between last_I_without_APs and first_I_with_APs. 
+    If criteria not met will recalculate with 2 points, if fit is adiquite and rheobase is not, will calculate 1/2 way between steps. 
 
-    Calculates the slope of the frequency-current (FI) curve and the rheobase threshold.
-
-    input:
+    Parameters:
+        folder_file (string): unique file identifier.
         x (numpy.ndarray): 1D array representing the current input (usually in pA).
         y (numpy.ndarray): 1D array representing the number of action potentials per sweep.
-        slope_linear (bool): If True, a linear fit is used to calculate the slope; if False, a sigmoid fit is used, and the slope is determined from the 'k' value of the sigmoid (default True).
 
     Returns:
-        slope (float): The slope of the FI curve. It's either the linear slope or the 'k' value from the sigmoid fit.
-        rheobase_threshold (float): The calculated rheobase threshold in pA, determined as the x-intercept of the linear fit of the FI curve.
-
-
+        FI_slope (float): The slope of the FI curve, calculated using a linear fit.
+        rheobase_threshold (float): The calculated rheobase threshold in pA, determined as the x-intercept of the linear fit / 1/2 way between I steps without and with APs.
     '''
-    list_of_non_zero = [i for i, element in enumerate(y) if element!=0] #indicies of non-0 element in y
+    # Identifying indices of nonzero elements (AP count)
+    list_of_non_zero = [i for i, element in enumerate(y) if element != 0]
+    last_I_without_APs = x[list_of_non_zero[0]-1]
+    first_I_with_APs = x[list_of_non_zero[0]]
+    min_fit_quality = 0.2
 
-    #need to handle pAD here 
-    x_threshold = np.array (x[list_of_non_zero[0]:list_of_non_zero[0]+3])# taking the first 3 non zero points to build linear fit corisponsing to the first 3 steps with APs
-    y_threshold = np.array(y[list_of_non_zero[0]:list_of_non_zero[0]+3])
-    
-    # rehobased threshold with linear
-    coef = np.polyfit(x_threshold,y_threshold,1) #coef = m, b #rheobase: x when y = 0 (nA) 
-    rheobase_threshold = -coef[1]/coef[0] #-b/m
-    #liniar_FI_slope
-    if slope_liniar == True:
-        FI_slope_linear = coef[0]  
-    else: #sigmoid_FI_slope
-        x_sig, y_sig = trim_after_AP_dropoff(x,y) #remove data after depolarisation block/AP dropoff
-        x_sig, y_sig = sigmoid_fit_0_0_trim ( x_sig, y_sig, zeros_to_keep = 3) # remove excessive (0,0) point > 3 preceeding first AP
-        x_fit, y_fit , popt = fit_sigmoid( x_sig, y_sig, maxfev = 1000000, visualise = False) #calculate sigmoid best fit #popt =  [L ,x0, k]  
-        FI_slope_linear = popt[2]
+
+    for points_to_use in [3, 2]:  # Try with 3 points first, then with 2 if needed
+        # Check if there are enough points for a reliable linear fit
+        if len(list_of_non_zero) < points_to_use:
+            print("Not enough data points for a reliable fit.")
+            return np.nan, np.nan
+
+        # Preparing data for linear fit first 3 I steps with APs
+        x_fit = np.array(x[list_of_non_zero[0]:list_of_non_zero[0] + points_to_use])
+        y_fit = np.array(y[list_of_non_zero[0]:list_of_non_zero[0] + points_to_use])
+
+        #CHECK VALIDTY
+        if not (np.all(np.isfinite(x_fit)) and np.all(np.isfinite(y_fit))):
+            print(f"Non-finite values detected in {folder_file}. Skipping fit.")
+            return np.nan, np.nan
+
+        y_variance = np.var(y_fit)
+        if y_variance == 0 or np.isnan(y_variance):
+            print(f"Zero or NaN variance in {folder_file}. Skipping fit.")  #usualy unhealthy cells
+            return np.nan, np.nan  
+         
+        # Performing linear fit
+        slope, intercept = np.polyfit(x_fit, y_fit, 1)
+
+        # Calculating quality of fit
+        residuals = np.sum((np.polyval([slope, intercept], x_fit) - y_fit) ** 2)
         
-    return FI_slope_linear, rheobase_threshold
+        # Calculating rheobase threshold
+        rheobase_threshold = -intercept / slope
+        if np.isnan(rheobase_threshold) or np.isinf(rheobase_threshold):
+            print(f"Invalid rheobase threshold for {folder_file}.")
+            rheobase_threshold = np.nan 
+
+        # Checking fit quality and physiological bounds
+        if residuals / np.var(y_fit) <= min_fit_quality and last_I_without_APs <= rheobase_threshold < first_I_with_APs: #lower bound allows for - values 
+            # print (f" SAVING Fit : {(residuals / np.var(y_fit)):.2f} , Slope : {slope:.2f}  , Rheobase(pA): {rheobase_threshold:.2f}, Steps: {last_I_without_APs} < pA < {first_I_with_APs}")
+            return slope, rheobase_threshold
+        # else:
+            # print(f"File {folder_file} trying with {points_to_use-1} points due to poor fit ({(residuals / np.var(y_fit)):.2f}) or out-of-bounds rheobase {rheobase_threshold:.2f}pA, Steps: {last_I_without_APs} < pA < {first_I_with_APs}.")
+            # plot_FI_curve_and_fit(folder_file, x, y, slope, intercept)  
+
+    if residuals / np.var(y_fit) <= min_fit_quality and last_I_without_APs > rheobase_threshold:
+        # print (f" SAVING Fit : {(residuals / np.var(y_fit)):.2f} , Slope : {slope:.2f} , Rheobase(pA): {last_I_without_APs}")
+        return slope, last_I_without_APs
+    else:
+        print(f"Unable to calculate FI slope / rheobase threshold with sufficient quality fit." )
+        return np.nan, np.nan
+
+def plot_FI_curve_and_fit(folder_file, x, y, slope, intercept):
+    """
+    Plot the Frequency-Current (F-I) curve with a linear fit and mark the x-intercept.
+
+    Parameters:
+    - x: numpy array of current inputs.
+    - y: numpy array of corresponding firing rates.
+    - slope: slope of the linear fit.
+    - intercept: y-intercept of the linear fit.
+    """
+    # Plot the original data points
+    plt.scatter(x, y, label='Data points')
+    
+    # Generate x values for the fit line
+    x_fit = np.linspace(min(x), max(x), 100)
+    # Calculate the corresponding y values from the linear fit equation
+    y_fit = slope * x_fit + intercept
+    
+    # Plot the linear fit line
+    plt.plot(x_fit, y_fit, 'r-', label=f'Linear fit: y = {slope:.2f}x + {intercept:.2f}')
+    
+    # Mark the x-intercept (rheobase threshold) if it's within the plotted x range
+    if intercept <= 0:
+        rheobase = -intercept / slope
+        if min(x) <= rheobase <= max(x):
+            plt.axvline(rheobase, color='g', linestyle='--', label=f'Rheobase: {rheobase:.2f} pA')
+
+    # Labeling the plot
+    plt.xlabel('Current (pA)')
+    plt.ylabel('Firing Rate (Hz)')
+    plt.title(f'{folder_file} F-I Curve')
+    plt.legend()
+    plt.grid(True)
+    
+    # Show the plot
+    plt.show()
+
+#OLD 15/3/23
+# def extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True):
+#     '''
+
+#     Calculates the slope of the frequency-current (FI) curve and the rheobase threshold.
+
+#     input:
+#         x (numpy.ndarray): 1D array representing the current input (usually in pA).
+#         y (numpy.ndarray): 1D array representing the number of action potentials per sweep.
+#         slope_linear (bool): If True, a linear fit is used to calculate the slope; if False, a sigmoid fit is used, and the slope is determined from the 'k' value of the sigmoid (default True).
+
+#     Returns:
+#         slope (float): The slope of the FI curve. It's either the linear slope or the 'k' value from the sigmoid fit.
+#         rheobase_threshold (float): The calculated rheobase threshold in pA, determined as the x-intercept of the linear fit of the FI curve.
 
 
+#     '''
+#     list_of_non_zero = [i for i, element in enumerate(y) if element!=0] #indicies of non-0 element in y
 
-                       
+#     #need to handle pAD here 
+#     x_threshold = np.array (x[list_of_non_zero[0]:list_of_non_zero[0]+3])# taking the first 3 non zero points to build linear fit corisponsing to the first 3 steps with APs
+#     y_threshold = np.array(y[list_of_non_zero[0]:list_of_non_zero[0]+3])
+    
+#     # rehobased threshold with linear
+#     coef = np.polyfit(x_threshold,y_threshold,1) #coef = m, b #rheobase: x when y = 0 (nA) 
+#     rheobase_threshold = -coef[1]/coef[0] #-b/m
+#     #liniar_FI_slope
+#     if slope_liniar == True:
+#         FI_slope_linear = coef[0]  
+#     else: #sigmoid_FI_slope
+#         x_sig, y_sig = trim_after_AP_dropoff(x,y) #remove data after depolarisation block/AP dropoff
+#         x_sig, y_sig = sigmoid_fit_0_0_trim ( x_sig, y_sig, zeros_to_keep = 3) # remove excessive (0,0) point > 3 preceeding first AP
+#         x_fit, y_fit , popt = fit_sigmoid( x_sig, y_sig, maxfev = 1000000, visualise = False) #calculate sigmoid best fit #popt =  [L ,x0, k]  
+#         FI_slope_linear = popt[2]
+        
+#     return FI_slope_linear, rheobase_threshold
+     
 ########## PLOTTTING -- can we move it to plotters 
-    if main_big_plot: 
-        plot_window = 500 
+    # if main_big_plot: 
+    #     plot_window = 500 
 
-        for idx in range(len(peak_locs_corr)):    
+    #     for idx in range(len(peak_locs_corr)):    
 
-            fig  = plt.figure(figsize = (20,20))
-            plt.plot(v_array[peak_locs_corr[idx] - plot_window : peak_locs_corr[idx] + plot_window    ])
-            plt.plot( upshoot_locs[idx] -  peak_locs_corr[idx] + plot_window , v_array[upshoot_locs[idx]  ]  , '*', label = 'Threshold')
-            plt.plot(  plot_window , v_array[peak_locs_corr[idx]]  , '*', label = 'Peak')
-            plt.legend()
-            plt.show()
+    #         fig  = plt.figure(figsize = (20,20))
+    #         plt.plot(v_array[peak_locs_corr[idx] - plot_window : peak_locs_corr[idx] + plot_window    ])
+    #         plt.plot( upshoot_locs[idx] -  peak_locs_corr[idx] + plot_window , v_array[upshoot_locs[idx]  ]  , '*', label = 'Threshold')
+    #         plt.plot(  plot_window , v_array[peak_locs_corr[idx]]  , '*', label = 'Peak')
+    #         plt.legend()
+    #         plt.show()
 
-    return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
+    # return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
 
 def replace_nan_with_mean(array):
         '''
@@ -1510,7 +1684,7 @@ def APP_splitter(V_array_or_list, drug_in, drug_out):
 
         return V_PRE, V_APP, V_WASH
     else:
-        return np.nan, np.nan, V_array_or_list  # all wash values if no drug in or out 
+        return [], [], V_array_or_list  # all wash values if no drug in or out 
 
 
 def mean_RMP_APP_calculator(V_array, drug_in, drug_out, I_array=None):

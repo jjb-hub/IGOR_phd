@@ -28,7 +28,9 @@ from module.getters import (
     getExpandedSubsetDf, 
     getExpandedDf, 
     getCellDf, 
-    buildExpandedDF
+    buildExpandedDF, 
+    getFPStats,
+    getAPPStats
     )
 
 # from module.metadata import checkFeatureDF #fuck this fix if u need or delete 
