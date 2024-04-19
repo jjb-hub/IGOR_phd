@@ -35,9 +35,9 @@ from module.constants import CACHE_DIR, INPUT_DIR, OUTPUT_DIR, color_dict, n_min
 ########## WORKING WITH EXPANDED DF ###########
 def propagate_I_set(df):
     # Create a dictionary with 'cell_id' as keys and 'I_set' as values
-    # for rows where 'data_type' is 'AP' and 'application_order' is 1
-    ap_I_set = df[(df['data_type'] == 'AP') & (df['application_order'] == 1) & (~df['I_set'].isna())].set_index('cell_id')['I_set'].to_dict()
-    # Apply the I_set value to rows where it's NaN, without affecting rows where 'data_type' is 'AP'
+    # for rows where 'data_type' is 'APP' and 'application_order' is 1
+    ap_I_set = df[(df['data_type'] == 'APP') & (df['application_order'] == 1) & (~df['I_set'].isna())].set_index('cell_id')['I_set'].to_dict()
+    # Apply the I_set value to rows where it's NaN, without affecting rows where 'data_type' is 'APP'
     df['I_set'] = df.apply(lambda row: ap_I_set.get(row['cell_id'], row['I_set']) if pd.isna(row['I_set']) else row['I_set'], axis=1)
     return df
 
@@ -74,7 +74,7 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
     df=df[df['application_order'] <= 1] #remove second aplication data 
     update_rows=[]
 
-    if data_type == 'AP':
+    if data_type == 'APP':
         
         #measure == input_R / RMP
         columns_with_lists = ['inputR_PRE', 'RMP_PRE',
@@ -83,9 +83,9 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
         
 
         #measure == pAD_True_AP_count and AP_count 
-        columns_to_count = ['PRE_AP_locs', 'PRE_pAD_True_AP_locs', #, 'PRE_pAD_Possible_AP_locs' , 'PRE_Somatic_AP_locs'
-                            'APP_AP_locs', 'APP_pAD_True_AP_locs', #, 'PRE_pAD_Possible_AP_locs', 'APP_Somatic_AP_locs'
-                            'WASH_AP_locs', 'WASH_pAD_True_AP_locs'] #, 'PRE_pAD_Possible_AP_locs', 'WASH_Somatic_AP_locs'
+        columns_to_count = ['PRE_AP_locs', 'PRE_pAD_locs', 
+                            'APP_AP_locs', 'APP_pAD_locs', 
+                            'WASH_AP_locs', 'WASH_pAD_locs'] 
         
         for index, row in df.iterrows():  # Looping over each cell_id
             cell_id = row['cell_id'] 
@@ -108,21 +108,6 @@ def _update_APP_stats(filename, celltype_datatype_drug, df):
                 update_rows.append(update_row)
                 ap_count_by_condition[pre_app_wash] += value_len  # Accumulate total AP count
 
-            # OLD NOW HAVE 
-            # Add total AP count rows after processing all columns for a cell_id
-            # for condition, total_count in ap_count_by_condition.items():
-            #     total_count_row = {
-            #         "folder_file": df['folder_file'],
-            #         "cell_type": cell_type,
-            #         "cell_id": cell_id,
-            #         "measure": "AP_count",
-            #         "treatment": drug,
-            #         'protocol':row['I_set'],
-            #         "pre_app_wash": condition,
-            #         "value": total_count,
-            #         "sem": np.nan
-            #     }
-            #     update_rows.append(total_count_row)
             for list_col in columns_with_lists:
                 measure, pre_app_wash = list_col.split('_')[0], list_col.split('_')[1]
                 mean_row = {
@@ -217,10 +202,6 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
     df=df[df['application_order'] <= 1] #remove second aplication data 
     update_rows = []
     if data_type == 'FP':
-        #NORMALISE 
-        #compensation change (access) 20%
-        # number of FP PRE vs POST folder_files ?
-
 
         treatment = ', '.join(df[df['drug'] != 'PRE']['drug'].unique())
         for drug, pre_post_df in df.groupby('drug'):
@@ -280,17 +261,6 @@ def _update_FP_stats(filename, celltype_cellid_datatype, df):
     else:
         pass
     return df
-
-#OLD doesnt handle missing values i.e. JJB230207/t25
-# def fetchMeans(pre_post_df, measure):
-#     column=pre_post_df[measure]
-#     if all(isinstance(value, list) for value in column): #list comprehansion 
-#         file_values = [np.mean(value) for value in column]
-#         mean_value = np.mean(file_values)
-#     else: #single value comprehension
-#         file_values = column.tolist()  
-#         mean_value = np.mean(file_values)
-#     return mean_value, file_values
 
 
 def fetchMeans(pre_post_df, measure):
@@ -411,7 +381,7 @@ def plotSwarmHistogram(name, data=None, order=None, color_dict=None, x='col_name
 
 def _plot_pAD(celltype_drug_datatype, df, color_dict):
     cell_type, drug , data_type = celltype_drug_datatype
-    if data_type == 'AP': 
+    if data_type == 'APP': 
         pAD_df = df[['cell_id','PRE_pAD_AP_locs', 'APP_pAD_AP_locs', 'WASH_pAD_AP_locs', 'PRE_Somatic_AP_locs', 'APP_Somatic_AP_locs', 'WASH_Somatic_AP_locs']]
         pAD_df = pAD_df.dropna() #removing traces with no APs at all
         if len(pAD_df['cell_id'].unique()) <= n_minimum:
@@ -419,18 +389,18 @@ def _plot_pAD(celltype_drug_datatype, df, color_dict):
             return df
         
         pAD_df_to_plot = pd.melt(pAD_df, id_vars=['cell_id'], var_name='col_name', value_name='AP_locs'  )
-        pAD_df_to_plot[['drug', 'AP']] = pAD_df_to_plot['col_name'].str.split('_', n=1, expand=True).apply(lambda x: x.str.split('_').str[0])
+        pAD_df_to_plot[['drug', 'APP']] = pAD_df_to_plot['col_name'].str.split('_', n=1, expand=True).apply(lambda x: x.str.split('_').str[0])
         pAD_df_to_plot['count'] = pAD_df_to_plot['AP_locs'].apply(len)
         pAD_df_to_plot['drug'] = pAD_df_to_plot['drug'].str.replace('APP', drug)
         order = ['PRE', drug , 'WASH']
         
         fig, axs = plotSwarmHistogram(cell_type, data=pAD_df_to_plot, order=order, color_dict=color_dict, x='drug', y='count', 
-                                        swarm_hue='AP', bar_hue='AP', x_label='', y_label='number of APs', marker = 'x',  swarm_dodge= True)
+                                        swarm_hue='APP', bar_hue='APP', x_label='', y_label='number of APs', marker = 'x',  swarm_dodge= True)
         axs.set_title( f'{cell_type}_pAD_vs_somatic_APs_{drug} (CI 95%)', fontsize = 30) 
         saveFP_HistogramFig(fig, f'{cell_type}_pAD_vs_somatic_APs_{drug}')
         plt.close('all')
         
-    elif data_type == 'FP_AP': 
+    elif data_type == 'FP_APP': 
         return df
     elif data_type == 'pAD': 
         return df

@@ -60,18 +60,11 @@ def igor_exporter(path):
     return (point_list, igor_df)
 
 
-#JJB what is this?
-if __name__ == "__main__": #inbuilt test that will not be excuted unless run inside this file
-    print('igor tester being run...')
-    point_list, igor_df = igor_exporter('/Users/jasminebutler/Desktop/IGOR_phd/input/PatchData/JJB221230/t15Soma.ibw')
-
 
 
 ######### CACHE SYSTEM and SAVING ##########
 #figures
-IDENTIFIERS={
-
-}
+IDENTIFIERS={}
 
 #Check filesystem is set up for write operations
 def saveColors(filename, color_dict):
