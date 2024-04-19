@@ -39,7 +39,7 @@ def generate_V_pAD_df(folder_file):
     path_V, path_I = make_path(folder_file)
     V_list, V_df = igor_exporter(path_V)
     V_array      = np.array(V_df) 
-    peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  =   pAD_detection(V_array)
+    peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  =   pAD_detection(V_array)
     return pAD_df , V_array
 
 from scipy.ndimage import gaussian_filter1d
@@ -920,7 +920,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
                 #REDO SLOPE
                 average_slope, max_dvdt, max_dvdt_location = calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, AP_latency, sampling_rate)
                 if average_slope <= 0 or max_dvdt <= 0:
-                    print("Slope/derivative of AP is negative with new upshoot, setting to nan.")
+                    print(f"Slope/derivative of AP is negative with new upshoot, setting to nan (sweep: {sweep_index}).")
                     # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
                     average_slope, max_dvdt, max_dvdt_location  = np.nan , np.nan, np.nan
                 # REDO LATENCY
@@ -1216,6 +1216,67 @@ def ap_characteristics_extractor_main(folder_file, V_array, critical_num_spikes 
 
 ########################      pAD DETECTION FUNCTION(S)  ####################
  
+# NOT CALLED IN expendFeatureDF() !! 
+
+        # TODO build optional prams getter from folder_file id would need to add filename input
+    # filename_no_extension = filename.split(".")[0]
+    # if isCached(filename_no_extension, 'expanded_df'):
+    #     getCache(filename_no_extension, 'expanded_df')
+    # else:
+    #     getCache(filename_no_extension, 'feature_df')
+
+
+def build_AP_DF(folder_file, V_array, I_array ):
+    '''
+    BASE FUNCTION
+    Builds a df for a single file where each row is an AP with columns for AP charecteristics.
+
+    Input: 
+        folder_file (str)  : name of unique file identifier
+        V_array (np.ndarray) : 2D voltage array for folder_file, if not supplied fetched
+        I_array (np.ndarray) : 2D voltage array for folder_file, if not supplied fetched
+
+    Output: 
+        AP_df (pd.DataFrame): 
+
+    '''
+
+    V_array_adj, I_array_adj = normalise_array_length(V_array, I_array, columns_match=True)
+    
+    # Extract AP characteristics
+    peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array, all_sweeps=True)
+    
+    # Early return if no APs found
+    if np.all(np.isnan(peak_latencies_all)):
+        print (f"No APs detected in voltage trace {folder_file}.")
+        return np.nan #ADD TO FIN LENGTH
+
+    # create list of same length peak_locs_corr_all of the current injected at that peak location #GPT HERE IS MY QUESTION
+
+    # Create DataFrame of APs
+    AP_df = pd.DataFrame({
+        'folder_file': folder_file,
+        'peak_location': peak_locs_corr_all,
+        'upshoot_location': upshoot_locs_all,
+        'voltage_threshold': v_thresholds_all,
+        'slope': peak_slope_all,
+        'latency': peak_latencies_all,
+        'peak_voltage': peak_voltages_all,
+        'height': peak_heights_all,
+        'width': peak_fw_all,
+        'sweep': sweep_indices_all,
+        'I_injected': [I_array[loc, sweep] for loc, sweep in zip(peak_locs_corr_all, sweep_indices_all)],
+        'AP_type': 'somatic'  # default to 'somatic'
+    })
+
+    # Classify APs as 'pAD_true' if threshold < -65 mV and AP_turn around > 20mV                        #HARD CODE
+    AP_df.loc[(AP_df['AP_threshold'] < -65) & (AP_df['AP_turn_around'] > 20), 'AP_type'] = 'pAD_true'
+
+    
+    return AP_df
+
+
+
 
 def pAD_detection(folder_file, V_array):
     '''
@@ -1232,9 +1293,9 @@ def pAD_detection(folder_file, V_array):
     # Early return if no APs found
     if np.all(np.isnan(peak_latencies_all)):
         print (f"No APs detected in voltage trace.")
-        return peak_latencies_all,peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, np.nan
+        return peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, np.nan
 
-    # Create DataFrame
+    # Create DataFrame of APs
     pAD_df = pd.DataFrame({
         'AP_loc': peak_locs_corr_all,
         'upshoot_loc': upshoot_locs_all,
@@ -1249,34 +1310,30 @@ def pAD_detection(folder_file, V_array):
     })
 
     # Classify APs as 'pAD_true' if threshold < -65 mV and AP_turn around > 20mV                        #HARD CODE
-    pAD_df.loc[(pAD_df['AP_threshold'] < -60) & (pAD_df['AP_turn_around'] > 20), 'AP_type'] = 'pAD_true'
-    #OLD
-    # pAD_df.loc[pAD_df['AP_threshold'] < -60, 'AP_type'] = 'pAD_true'
-    # Count pADs
-    pAD_df['pAD_count'] = np.sum(pAD_df['AP_type'] == 'pAD_true')
+    pAD_df.loc[(pAD_df['AP_threshold'] < -65) & (pAD_df['AP_turn_around'] > 20), 'AP_type'] = 'pAD_true'
 
     # Prepare data for clustering
-    pAD_df_uncertain = pAD_df[pAD_df['AP_type'] == 'somatic']
-
+    pAD_df_uncertain = pAD_df[pAD_df['AP_type'] != 'pAD_true']
     if len(pAD_df_uncertain) < 2:
         print (f"Fewer than 2 APs with voltage threshold > -65mV.")
-        return peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df
+        return peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df
 
+    
+    #OLD TO IDENTIFY pAD / RA APs that do not fir base criteria 
     # # Clustering with KMeans
     # X = pAD_df_uncertain[['AP_slope', 'AP_threshold', 'AP_latency']]
     # kmeans = KMeans(n_clusters=2, n_init=1).fit(X)
     # labels = kmeans.labels_
 
-    # Clustering with GMM
-    X = pAD_df_uncertain[['AP_slope', 'AP_threshold', 'AP_latency']]
-    gmm = GaussianMixture(n_components=2, n_init=1).fit(X)
-    labels = gmm.predict(X)
+    # # Clustering with GMM
+    # X = pAD_df_uncertain[['AP_slope', 'AP_threshold', 'AP_latency']]
+    # gmm = GaussianMixture(n_components=2, n_init=1).fit(X)
+    # labels = gmm.predict(X)
 
-    # Assign GMM labels as 'pAD_possible' or 'somatic'
-    pAD_df.loc[pAD_df['AP_type'] == 'somatic', 'AP_type'] = np.where(labels == 0, 'pAD_possible', 'somatic')
+    # # Assign GMM labels as 'pAD_possible' or 'somatic'
+    # pAD_df.loc[pAD_df['AP_type'] == 'somatic', 'AP_type'] = np.where(labels == 0, 'pAD_possible', 'somatic')
 
-
-    return peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df
+    return peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df
 
 
 ########## HANDELIN FIRING PROPERTY DATA (FP)  --  FI curves
@@ -1334,9 +1391,10 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
     Extracts data for Frequency-Current (FI) relationship from voltage (V_array) and current (I_array) recordings.
 
     Input:
-        V_array (numpy array): 2D array containing voltage recordings for different current steps.
-        I_array (numpy array): 2D array containing current recordings for different current steps.
-        peak_locs_corr_all (): peak locations  
+        V_array (np.ndarray):  2D array containing voltage recordings for different current steps (sweeps).
+        I_array (np.ndarray): 2D array containing current recordings for different current steps (sweeps).
+        peak_locs_corr_all (list): peak locations for folder_file.
+        sweep_indices_all (list): indices of sweeps corresponding to each peak in peak_locs_corr_all.
 
     Returns:
         step_current_values (list): List of injected current values in picoamperes (pA) for each sweep.
@@ -1346,8 +1404,9 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
     V_array_adj, I_array_adj = normalise_array_length(V_array, I_array, columns_match=True)
 
     ap_counts_per_sweep = [] #on step
-    step_current_values = []
+    step_current_values = [] 
     V_rest_values = []
+    off_step_peak_locs = []
 
     for sweep in range(I_array_adj.shape[1]):
         current_sweep = I_array_adj[:, sweep]
@@ -1365,7 +1424,7 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
             previous_current_step = previous_current[previous_non_zero_indices[0]]
             next_current = I_array_adj[:, sweep+1]
             next_current_step = next_current[previous_non_zero_indices[0]]
-            if previous_current_step+ next_current_step==0 or sweep == 0:
+            if previous_current_step+ next_current_step==0 or sweep == 0: #if previous and next step == or first sweep 0nA I injection is valid
                 step_current_values.append(0)
                 ap_counts_per_sweep.append(len(sweep_peak_locs))
                 V_rest_values.append(np.mean(voltage_sweep))  
@@ -1388,70 +1447,21 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
             V_rest_values.append(np.mean(voltage_sweep[V_rest_indices]))
 
         # Calculating the step current value
-        first_non_zero_index = non_zero_indices[0]
         first_non_zero_current = current_sweep[first_non_zero_index]
         step_current_values.append(first_non_zero_current)
 
-        buffer = 50
         # Check for spikes off the current step
-        ap_off_step = [peak for peak in sweep_peak_locs if peak < (first_non_zero_index) or peak > (last_non_zero_index+buffer)]
+        ap_off_step = [peak for peak in sweep_peak_locs if peak < (first_non_zero_index) or peak > (last_non_zero_index+10)] # 10ms buffer added after step
         if ap_off_step:
             print(f"APs detected off current step at {np.mean(voltage_sweep[V_rest_indices]):.2f}mV in sweep {sweep+1}. ")
             # plot_APs_off_step(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all, sweep_to_plot=sweep)
+            off_step_peak_locs.extend(ap_off_step)
             
 
     V_rest = np.nanmean(V_rest_values) if len(V_rest_values) > 0 else np.nan
 
-    return step_current_values, ap_counts_per_sweep,  V_rest 
-#OLD 
-# def extract_FI_x_y (path_I, path_V):
-#     '''
-#     Extracts data for Frequency-Current (FI) relationship from voltage and current recordings.
+    return step_current_values, ap_counts_per_sweep,  V_rest , off_step_peak_locs
 
-#     Input:
-#         path_I (str): Path to the current (I) data file.
-#         path_V (str): Path to the voltage (V) data file.
-
-#     Returns:
-#         x (list): List of injected current values in picoamperes (pA) for each sweep.
-#         y (list): List of action potential counts for each sweep.
-#         v_rest (float): Average resting membrane potential (in millivolts) calculated when no current is injected.
-#     '''
-#     _, df_V = igor_exporter(path_V) # _ will be the continious wave which is no use here
-#     _, df_I = igor_exporter(path_I)
-    
-#     # setting df_V and df_I to be the same dimentions
-#     df_I_test = df_I.iloc[:, 0:df_V.shape[1]]
-#     df_V_test = df_V.iloc[0:df_I.shape[0],:]
-    
-#     #pulling and averageing all V values  when I = 0
-#     v_rest = np.nanmean(df_V_test[df_I_test == 0])
-
-#     y = [] #APs per sweep
-#     for i in range (len(df_V.columns)): #count APs in each column (sweep/ current step and append to list y)
-    
-#         y_ = df_V.iloc[:,i].tolist()
-#         v_smooth, peak_locs , _ , num_peaks  = ap_finder(y_) #props cotains dict with height/width for each AP
-#         y.append(num_peaks) 
-    
-#     x = [] #current injection per sweep (taking max)
-#     for i in range (len(df_I.columns)):
-#         x_ = df_I.iloc[:,i].tolist()
-#         #I_modes = max(set(x_), key=x_.count)
-#         I_modes = np.max(np.abs(x_))
-#         x.append(I_modes)
-    
-#     #now df is trimmed to fit eachother should not be relevant 
-#     if len(x) < len(y):
-#         print("F file > I file        Data Error: Igor Sucks") #THIS SHOULDNT HAPPEN
-        
-#     if len(x) is not len(y):    #this may happen because when you plan a series of sweeps all are saved even if you esc before all are run
-#         # print (len(x), len(y))
-#         del x[len(y):]
-#         # print("inequal_adjusting")
-#         # print (len(x), len(y))
-
-#     return x, y,  v_rest  
 
 
 def extract_FI_slope_and_rheobased_threshold(folder_file, x, y):
@@ -1475,7 +1485,7 @@ def extract_FI_slope_and_rheobased_threshold(folder_file, x, y):
     min_fit_quality = 0.2
 
 
-    for points_to_use in [3, 2]:  # Try with 3 points first, then with 2 if needed
+    for points_to_use in [4, 3, 2]:  # Try with 4 points first, then with 3, 2 if needed #started with 3 before 8/4/24
         # Check if there are enough points for a reliable linear fit
         if len(list_of_non_zero) < points_to_use:
             print("Not enough data points for a reliable fit.")

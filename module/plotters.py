@@ -6,6 +6,7 @@ from module.action_potential_functions import pAD_detection
 from module.constants import color_dict, unit_dict, n_minimum
 #external
 from matplotlib import pyplot as plt
+import matplotlib.patches as mpatches
 from matplotlib.backends.backend_pdf import PdfPages
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -64,59 +65,30 @@ def quick_line_plot(plot_array, plottitle, stacked=False):
     plt.ylabel('Current in pA')
     plt.show()
     
-# OLD PRE STACKED 
-# def quick_plot_file(filename, folder_file, stacked='False'):
-#     '''
-#     Plots any waveform based off folder_file.
-#     Stacked will plot each column on top of eachother, defults to False.
-#     '''
-#     df=getRawDf(filename)
-#     path_V, path_I = make_path(folder_file)
-#     listV, dfV = igor_exporter(path_V)
-#     V_array = np.array(dfV)
 
-#     display(df[df['folder_file']==folder_file]) # show file info 
-#     quick_line_plot(V_array, f'Voltage trace for {folder_file}', stacked=False)
-#     try:
-#         listI, dfI = igor_exporter(path_I)
-#         I_array = np.array(dfI)
-#         quick_line_plot(listI, f'Current (I) trace for {folder_file}')
-#     except:
-#         print('no I file found', path_I)
-    
+def draw_paired_lines(ax, data, x_col, y_col, hue_col, identifier_col, order, hue_order):
+    # Extract the positions of the points in the swarmplot for each hue level
+    points_positions = [ax.collections[i].get_offsets() for i in range(len(hue_order))]
 
-# # def quick_line_plot(plotlist, plottitle):
-# #     plt.plot( range(len(plotlist)), plotlist, marker='o', linestyle='-')
-# #     plt.title(plottitle)
-# #     plt.show()
-# def quick_line_plot(plot_array, plottitle, stacked=False):
-#     '''
-#     Plots line plot for given array.
+    # Calculate the mean x position for each hue, assuming the dodge is symmetrical
+    dodge_widths = [(np.mean(positions[:, 0]) - ax.get_xticks()[0]) for positions in points_positions]
     
-#     Parameters:
-#         plot_array (numpy.ndarray): 2D array to plot, where each column is a sweep.
-#         plottitle (str): Title for the plot.
-#         stacked (bool): If True, plots each sweep stacked on top of each other.
-#     '''
-#     num_sweeps = plot_array.shape[1]
-#     fig, ax = plt.subplots()
-    
-#     if stacked:
-#         for i in range(num_sweeps):
-#             # Adding an offset for each sweep to stack them
-#             offset = i * plot_array.max() * 1.1  # 1.1 to ensure a little space between plots
-#             ax.plot(plot_array[:, i] + offset, label=f'Sweep {i+1}')
-#     else:
-#         for i in range(num_sweeps):
-#             ax.plot(plot_array[:, i], label=f'Sweep {i+1}')
-    
-#     ax.set_title(plottitle)
-#     ax.legend()
-#     plt.show()
-    
-from scipy.ndimage import gaussian_filter1d
+    # Iterate over the order of x_col and draw lines for each cell_id
+    for i, x_level in enumerate(order):
+        # Get the data for this x_level
+        subset = data[data[x_col] == x_level]
 
-
+        # Get the x position for this x_level from the Axes object
+        x_base_position = ax.get_xticks()[i]
+        
+        # Draw lines for each cell_id
+        for ident in subset[identifier_col].unique():
+            ident_subset = subset[subset[identifier_col] == ident]
+            # Make sure we have all hues for this identifier
+            if ident_subset[hue_col].nunique() == len(hue_order):
+                y_values = ident_subset.set_index(hue_col)[y_col].reindex(hue_order).values
+                x_values = [x_base_position + dodge_width for dodge_width in dodge_widths]
+                ax.plot(x_values, y_values, color='black', lw=0.5)
 
 
 def build_FP_figs(filename, compensation_variance=None):
@@ -220,6 +192,9 @@ def build_FP_figs(filename, compensation_variance=None):
 
         # Add significance annotations for paired t-test
         add_statistical_annotation_hues(ax, subset, 'treatment', 'mean_value', 'pre_post', order, ['PRE', 'POST'],  test='paired_ttest', p_threshold=0.05)
+        
+        # Add line between hues
+        draw_paired_lines(ax, subset_to_plot, 'treatment', 'mean_value', 'pre_post', 'cell_id', order, ['PRE', 'POST'])
 
         # Customize plot labels and titles using ax.set_ methods
         ax.set_xlabel('Treatment', fontsize=14)  # Adjust font size as needed
@@ -316,30 +291,13 @@ def build_APP_histogram_figures(filename):
 
             # Add protocol to legend dictionary
             legend_handles_labels[protocol] = plt.Line2D(
-                [0], [0], marker=marker, color='w', label=protocol
+                [0], [0], marker=marker, label=protocol, color='black'
             )
 
-        # sns.stripplot( #stripplot or swarmplot
-        #         x='treatment',
-        #         y='value',
-        #         hue='pre_app_wash',
-        #         hue_order=['PRE', 'APP', 'WASH'],
-        #         data=subset,
-        #         palette='Set2',
-        #         order=order,
-        #         edgecolor='k',
-        #         linewidth=1,
-        #         linestyle="-",
-        #         dodge=True,
-        #         ax=ax, 
-        #         legend=False,
-        #         size=4,
-        #         # marker='D',
-        #     )
-
-        
         # Add significance annotations for paired t-test PRE vs APP/WASH
         add_statistical_annotation_hues(ax, subset, 'treatment', 'value', 'pre_app_wash', order,  ['PRE', 'APP', 'WASH'],  test='paired_ttest', p_threshold=0.05)
+        # Add lines between same cell paired data 
+        draw_paired_lines(ax, subset, 'treatment', 'value', 'pre_app_wash', 'cell_id', order, ['PRE', 'APP', 'WASH'])
 
         # Annotate each bar with 'n' value
         for i, treatment in enumerate(order):
@@ -358,7 +316,19 @@ def build_APP_histogram_figures(filename):
         ax.set_xlabel('')
         ax.set_ylabel(unit_dict[measure], fontsize=14)  # Adjust font size as needed
         ax.set_title(f'{cell_type} {measure} ', fontsize=16)  # Adjust font size as needed
-        ax.legend(handles=legend_handles_labels.values(), labels=legend_handles_labels.keys()) #legend for protocols
+
+        current_handles, current_labels = ax.get_legend_handles_labels()
+
+        # Create a combined legend with both hue labels and custom protocol markers
+        combined_handles = current_handles + list(legend_handles_labels.values())
+        combined_labels = current_labels + list(legend_handles_labels.keys())
+
+        # Set the combined custom legend to the axes
+        ax.legend(handles=combined_handles, labels=combined_labels, loc='best', title='Legend')
+
+        # ax.legend(handles=legend_handles_labels.values(), labels=legend_handles_labels.keys()) #legend for protocols
+
+        
 
         # Optionally, adjust the font size of the tick labels
         ax.tick_params(axis='x', labelsize=12)  # Adjust font size for x-axis tick labels
@@ -375,7 +345,7 @@ def build_APP_histogram_figures(filename):
 def loopbuildAplicationFigs(filename):
     df = getExpandedDf(filename)
     color_dict = getColors(filename)
-    application_df = df[df.data_type == 'AP'] 
+    application_df = df[df.data_type == 'APP'] 
     for row_ind, row in application_df.iterrows():  #row is a series that can be called row['colname']
         #inputs to builder if not cached:
         cell_id = row['cell_id']
@@ -396,7 +366,7 @@ def loopbuildAplicationFigs(filename):
 def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
     if not isinstance(cell_id_or_cell_df, pd.DataFrame):
         expanded_df = getExpandedDf(filename)
-        cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+        cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
     else:
         cell_df = cell_id_or_cell_df
     cell_id = cell_df['cell_id'].iloc[0]
@@ -420,11 +390,48 @@ def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
         fig = getCache(filename, cell_id)
     # fig.show()
     
+### AP CHARECTRISTICS PLOTTERS
 
-def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
+def RA_AP_chatecteristics_plot(filename, cell_id_or_cell_df, data_type = None, from_scratch=None):
+        '''
+        For a single cell plots all RA/pAD defined APs against all somatic from APP file and first 3 form each FP file. 
+        '''
+        
+        # get df of all files for single cell
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = data_type)
+        else:
+            cell_df = cell_id_or_cell_df
+
+        # filters FP files where APs occure off I step and threshold <-65mV
+        cell_id = cell_df['cell_id'].iloc[0]
+
+        from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
+        if from_scratch or not isCached(filename, cell_id):
+
+            print(f'BUILDING "{cell_id} Mean APs Figure"') 
+
+            # for folder_file in 
+            folder_file = cell_df['folder_file'].values[0]
+            path_V, path_I = make_path(folder_file)
+            listV, dfV = igor_exporter(path_V)
+            V_array = np.array(dfV)
+            peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
+            if len(peak_heights_all) <=1:
+                return print(f'No APs in trace for {cell_id}')
+            fig = buildAP_MeanFig(cell_id, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
+            saveAP_MeanFig(fig, cell_id)
+        else : fig = getCache(filename, cell_id)
+        fig.show()
+
+
+#old 11/4/24
+def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
+        
+        if not isinstance(cell_id_or_cell_df, pd.DataFrame):
+            expanded_df = getExpandedDf(filename)
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
         else:
             cell_df = cell_id_or_cell_df
 
@@ -438,7 +445,7 @@ def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
+            peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig = buildAP_MeanFig(cell_id, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
@@ -449,7 +456,7 @@ def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
 def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -461,7 +468,7 @@ def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
+            peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_PhasePlotFig(cell_id, pAD_df, V_array)
@@ -473,7 +480,7 @@ def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
 def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -485,7 +492,7 @@ def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
+            peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_PCAFig(cell_id, pAD_df, V_array)
@@ -496,7 +503,7 @@ def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
 def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'AP')
+            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -508,7 +515,7 @@ def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
             path_V, path_I = make_path(folder_file)
             listV, dfV = igor_exporter(path_V)
             V_array = np.array(dfV)
-            peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
+            peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
             if len(peak_heights_all) <=1:
                 return print(f'No APs in trace for {cell_id}')
             fig =buildAP_HistogramFig(cell_id, pAD_df, V_array)
@@ -555,7 +562,7 @@ def buildApplicationFig( cell_id=None, folder_file=None, I_set=None, drug=None, 
     
     if pAD_locs is True: 
         # Get pAD_locs
-        peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array) 
+        peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array) 
 
         if np.all(np.isnan(peak_latencies_all)) == False: #if APs detected
 
@@ -592,7 +599,7 @@ def buildApplicationFig( cell_id=None, folder_file=None, I_set=None, drug=None, 
     ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
     ax1.set_title(cell_id + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
     plt.tight_layout()
-    plt.show()
+
     return fig
 
 ########## AP MATRICS PLOTTERS

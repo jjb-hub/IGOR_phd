@@ -10,10 +10,14 @@ CACHE_DIR = f"{INPUT_DIR}/cache"
 
 color_dict = { #drugs
               "CONTROL": 'grey', 
+              "CONTROL_CNQX_APP5": 'grey',
               "TCB2":'green', 
+              "TCB2_CNQX_APP5": 'green',
               "DMT":"teal", 
               "PSIL":"orange", 
+              "PSIL_CNQX_APP5":'PSIL_CNQX_APP5',
               "LSD":"purple", 
+              "LSD_CNQX_APP5": 'purple',
               "MDL":'blue', 
                 #AP figures
               "pAD":"orange",
@@ -34,9 +38,7 @@ unit_dict = {'max_firing': 'Firing_(Hz)',
             'tau_rc':'ms',
             'sag':'%',
             'AP_count_AP_locs':'AP_count', #ODD TODO 
-            'AP_count_Somatic_AP':'AP_count_Somatic',
-            'AP_count_pAD_True':'AP_count_pAD_True',
-            'AP_count_pAD_Possible':'AP_count_pAD_Posible',
+            'AP_count_pAD_locs':'AP_count',
             'inputR': 'input R (Ohm)',
             'RMP':'membrane potentiam (mV)',
             'AP_dvdt_max': 'dV/dt (V/s)'
