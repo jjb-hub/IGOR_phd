@@ -1,7 +1,7 @@
 # module
 from module.stats import loop_stats, add_statistical_annotation_hues
 from module.utils import *
-from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf, getFPStats, getAPPStats
+from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf, getFPAggStats, getAPPAggStats
 from module.action_potential_functions import pAD_detection
 from module.constants import color_dict, unit_dict, n_minimum
 #external
@@ -93,11 +93,11 @@ def draw_paired_lines(ax, data, x_col, y_col, hue_col, identifier_col, order, hu
 
 def build_FP_figs(filename, compensation_variance=None):
     '''
-    Fetches FP_stats df for filename - plots with paired student t PRE vs POST for each cell_type and FP measure (i.e. max_firing)
+    Fetches FP_agg_stats df for filename - plots with paired student t PRE vs POST for each cell_type and FP measure (i.e. max_firing)
     input: filename
     output: 
     '''
-    df=getFPStats(filename)
+    df=getFPAggStats(filename)
     insufficient_data_tracking=getOrBuildDataTracking(filename)
 
     for (cell_type, measure), subset_raw in df.groupby(['cell_type', 'measure']):
@@ -210,7 +210,7 @@ def build_FP_figs(filename, compensation_variance=None):
       
 
 def build_APP_histogram_figures(filename):
-    df=getAPPStats(filename)
+    df=getAPPAggStats(filename)
     insufficient_data_tracking=getOrBuildDataTracking(filename) #track groups with n < n_minimum 
 
     for (cell_type,  measure), group in df.groupby(['cell_type', 'measure']):
@@ -325,11 +325,6 @@ def build_APP_histogram_figures(filename):
 
         # Set the combined custom legend to the axes
         ax.legend(handles=combined_handles, labels=combined_labels, loc='best', title='Legend')
-
-        # ax.legend(handles=legend_handles_labels.values(), labels=legend_handles_labels.keys()) #legend for protocols
-
-        
-
         # Optionally, adjust the font size of the tick labels
         ax.tick_params(axis='x', labelsize=12)  # Adjust font size for x-axis tick labels
         ax.tick_params(axis='y', labelsize=12)  # Adjust font size for y-axis tick labels

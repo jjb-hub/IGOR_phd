@@ -19,11 +19,6 @@ import numpy as np
 import traceback
 
 
-
-
-
-
-
 ########## GETTERS ##########
 
 
@@ -36,11 +31,11 @@ def getExpandedDf(filename):
 def getExpandedSubsetDf(filename, cell_type, from_scratch=None):
     return getorbuildSubselectExpandedDF(filename, f"{cell_type}_expanded_df", buildExpandedDF, cell_type, from_scratch)
 
-def getFPStats(filename):
-    return getOrBuildDf(filename, "FP_stats", buildFPStatsDf)
+def getFPAggStats(filename):
+    return getOrBuildDf(filename, "FP_agg_stats", buildFPAggStatsDf)
 
-def getAPPStats(filename):
-    return getOrBuildDf(filename, "APP_stats", buildAPPStatsDf)
+def getAPPAggStats(filename):
+    return getOrBuildDf(filename, "APP_agg_stats", buildAPPStatsDf)
 
 
 def getCellDf(filename_or_df, cell_id, data_type = None):
@@ -83,7 +78,7 @@ def getorbuildSubselectExpandedDF(filename, identifier, builder_cb, cell_type, f
 
 def getExpandedDfIfFilename(filename_or_df):
     '''
-    input: filename or df s
+    input: filename or df to be expanded (df useful in the case of a cell df or some subset of feature df)
     output: df
     '''
     if not isinstance(filename_or_df,  pd.DataFrame):
@@ -99,52 +94,52 @@ def getExpandedDfIfFilename(filename_or_df):
 
 ########## SETTERS ##########
 
-def updateFPStats(filename, rows):
-    FP_stats_df = getFPStats(filename)
+def updateFPAggStats(filename, rows):
+    FP_agg_stats_df = getFPAggStats(filename)
     
     # Create a unique identifier in the existing DataFrame
-    FP_stats_df['unique_id'] = FP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment",'protocol', "pre_post"]]), axis=1)
+    FP_agg_stats_df['unique_id'] = FP_agg_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_subtype", "cell_id", "measure", "treatment",'protocol', "pre_post"]]), axis=1)
     
     for row in rows:
-        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_id", "measure", "treatment", 'protocol', "pre_post"]])
+        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_subtype",  "cell_id", "measure", "treatment", 'protocol', "pre_post"]])
         data_row = pd.DataFrame([row])
         data_row['unique_id'] = unique_id
 
         # Check if this unique_id already exists
-        if unique_id in FP_stats_df['unique_id'].values:
+        if unique_id in FP_agg_stats_df['unique_id'].values:
             # Update the existing row
-            match_index = FP_stats_df[FP_stats_df['unique_id'] == unique_id].index[0]
-            FP_stats_df.at[match_index, 'mean_value'] = data_row.at[0, 'mean_value']
-            FP_stats_df.at[match_index, 'file_values'] = data_row.at[0, 'file_values']
+            match_index = FP_agg_stats_df[FP_agg_stats_df['unique_id'] == unique_id].index[0]
+            FP_agg_stats_df.at[match_index, 'mean_value'] = data_row.at[0, 'mean_value']
+            FP_agg_stats_df.at[match_index, 'file_values'] = data_row.at[0, 'file_values']
         else:
             # Append the new row
-            FP_stats_df = pd.concat([FP_stats_df, data_row], ignore_index=True)
+            FP_agg_stats_df = pd.concat([FP_agg_stats_df, data_row], ignore_index=True)
 
     # Drop the unique identifier column
-    FP_stats_df.drop('unique_id', axis=1, inplace=True)
+    FP_agg_stats_df.drop('unique_id', axis=1, inplace=True)
 
-    cache(filename, "FP_stats", FP_stats_df)
+    cache(filename, "FP_agg_stats", FP_agg_stats_df)
 
-def updateAPPStats(filename, rows):
-    APP_stats_df = getAPPStats(filename)
+def updateAPPAggStats(filename, rows):
+    APP_agg_stats_df = getAPPAggStats(filename)
     
     # Create a unique identifier 
-    APP_stats_df['unique_id'] = APP_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment",'protocol', "pre_app_wash"]]), axis=1)
+    APP_agg_stats_df['unique_id'] = APP_agg_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment",'protocol', "pre_app_wash"]]), axis=1)
     
     for row in rows:
         unique_id = '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment", 'protocol', "pre_app_wash"]])
         data_row = pd.DataFrame([row])
         data_row['unique_id'] = unique_id
 
-        if unique_id in APP_stats_df['unique_id'].values: #update row
-            match_index = APP_stats_df[APP_stats_df['unique_id'] == unique_id].index[0]
-            APP_stats_df.at[match_index, 'value'] = data_row.at[0, 'value']
-            APP_stats_df.at[match_index, 'sem'] = data_row.at[0, 'sem']
+        if unique_id in APP_agg_stats_df['unique_id'].values: #update row
+            match_index = APP_agg_stats_df[APP_agg_stats_df['unique_id'] == unique_id].index[0]
+            APP_agg_stats_df.at[match_index, 'value'] = data_row.at[0, 'value']
+            APP_agg_stats_df.at[match_index, 'sem'] = data_row.at[0, 'sem']
         else: #add row
-            APP_stats_df = pd.concat([APP_stats_df, data_row], ignore_index=True)
+            APP_agg_stats_df = pd.concat([APP_agg_stats_df, data_row], ignore_index=True)
 
-    APP_stats_df.drop('unique_id', axis=1, inplace=True)# Drop unique identifier 
-    cache(filename, "APP_stats", APP_stats_df)
+    APP_agg_stats_df.drop('unique_id', axis=1, inplace=True)# Drop unique identifier 
+    cache(filename, "APP_agg_stats", APP_agg_stats_df)
 
 
 ############ BUILDERS ##########
@@ -165,12 +160,6 @@ def buildExpandedDF(filename_or_df):
 
     # df=propagate_I_set(df)
     og_columns = df.columns.copy() #origional column order
-    
-    # df['mouseline'] = df.cell_id.str[:3]
-    # df.loc[:, 'mouseline'] = df['cell_id'].str[:3]
-    # pandas.errors.SettingWithCopyWarning: 
-    # A value is trying to be set on a copy of a slice from a DataFrame.
-    # Try using .loc[row_indexer,col_indexer] = value instead
 
     df = df.apply(lambda row: _handleFile(row), axis=1) # np.find_common_type is deprecated used in .apply check versions
 
@@ -361,14 +350,15 @@ def buildRawDf(filename):
         raise Exception(f'FILE {filename} IS ABSENT IN "input/" DIRECTORY')
 
     df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
-    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
+    df['cell_subtype'].fillna(np.nan, inplace=True) #for consistency in lack of subtype specification
     return (df)
 
 
-def buildFPStatsDf(filename):
+def buildFPAggStatsDf(filename):
     return pd.DataFrame(
         columns=[
             "cell_type",
+            "cell_subtype",
             "cell_id",
             "measure",
             "treatment",
@@ -387,6 +377,7 @@ def buildAPPStatsDf(filename):
         columns=[
             "folder_file",
             "cell_type",
+            "cell_subtype",
             "cell_id",
             "measure",
             "treatment",
