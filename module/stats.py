@@ -68,63 +68,63 @@ def _update_APP_agg_stats(filename, celltype_datatype_drug, df):
     Creates a list of rows for  APP_agg_stats df with a single row for each pre/app/wash time-bin for a single cell_id and measure (ie AP_count or averaged RMP)
     '''
     cell_type, data_type, drug = celltype_datatype_drug
-    df=df[df['application_order'] <= 1] #remove second aplication data 
-    update_rows=[]
-
     if data_type == 'APP':
-        if row['I_set'] == np.nan or 'steps':
-            print (f"Excluding FP data {cell_id} ad I_set is {row['I_set']}.")
-        else:
-            #measure == input_R / RMP
-            columns_with_lists = ['inputR_PRE', 'RMP_PRE',
-                                'inputR_APP', 'RMP_APP', 
-                                'inputR_WASH', 'RMP_WASH']
-            
+        df=df[df['application_order'] <= 1] #remove second aplication data 
+        update_rows=[]
+        # if row['I_set'] == np.nan or 'steps': # APP data type has no I_set now first check how the inputR is measured to see if this is needed
+        #     print (f"Excluding FP data {cell_id} ad I_set is {row['I_set']}.")
+        # else:
+    
+        #measure == input_R / RMP
+        columns_with_lists = ['inputR_PRE', 'RMP_PRE',
+                            'inputR_APP', 'RMP_APP', 
+                            'inputR_WASH', 'RMP_WASH']
+        
 
-            #measure == pAD_True_AP_count and AP_count 
-            columns_to_count = ['PRE_AP_locs', 'PRE_pAD_locs', 
-                                'APP_AP_locs', 'APP_pAD_locs', 
-                                'WASH_AP_locs', 'WASH_pAD_locs'] 
-            
-            for index, row in df.iterrows():  # Looping over each cell_id
-                cell_id = row['cell_id'] 
-                ap_count_by_condition = {'PRE': 0, 'APP': 0, 'WASH': 0}  # Initialize AP counts for each condition
+        #measure == pAD_True_AP_count and AP_count 
+        columns_to_count = ['PRE_AP_locs', 'PRE_pAD_locs', 
+                            'APP_AP_locs', 'APP_pAD_locs', 
+                            'WASH_AP_locs', 'WASH_pAD_locs'] 
+        
+        for index, row in df.iterrows():  # Looping over each cell_id
+            cell_id = row['cell_id'] 
+            ap_count_by_condition = {'PRE': 0, 'APP': 0, 'WASH': 0}  # Initialize AP counts for each condition
 
-                for col_name in columns_to_count:  # Looping over PRE, APP, WASH
-                    pre_app_wash, AP_type = col_name.split('_')[0], "_".join(col_name.split('_')[1:3])
-                    value_len = len(row[col_name]) if isinstance(row[col_name], list) else 0
-                    update_row = {
-                        "folder_file": row['folder_file'],
-                        "cell_type": cell_type,
-                        "cell_subtype": row['cell_subtype'],
-                        "cell_id": cell_id,
-                        "measure": f"AP_count_{AP_type}",
-                        "treatment": drug,
-                        'protocol':row['I_set'],
-                        "pre_app_wash": pre_app_wash,
-                        "value": value_len,
-                        "sem": np.nan
-                    }
-                    update_rows.append(update_row)
-                    ap_count_by_condition[pre_app_wash] += value_len  # Accumulate total AP count
+            for col_name in columns_to_count:  # Looping over PRE, APP, WASH
+                pre_app_wash, AP_type = col_name.split('_')[0], "_".join(col_name.split('_')[1:3])
+                value_len = len(row[col_name]) if isinstance(row[col_name], list) else 0
+                update_row = {
+                    "folder_file": row['folder_file'],
+                    "cell_type": cell_type,
+                    "cell_subtype": row['cell_subtype'],
+                    "cell_id": cell_id,
+                    "measure": f"AP_count_{AP_type}",
+                    "treatment": drug,
+                    'protocol':row['I_set'],
+                    "pre_app_wash": pre_app_wash,
+                    "value": value_len,
+                    "sem": np.nan
+                }
+                update_rows.append(update_row)
+                ap_count_by_condition[pre_app_wash] += value_len  # Accumulate total AP count
 
-                for list_col in columns_with_lists:
-                    measure, pre_app_wash = list_col.split('_')[0], list_col.split('_')[1]
-                    mean_row = {
-                        "folder_file": row['folder_file'],
-                        "cell_type": cell_type,
-                        "cell_subtype": row['cell_subtype'],
-                        "cell_id": cell_id,
-                        "measure": measure,
-                        "treatment": drug,
-                        'protocol':row['I_set'],
-                        "pre_app_wash": pre_app_wash,
-                        "value": safe_mean(row[list_col]),
-                        "sem": safe_sem(row[list_col])
-                    }
-                    update_rows.append(mean_row)
+            for list_col in columns_with_lists:
+                measure, pre_app_wash = list_col.split('_')[0], list_col.split('_')[1]
+                mean_row = {
+                    "folder_file": row['folder_file'],
+                    "cell_type": cell_type,
+                    "cell_subtype": row['cell_subtype'],
+                    "cell_id": cell_id,
+                    "measure": measure,
+                    "treatment": drug,
+                    'protocol':row['I_set'],
+                    "pre_app_wash": pre_app_wash,
+                    "value": safe_mean(row[list_col]),
+                    "sem": safe_sem(row[list_col])
+                }
+                update_rows.append(mean_row)
 
-            updateAPPAggStats(filename, update_rows) 
+        updateAPPAggStats(filename, update_rows) 
     else:
         pass
     return df
@@ -200,23 +200,22 @@ def _update_FP_agg_stats(filename, celltype_cellid_datatype, df):
     output: updated FP_agg_stats with a single mean pre and post for each cell_id , measure , treatment_group (cell_type/drug)
     '''
     cell_type, cell_id, data_type = celltype_cellid_datatype
-    df=df[df['application_order'] <= 1] #remove second aplication data 
-    cell_subtype = df['cell_subtype'].iloc[0] if len(df['cell_subtype'].unique()) == 1 else print(f"Multiple unique cell subtypes found {cell_id}.")
+    df=df[df['application_order'] <= 1] #remove second aplication data (FP or AP)
+
+    I_setting = get_absolute_column_value(df, 'I_set')
+    cell_subtype = get_absolute_column_value(df, 'cell_subtype')
 
     update_rows = []
     if data_type == 'FP':
-
         treatment = ', '.join(df[df['drug'] != 'PRE']['drug'].unique())
-        I_setting =  pre_post_df['I_set'].iloc[0] if pre_post_df['I_set'].nunique() == 1 else print("Not all values are the same.")
-
-        if I_setting == np.nan or 'steps': #skip 
-            print (f"Excluding FP data {cell_id} ad I_set is {I_setting}.")
+        for drug, pre_post_df in df.groupby('drug'):
+            # I_setting =  pre_post_df['I_set'].iloc[0] if pre_post_df['I_set'].nunique() == 1 else print("Not all values are the same.")
+            pre_post = 'PRE' if 'PRE' in pre_post_df['drug'].values else 'POST'
             
-        else: 
-            for drug, pre_post_df in df.groupby('drug'):
-                pre_post = 'PRE' if 'PRE' in pre_post_df['drug'].values else 'POST'
-                # I_setting =  pre_post_df['I_set'].iloc[0] if pre_post_df['I_set'].nunique() == 1 else "Not all values are the same."
-
+            if pd.isna(I_setting) or I_setting == 'steps':  #skip 
+                print (f"Excluding FP data {cell_id} ad I_set is {I_setting}.")
+        
+            else: 
                 for measure in ['max_firing', 
                                 'rheobased_threshold',
                                 'FI_slope',

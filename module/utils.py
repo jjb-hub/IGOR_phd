@@ -59,8 +59,19 @@ def igor_exporter(path):
         counter = counter - 1
     return (point_list, igor_df)
 
-
-
+def get_absolute_column_value (df, column_name):
+    '''
+    Checks for absoloute value in column and returns it.
+    '''
+    if df[column_name].isna().all():
+        return np.nan
+    else:
+        unique_values = df[column_name].unique()
+        if len(unique_values) == 1:
+            return unique_values[0]
+        else:
+            print(f"Error: Multiple unique values found in column '{column_name}'.")
+            return None
 
 ######### CACHE SYSTEM and SAVING ##########
 #figures
