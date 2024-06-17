@@ -27,22 +27,6 @@ from scipy.stats import linregress
 from scipy.signal import find_peaks
 import numpy as np
 
-########## TESTERS
-def generate_V_pAD_df(folder_file): 
-    '''
-    Input : 
-           folder_file : str 
-    Ouput : 
-           pAD_df  : pAD dataframe built from pAD_detection
-           V_array : v array     
-    '''
-    path_V, path_I = make_path(folder_file)
-    V_list, V_df = igor_exporter(path_V)
-    V_array      = np.array(V_df) 
-    peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  =   pAD_detection(V_array)
-    return pAD_df , V_array
-
-from scipy.ndimage import gaussian_filter1d
 
 def plot_ap_window(folder_file, v_array, peak_location, upshoot_location, threshold_voltage, latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms):
     """
@@ -759,7 +743,7 @@ def calculate_derivative(voltage_array, sampling_rate):
 
 
 
-def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index, main_plot = False, input_sampling_rate = 1e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, input_backwards_window = 50 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
+def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index, main_plot = False, input_sampling_rate = 2e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, ap_backwards_window = 50 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
     '''
     Extracts detailed characteristics of action potentials (APs) from voltage data within a specified sweep.
 
@@ -768,7 +752,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         sweep_index (int): The index of the sweep in the DataFrame from which AP characteristics are to be extracted.
 
                 main_plot (bool, optional): If set to True, generates a main plot. Defaults to False.
-                input_sampling_rate (float, optional): The sampling rate of the data in Hz. Defaults to 10000 Hz.
+                input_sampling_rate (float, optional): The sampling rate of the data in Hz. Defaults to 20000 Hz.
                 input_smoothing_kernel (float, optional): The size of the smoothing kernel to apply to the voltage data. Defaults to 1.5.
                 input_plot_window (int, optional): The window size for plotting the data. Defaults to 500.
                 input_slide_window (int, optional): The sliding window size for analyzing APs. Defaults to 200.
@@ -786,16 +770,11 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         peak_latencies (list): Time delays between the AP threshold and its peak (ms).
         peak_slope (list): Rate of change of the membrane potential at the AP upshoot location (mV/ms).
         peak_fw (list): Full width at half maximum (FWHM) of each AP, if <0 set as peak_latency (ms).
-           
-    '''
-    # Other Input Hyperparameters 
-    # need the first two sweeps from 1st spike and 2nd spike. if 1st ap has around 3 spikes (parameter) then only first is good enough otw go to the 2nd trace 
-    
-    ap_backwards_window = input_backwards_window
+    '''    
     pre_ap_baseline_forwards_window = input_pre_ap_baseline_forwards_window 
     sampling_rate    = input_sampling_rate
     sec_to_ms        = 1e3 
-    ap_peak_voltage =  0 # peak voltage cutoff 0mV HARD CODE ensuring positive peaks
+    min_ap_peak_voltage =  0 # peak voltage cutoff 0mV HARD CODE ensuring positive peaks
     ap_width_min = 0.1 # ms
     ap_width_max = 4 # ms
 
@@ -816,7 +795,6 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
     v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(V_array) #get smoothed peak_locs
 
 
-    # NO APs FOUND
     if len(peak_locs) == 0 :
         # print("No peaks found in sweep.")
         return  [] ,   [] ,  []  , [] ,  [] ,  [] , [] , [], []
@@ -830,13 +808,13 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         peak_locs_shift = ap_backwards_window - np.where(V_array[peak_locs[peak_idx] - ap_backwards_window: peak_locs[peak_idx] + pre_ap_baseline_forwards_window] == v_max)[0][0]
         AP_locations_list += [ peak_locs[peak_idx] - peak_locs_shift ]  
     
-    #FILTER ON PEAK VOLTAGE > ap_peak_voltage
-    ls = list(np.where(V_array[AP_locations_list] >= ap_peak_voltage)[0])
+    #FILTER ON PEAK VOLTAGE > min_ap_peak_voltage
+    ls = list(np.where(V_array[AP_locations_list] >= min_ap_peak_voltage)[0])
     AP_locations_list  = [AP_locations_list[ls_ ] for ls_ in ls ] # list of accurate AP peak locations
 
     # NO VALID APs FOUND 
     if len(AP_locations_list) == 0:
-        # print(f"Detected peaks max voltage  < {ap_peak_voltage}.") #catches nois/ EPSPs mostly
+        # print(f"Detected peaks max voltage  < {min_ap_peak_voltage}.") #catches nois/ EPSPs mostly
         return [] ,   [] ,  []  , [] ,  [] ,  [] , [] , [], []
 
     # REDEFINE WINDOW ap_backwards_window if inter_spike_interval  < ap_backwards_window
@@ -940,11 +918,6 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         if AP_height > 150 or AP_height < 10: #HARD CODE #TODO
             print(f"Artifact detected, index {peak_location}, AP height of {AP_height:.2f} mV, analising next peak.")
             continue
-
-        # PAD CHECK or TRASH
-        # if voltage_threshold < -65:
-            # print('tell me cunt')
-            # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
 
 
         #WIDTH
@@ -1238,6 +1211,18 @@ def build_AP_DF(folder_file, V_array, I_array ):
 
     Output: 
         AP_df (pd.DataFrame): 
+                'folder_file':          string inentifier
+                'peak_location':        peak location within sweep
+                'upshoot_location':     upshoot location within sweep
+                'voltage_threshold':    voltage at detected upshoot
+                'slope':                slope of AP 
+                'latency':              time (s) from upshoot to peak             
+                'peak_voltage':         voltage at AP peak
+                'height':               mV height from upshoot to peak
+                'width':                peak full width at half maximum
+                'sweep':                sweep index
+                'I_injected':           pA of current (I) injected
+                'AP_type'               defult to np.NaN otherwise set in this finction to RA
 
     '''
 
@@ -1265,13 +1250,12 @@ def build_AP_DF(folder_file, V_array, I_array ):
         'height': peak_heights_all,
         'width': peak_fw_all,
         'sweep': sweep_indices_all,
-        'I_injected': [I_array[loc, sweep] for loc, sweep in zip(peak_locs_corr_all, sweep_indices_all)],
-        'AP_type': 'somatic'  # default to 'somatic'
+        'I_injected': [I_array[loc, 0] for loc in peak_locs_corr_all], #sweep index is 0 as I_array is indentical
+        'AP_type': np.NaN  # default 
     })
 
     # Classify APs as 'pAD_true' if threshold < -65 mV and AP_turn around > 20mV                        #HARD CODE
-    AP_df.loc[(AP_df['AP_threshold'] < -65) & (AP_df['AP_turn_around'] > 20), 'AP_type'] = 'pAD_true'
-
+    AP_df.loc[(AP_df['voltage_threshold'] < -65) & (AP_df['peak_voltage'] > 20), 'AP_type'] = 'RA'
     
     return AP_df
 
@@ -1407,6 +1391,7 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
     step_current_values = [] 
     V_rest_values = []
     off_step_peak_locs = []
+    ap_frequencies_Hz = []
 
     for sweep in range(I_array_adj.shape[1]):
         current_sweep = I_array_adj[:, sweep]
@@ -1439,7 +1424,10 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
         # Count of APs within the current injection step of this sweep
         ap_on_step = len([peak_loc for peak_loc in sweep_peak_locs if first_non_zero_index <= peak_loc <= last_non_zero_index])
         ap_counts_per_sweep.append(ap_on_step)
-         
+        # firing frequency in Hz (recorded at 20kHz)
+        setep_in_seconds = len(non_zero_indices)*0.00005 
+        ap_frequency_Hz = ap_on_step/setep_in_seconds
+        ap_frequencies_Hz.append(ap_frequency_Hz)
 
         # Calculating the resting membrane potential
         V_rest_indices = np.where(current_sweep == 0)[0]
@@ -1460,7 +1448,7 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
 
     V_rest = np.nanmean(V_rest_values) if len(V_rest_values) > 0 else np.nan
 
-    return step_current_values, ap_counts_per_sweep,  V_rest , off_step_peak_locs
+    return step_current_values, ap_counts_per_sweep,  V_rest , off_step_peak_locs, ap_frequencies_Hz
 
 
 

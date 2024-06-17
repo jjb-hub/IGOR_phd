@@ -44,8 +44,8 @@ def igor_exporter(path):
     path: path to .ibw file
     Returns
     -------
-    'point_list' : a continious points  (combining sweeps into continious wave)  
-    'igor_df' : a df with each column corisponding to one sweep  
+    'point_list' (list): a continious points  (combining sweeps)  
+    'V_array_2d' (array): a 2d array with each column corisponding to one sweep  
      '''
     igor_file = igor.binarywave.load(path)
     wave = igor_file["wave"]["wData"]
@@ -57,7 +57,10 @@ def igor_exporter(path):
         temp_list = igor_df.iloc[:,i].tolist()
         point_list.extend(temp_list)
         counter = counter - 1
-    return (point_list, igor_df)
+    
+    V_array_2d = np.array(igor_df)
+    
+    return (point_list, V_array_2d)
 
 def get_absolute_column_value (df, column_name):
     '''

@@ -63,17 +63,103 @@ def apply_group_by_funcs(filename, df, groupby_cols, handleFn): #creating a list
     new_df = pd.concat(res_dfs_li) # some functions expand expanded_df so all function must return df and only df
     return new_df
 
+def _update_FP_agg_stats(filename, celltype_cellid_datatype, df):
+    '''
+    input: single cell FP expanded df
+    output: updated FP_agg_stats with a single mean pre and post for each cell_id , measure , treatment_group (cell_type/drug)
+    '''
+    cell_type, cell_id, data_type = celltype_cellid_datatype
+    if data_type == 'FP':
+        df=df[df['application_order'] <= 1] #remove second aplication data (FP or AP)
+        treatment = ', '.join(df[df['drug'] != 'PRE']['drug'].unique())
+        # exluude data without pre and post 
+        if not all(x in df['drug'].unique() for x in ['PRE', treatment ]):
+                print(f"{cell_id} does not have all PRE and POST FP data, and therefore excluded.")
+                return df
+        
+        I_setting = get_absolute_column_value(df, 'I_set')
+        cell_subtype = get_absolute_column_value(df, 'cell_subtype')
+
+        update_rows = []
+        for drug, pre_post_df in df.groupby('drug'):
+            # I_setting =  pre_post_df['I_set'].iloc[0] if pre_post_df['I_set'].nunique() == 1 else print("Not all values are the same.")
+            pre_post = 'PRE' if 'PRE' in pre_post_df['drug'].values else 'POST'
+            
+            if pd.isna(I_setting) or I_setting == 'steps':  #skip 
+                print (f"Excluding FP data {cell_id} ad I_set is {I_setting}.")
+        
+            else: 
+                for measure in ['max_firing', 
+                                'rheobased_threshold',
+                                'FI_slope',
+                                'voltage_threshold',
+                                'AP_height',
+                                'AP_slope',
+                                'AP_width',
+                                'AP_latency',
+                                'AP_dvdt_max']:
+
+                    mean_value, file_values, folder_files = fetchMeans(pre_post_df, measure)
+                    update_row = {
+                        "cell_type": cell_type,
+                        "cell_subtype": cell_subtype,
+                        "cell_id": cell_id,
+                        "measure": measure,
+                        "treatment": treatment,
+                        'protocol': I_setting , #JJB doubt this will work as nan unless data_type=AP
+                        "pre_post": pre_post,
+                        "mean_value": mean_value,
+                        "file_values": file_values, 
+                        "folder_files": folder_files, 
+                        "R_series": list(pre_post_df['R_series']),
+                    }
+                    # Append the dictionary to the list
+                    update_rows.append(update_row)
+
+                for unnormalised_measure in ['tau_rc', 'sag']:
+                    normalised_current = get_common_val_PRE_DRUG(df, unnormalised_measure, 2)
+                    if pd.notna(normalised_current):
+                        pre_post_df_clean = pre_post_df.dropna(subset=[unnormalised_measure])
+                        idx_normalised =[idx for idx, row in pre_post_df_clean.iterrows() if row[unnormalised_measure][2] == normalised_current]
+                        file_values =  list(df.loc[idx_normalised, unnormalised_measure].apply(lambda x: x[0]))
+                        update_row = {
+                            "cell_type": cell_type,
+                            "cell_subtype": cell_subtype,
+                            "cell_id": cell_id,
+                            "measure": unnormalised_measure,
+                            "treatment": treatment,
+                            'protocol': I_setting , #JJB doubt this will work as nan unless data_type=AP
+                            "pre_post": pre_post,
+                            "mean_value": np.mean(file_values),
+                            "file_values": file_values, 
+                            "folder_files": list(df.loc[idx_normalised, 'folder_file']), 
+                        }
+                        # Append the dictionary to the list
+                        update_rows.append(update_row)
+                    else:
+                        print(f"{unnormalised_measure} for {cell_id} has no common FP current injected.")
+                        
+
+            updateFPAggStats(filename, update_rows)
+    else: #not FP data 
+        pass
+    return df
+
+
 def _update_APP_agg_stats(filename, celltype_datatype_drug, df):
     '''
     Creates a list of rows for  APP_agg_stats df with a single row for each pre/app/wash time-bin for a single cell_id and measure (ie AP_count or averaged RMP)
     '''
     cell_type, data_type, drug = celltype_datatype_drug
     if data_type == 'APP':
-        df=df[df['application_order'] <= 1] #remove second aplication data 
-        update_rows=[]
-        # if row['I_set'] == np.nan or 'steps': # APP data type has no I_set now first check how the inputR is measured to see if this is needed
-        #     print (f"Excluding FP data {cell_id} ad I_set is {row['I_set']}.")
-        # else:
+        df=df[df['application_order'] <= 1] #remove second aplication data #this should be redundant TODO check
+
+        
+        if (df['I_set'] == 'steps').any(): # APP data type has no I_set now first check how the inputR is measured to see if this is needed            
+                remove_cell_ids = df[df['I_set'] == 'steps']['cell_id'].unique()
+                print (f"removing cells {remove_cell_ids} with I_set == 'steps'. ")
+                df = df[df['I_set'] != 'steps'] #drop data 
+
     
         #measure == input_R / RMP
         columns_with_lists = ['inputR_PRE', 'RMP_PRE',
@@ -85,7 +171,8 @@ def _update_APP_agg_stats(filename, celltype_datatype_drug, df):
         columns_to_count = ['PRE_AP_locs', 'PRE_pAD_locs', 
                             'APP_AP_locs', 'APP_pAD_locs', 
                             'WASH_AP_locs', 'WASH_pAD_locs'] 
-        
+        update_rows=[]
+
         for index, row in df.iterrows():  # Looping over each cell_id
             cell_id = row['cell_id'] 
             ap_count_by_condition = {'PRE': 0, 'APP': 0, 'WASH': 0}  # Initialize AP counts for each condition
@@ -110,6 +197,13 @@ def _update_APP_agg_stats(filename, celltype_datatype_drug, df):
 
             for list_col in columns_with_lists:
                 measure, pre_app_wash = list_col.split('_')[0], list_col.split('_')[1]
+
+                #if I_set is np.nan or none should not have input R
+                if list_col in ['inputR_PRE', 'inputR_APP', 'inputR_WASH']:
+                    if pd.isna(row['I_set']) or row['I_set'] == 'none' :
+                        if safe_mean(row[list_col]):
+                            print('k')
+
                 mean_row = {
                     "folder_file": row['folder_file'],
                     "cell_type": cell_type,
@@ -123,6 +217,8 @@ def _update_APP_agg_stats(filename, celltype_datatype_drug, df):
                     "sem": safe_sem(row[list_col])
                 }
                 update_rows.append(mean_row)
+
+
 
         updateAPPAggStats(filename, update_rows) 
     else:
@@ -192,85 +288,6 @@ def get_common_val_PRE_DRUG(df, col_with_list, sort_by_list_idx):
     # Return the most common value as an integer
     return int(max(common_value_counts, key=common_value_counts.get))
 
-
-
-def _update_FP_agg_stats(filename, celltype_cellid_datatype, df):
-    '''
-    input: single cell FP expanded df
-    output: updated FP_agg_stats with a single mean pre and post for each cell_id , measure , treatment_group (cell_type/drug)
-    '''
-    cell_type, cell_id, data_type = celltype_cellid_datatype
-    df=df[df['application_order'] <= 1] #remove second aplication data (FP or AP)
-
-    I_setting = get_absolute_column_value(df, 'I_set')
-    cell_subtype = get_absolute_column_value(df, 'cell_subtype')
-
-    update_rows = []
-    if data_type == 'FP':
-        treatment = ', '.join(df[df['drug'] != 'PRE']['drug'].unique())
-        for drug, pre_post_df in df.groupby('drug'):
-            # I_setting =  pre_post_df['I_set'].iloc[0] if pre_post_df['I_set'].nunique() == 1 else print("Not all values are the same.")
-            pre_post = 'PRE' if 'PRE' in pre_post_df['drug'].values else 'POST'
-            
-            if pd.isna(I_setting) or I_setting == 'steps':  #skip 
-                print (f"Excluding FP data {cell_id} ad I_set is {I_setting}.")
-        
-            else: 
-                for measure in ['max_firing', 
-                                'rheobased_threshold',
-                                'FI_slope',
-                                'voltage_threshold',
-                                'AP_height',
-                                'AP_slope',
-                                'AP_width',
-                                'AP_latency',
-                                'AP_dvdt_max']:
-
-                    mean_value, file_values, folder_files = fetchMeans(pre_post_df, measure)
-                    update_row = {
-                        "cell_type": cell_type,
-                        "cell_subtype": cell_subtype,
-                        "cell_id": cell_id,
-                        "measure": measure,
-                        "treatment": treatment,
-                        'protocol': I_setting , #JJB doubt this will work as nan unless data_type=AP
-                        "pre_post": pre_post,
-                        "mean_value": mean_value,
-                        "file_values": file_values, 
-                        "folder_files": folder_files, 
-                        "R_series": list(pre_post_df['R_series']),
-                    }
-                    # Append the dictionary to the list
-                    update_rows.append(update_row)
-
-                for unnormalised_measure in ['tau_rc', 'sag']:
-                    normalised_current = get_common_val_PRE_DRUG(df, unnormalised_measure, 2)
-                    if pd.notna(normalised_current):
-                        pre_post_df_clean = pre_post_df.dropna(subset=[unnormalised_measure])
-                        idx_normalised =[idx for idx, row in pre_post_df_clean.iterrows() if row[unnormalised_measure][2] == normalised_current]
-                        file_values =  list(df.loc[idx_normalised, unnormalised_measure].apply(lambda x: x[0]))
-                        update_row = {
-                            "cell_type": cell_type,
-                            "cell_subtype": cell_subtype,
-                            "cell_id": cell_id,
-                            "measure": unnormalised_measure,
-                            "treatment": treatment,
-                            'protocol': I_setting , #JJB doubt this will work as nan unless data_type=AP
-                            "pre_post": pre_post,
-                            "mean_value": np.mean(file_values),
-                            "file_values": file_values, 
-                            "folder_files": list(df.loc[idx_normalised, 'folder_file']), 
-                        }
-                        # Append the dictionary to the list
-                        update_rows.append(update_row)
-                    else:
-                        print(f"{unnormalised_measure} for {cell_id} has no common FP current injected.")
-                        
-
-            updateFPAggStats(filename, update_rows)
-    else: #not FP data 
-        pass
-    return df
 
 
 def fetchMeans(pre_post_df, measure):

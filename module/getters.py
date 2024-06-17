@@ -188,11 +188,11 @@ def _handleFile(row):
 
     #open file
     path_V, path_I = make_path(row.folder_file) 
-    V_list, V_df = igor_exporter(path_V)
-    V_array      = np.array(V_df) 
+    V_list, V_array = igor_exporter(path_V)
+    # V_array      = np.array(V_df) 
     try: # handel missing I traces (Soma_outwave)
-        I_list, I_df = igor_exporter(path_I)
-        I_array      = np.array(I_df)
+        I_list, I_array = igor_exporter(path_I)
+        # I_array      = np.array(I_df)
     except FileNotFoundError:
         I_list, I_df = None, None
         I_array      = None
@@ -216,7 +216,7 @@ def _handleFile(row):
                 row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
             
             # x, y for FI curve i.e. step_current_values, ap_counts (on I step) #TODO use off step peak locs? or remove 
-            step_current_values, ap_counts, V_rest, off_step_peak_locs = extract_FI_x_y (row.folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all) 
+            step_current_values, ap_counts, V_rest, off_step_peak_locs, ap_frequencies_Hz = extract_FI_x_y (row.folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all) 
             FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(row.folder_file, step_current_values, ap_counts) #TODO handel pAD APs better slope fit
             row["rheobased_threshold"] = rheobase_threshold
             row["FI_slope"] = FI_slope
