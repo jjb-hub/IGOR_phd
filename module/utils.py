@@ -3,6 +3,7 @@ import os, shutil, itertools, json, time, functools, pickle
 import pandas as pd
 import igor2 as igor
 import os
+import re
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -80,15 +81,22 @@ def get_absolute_column_value (df, column_name):
 #figures
 IDENTIFIERS={}
 
-#Check filesystem is set up for write operations
-def saveColors(filename, color_dict):
-    subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
-    checkFileSystem(subcache_dir)
-    saveJSON(f"{subcache_dir}/color_dict.json", color_dict)
-    print(f"COLORS {color_dict} SAVED TO {subcache_dir} SUBCACHE")
+def valdidateIdentifier(identifier):
+    invalid_chars_pattern = r'[\/:*?"<>|%\&#$@!=+,;\'`~]'
+    sanitized_identifier = re.sub(invalid_chars_pattern, "_", identifier)
+    if re.search(invalid_chars_pattern, identifier):
+        print("Invalid characters in identifier, replacing with '_' ")
+    return sanitized_identifier
 
-def getColors(filename):
-    return getJSON(f"{CACHE_DIR}/{filename.split('.')[0]}/color_dict.json")
+#Check filesystem is set up for write operations #TODO put in main and save from constants if youwant in dict no inconstants 
+# def saveColors(filename, color_dict):
+#     subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
+#     checkFileSystem(subcache_dir)
+#     saveJSON(f"{subcache_dir}/color_dict.json", color_dict)
+#     print(f"COLORS {color_dict} SAVED TO {subcache_dir} SUBCACHE")
+
+# def getColors(filename):
+#     return getJSON(f"{CACHE_DIR}/{filename.split('.')[0]}/color_dict.json")
 
 def saveDataTracking(filename, insufficient_data_tracking):
     subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
@@ -160,6 +168,8 @@ def isCached(filename, identifier, extension='pkl'):
     filename = filename.split(".")[0]
     print(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
     return os.path.isfile(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
+
+
 
 ######### SAVE ##########
 

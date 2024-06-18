@@ -20,6 +20,32 @@ import traceback
 
 
 ########## GETTERS ##########
+def getfileinfo(filename, folder_file, colname):
+    df = getExpandedDf(filename)
+    if colname not in df.columns: # check valid colname
+        raise ValueError(f"Column '{colname}' does not exist in the DataFrame.")
+    filtered_df = df[df['folder_file'] == folder_file][colname]
+    if len(filtered_df) == 1:
+        return filtered_df.iloc[0]
+    else:
+        raise ValueError(f"Expected exactly one row for folder_file '{folder_file}', found {len(filtered_df)} rows.")
+    
+def get_VandI_arrays_lists(filename, folder_file):
+    path_V, path_I = make_path(folder_file)
+    I_set = getfileinfo(filename, folder_file, 'I_set')
+    V_list, V_array = igor_exporter(path_V) # V_array (2D) each sweep is a column
+    try:
+        I_list, I_array = igor_exporter(path_I) 
+    except FileNotFoundError: #if no I file exists 
+        print(f"no I file found for {folder_file}, I setting used was: {I_set}")
+        if I_set == 'none':
+            I_array = np.zeros((len(V_array), 1))
+            I_list = np.zeros(len(V_list))
+        else:
+            I_array = np.full((len(V_array), 1), 3.333) # for instance unknown holding_I != 0pA of I
+            I_list = np.full(len(V_array), 3.333)
+    return V_array, I_array, V_list, I_list
+
 
 
 def getRawDf(filename):
@@ -36,6 +62,9 @@ def getFPAggStats(filename):
 
 def getAPPAggStats(filename):
     return getOrBuildDf(filename, "APP_agg_stats", buildAPPStatsDf)
+
+def getFPAPPAggStats(filename):
+    return getOrBuildDf(filename, "FP_APP_agg_stats", buildFPAPPStatsDf)
 
 
 def getCellDf(filename_or_df, cell_id, data_type = None):
@@ -94,54 +123,96 @@ def getExpandedDfIfFilename(filename_or_df):
 
 ########## SETTERS ##########
 
-def updateFPAggStats(filename, rows):
-    FP_agg_stats_df = getFPAggStats(filename)
+# def updateFPAggStats(filename, rows):
+#     FP_agg_stats_df = getFPAggStats(filename)
+#     # Create a unique identifier in the existing DataFrame
+#     FP_agg_stats_df['unique_id'] = FP_agg_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_subtype", "cell_id", "measure", "treatment",'protocol', "pre_post"]]), axis=1)
+#     for row in rows:
+#         unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_subtype",  "cell_id", "measure", "treatment", 'protocol', "pre_post"]])
+#         data_row = pd.DataFrame([row])
+#         data_row['unique_id'] = unique_id
+
+#         # Check if this unique_id already exists
+#         if unique_id in FP_agg_stats_df['unique_id'].values:
+#             # Update the existing row
+#             match_index = FP_agg_stats_df[FP_agg_stats_df['unique_id'] == unique_id].index[0]
+#             FP_agg_stats_df.at[match_index, 'mean_value'] = data_row.at[0, 'mean_value']
+#             FP_agg_stats_df.at[match_index, 'file_values'] = data_row.at[0, 'file_values']
+#         else:
+#             # Append the new row
+#             FP_agg_stats_df = pd.concat([FP_agg_stats_df, data_row], ignore_index=True)
+#     # Drop the unique identifier column
+#     FP_agg_stats_df.drop('unique_id', axis=1, inplace=True)
+#     cache(filename, "FP_agg_stats", FP_agg_stats_df)
+
+# def updateAPPAggStats(filename, rows):
+#     APP_agg_stats_df = getAPPAggStats(filename)
+    
+#     # Create a unique identifier 
+#     APP_agg_stats_df['unique_id'] = APP_agg_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment",'protocol', "pre_app_wash"]]), axis=1)
+    
+#     for row in rows:
+#         unique_id = '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment", 'protocol', "pre_app_wash"]])
+#         data_row = pd.DataFrame([row])
+#         data_row['unique_id'] = unique_id
+
+#         if unique_id in APP_agg_stats_df['unique_id'].values: #update row
+#             match_index = APP_agg_stats_df[APP_agg_stats_df['unique_id'] == unique_id].index[0]
+#             APP_agg_stats_df.at[match_index, 'value'] = data_row.at[0, 'value']
+#             APP_agg_stats_df.at[match_index, 'sem'] = data_row.at[0, 'sem']
+#         else: #add row
+#             APP_agg_stats_df = pd.concat([APP_agg_stats_df, data_row], ignore_index=True)
+
+#     APP_agg_stats_df.drop('unique_id', axis=1, inplace=True)# Drop unique identifier 
+#     cache(filename, "APP_agg_stats", APP_agg_stats_df)
+
+############ SETTERS IMPROVED #############
+
+def getAggStats(filename, stat_type):
+    if stat_type == 'FP':
+        return getFPAggStats(filename)
+    elif stat_type == 'APP':
+        return getAPPAggStats(filename)
+    elif stat_type == 'FP_APP':
+        return getFPAPPAggStats(filename) # DEVELOP WHEN NEEDED
+    else:
+        raise ValueError(f"Unknown stat type: {stat_type}")
+    
+def updateAggStats(filename, rows, stat_type, unique_id_columns, value_columns):
+    agg_stats_df = getAggStats(filename, stat_type)
     
     # Create a unique identifier in the existing DataFrame
-    FP_agg_stats_df['unique_id'] = FP_agg_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["cell_type", "cell_subtype", "cell_id", "measure", "treatment",'protocol', "pre_post"]]), axis=1)
+    agg_stats_df['unique_id'] = agg_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in unique_id_columns]), axis=1)
     
     for row in rows:
-        unique_id = '_'.join([str(row[col]) for col in ["cell_type", "cell_subtype",  "cell_id", "measure", "treatment", 'protocol', "pre_post"]])
+        unique_id = '_'.join([str(row[col]) for col in unique_id_columns])
         data_row = pd.DataFrame([row])
         data_row['unique_id'] = unique_id
 
         # Check if this unique_id already exists
-        if unique_id in FP_agg_stats_df['unique_id'].values:
+        if unique_id in agg_stats_df['unique_id'].values:
             # Update the existing row
-            match_index = FP_agg_stats_df[FP_agg_stats_df['unique_id'] == unique_id].index[0]
-            FP_agg_stats_df.at[match_index, 'mean_value'] = data_row.at[0, 'mean_value']
-            FP_agg_stats_df.at[match_index, 'file_values'] = data_row.at[0, 'file_values']
+            match_index = agg_stats_df[agg_stats_df['unique_id'] == unique_id].index[0]
+            for value_col in value_columns:
+                agg_stats_df.at[match_index, value_col] = data_row.at[0, value_col]
         else:
             # Append the new row
-            FP_agg_stats_df = pd.concat([FP_agg_stats_df, data_row], ignore_index=True)
+            agg_stats_df = pd.concat([agg_stats_df, data_row], ignore_index=True)
 
     # Drop the unique identifier column
-    FP_agg_stats_df.drop('unique_id', axis=1, inplace=True)
+    agg_stats_df.drop('unique_id', axis=1, inplace=True)
+    cache(filename, f"{stat_type}_agg_stats", agg_stats_df)
 
-    cache(filename, "FP_agg_stats", FP_agg_stats_df)
+def updateFPAggStats(filename, rows):
+    unique_id_columns = ["cell_type", "cell_subtype", "cell_id", "measure", "treatment", 'protocol', "pre_post"]
+    value_columns = ['mean_value', 'file_values']
+    updateAggStats(filename, rows, 'FP', unique_id_columns, value_columns)
 
 def updateAPPAggStats(filename, rows):
-    APP_agg_stats_df = getAPPAggStats(filename)
+    unique_id_columns = ["folder_file", "cell_type", "cell_id", "measure", "treatment", 'protocol', "pre_app_wash"]
+    value_columns = ['value', 'sem']
+    updateAggStats(filename, rows, 'APP', unique_id_columns, value_columns)
     
-    # Create a unique identifier 
-    APP_agg_stats_df['unique_id'] = APP_agg_stats_df.apply(lambda row: '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment",'protocol', "pre_app_wash"]]), axis=1)
-    
-    for row in rows:
-        unique_id = '_'.join([str(row[col]) for col in ["folder_file", "cell_type", "cell_id", "measure",  "treatment", 'protocol', "pre_app_wash"]])
-        data_row = pd.DataFrame([row])
-        data_row['unique_id'] = unique_id
-
-        if unique_id in APP_agg_stats_df['unique_id'].values: #update row
-            match_index = APP_agg_stats_df[APP_agg_stats_df['unique_id'] == unique_id].index[0]
-            APP_agg_stats_df.at[match_index, 'value'] = data_row.at[0, 'value']
-            APP_agg_stats_df.at[match_index, 'sem'] = data_row.at[0, 'sem']
-        else: #add row
-            APP_agg_stats_df = pd.concat([APP_agg_stats_df, data_row], ignore_index=True)
-
-    APP_agg_stats_df.drop('unique_id', axis=1, inplace=True)# Drop unique identifier 
-    cache(filename, "APP_agg_stats", APP_agg_stats_df)
-
-
 ############ BUILDERS ##########
 
 
@@ -220,6 +291,7 @@ def _handleFile(row):
             FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(row.folder_file, step_current_values, ap_counts) #TODO handel pAD APs better slope fit
             row["rheobased_threshold"] = rheobase_threshold
             row["FI_slope"] = FI_slope
+
 
             #only consider APs on a I step using off_step_peak_locs to filter before selecting for 10
 
@@ -388,3 +460,19 @@ def buildAPPStatsDf(filename):
         ]
     )
 
+def buildFPAPPStatsDf(filename): #DEVELOP WHEN NEEDED TODO
+    return pd.DataFrame(
+        columns=[
+            "cell_type",
+            "cell_subtype",
+            "cell_id",
+            "measure",
+            "treatment",
+            'protocol', 
+            "pre_drug_post",
+            "mean_value",
+            "file_values",
+            "folder_files",
+            "R_series",
+        ]
+    )

@@ -1,7 +1,7 @@
 # module
-from module.stats import loop_stats, add_statistical_annotation_hues
+from module.stats import buildAggregateDfs, add_statistical_annotation_hues
 from module.utils import *
-from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf, getFPAggStats, getAPPAggStats
+from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf, getFPAggStats, getAPPAggStats, getfileinfo, get_VandI_arrays_lists
 from module.action_potential_functions import pAD_detection, build_AP_DF
 from module.constants import color_dict, unit_dict, n_minimum
 #external
@@ -411,30 +411,6 @@ def build_APP_histogram_figures(filename):
         saveAPP_HistogramFig(Fig, f'{cell_type}_{measure}')
 
 
-## LOOPER ## 
-
-#for cell_type and drug
-
-# #right now need expanded df to make ap figuures not ideal
-
-def loopbuildAplicationFigs(filename):
-    df = getExpandedDf(filename)
-    color_dict = getColors(filename)
-    application_df = df[df.data_type == 'APP'] 
-    for row_ind, row in application_df.iterrows():  #row is a series that can be called row['colname']
-        #inputs to builder if not cached:
-        cell_id = row['cell_id']
-        folder_file = row['folder_file']
-        I_set = row['I_set']
-        drug = row['drug']
-        drug_in = row['drug_in']
-        drug_out = row['drug_out']
-        application_order = row['application_order']
-        pAD_locs = row['APP_pAD_AP_locs']
-
-        buildApplicationFig(cell_id=cell_id, folder_file=folder_file, I_set=I_set, drug=drug, drug_in=drug_in, drug_out=drug_out, application_order=application_order, pAD_locs=None)
-        plt.close()
-    return
 
 ## GETTERS ##
 
@@ -512,33 +488,29 @@ def RA_AP_chatecteristics_plot(filename, cell_id_or_cell_df, data_type = None, f
         fig.show()
 
 
-#old 11/4/24
-def getorbuildAP_MeanFig(filename, cell_id_or_cell_df, from_scratch=None):
-        
-        if not isinstance(cell_id_or_cell_df, pd.DataFrame):
-            expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
-        else:
-            cell_df = cell_id_or_cell_df
-
-
-        cell_id = cell_df['cell_id'].iloc[0]
-
+# nEW 18/5/24
+def getorbuildAP_MeanFig(filename, folder_file, from_scratch=None):
+        '''
+        Gets from cache / builds MeanAPFig for a single file.
+        '''
+        cashable_folder_file = valdidateIdentifier(folder_file)
         from_scratch = from_scratch if from_scratch is not None else input("Rebuild Fig even if previous version exists? (y/n)") == 'y'
-        if from_scratch or not isCached(filename, cell_id):
-            print(f'BUILDING "{cell_id} Mean APs Figure"') 
-            folder_file = cell_df['folder_file'].values[0]
-            path_V, path_I = make_path(folder_file)
-            listV, V_array = igor_exporter(path_V)
-            # V_array = np.array(dfV)
-            peak_voltages_all, peak_latencies_all, peak_locs_corr_all, v_thresholds_all, peak_slope_all, peak_heights_all, pAD_df  = pAD_detection(folder_file,V_array)
-            if len(peak_heights_all) <=1:
-                return print(f'No APs in trace for {cell_id}')
-            fig = buildAP_MeanFig(cell_id, pAD_df, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100)
-            saveAP_MeanFig(fig, cell_id)
-        else : fig = getCache(filename, cell_id)
+        if from_scratch or not isCached(filename, cashable_folder_file):
+            print(f'BUILDING "{folder_file} Mean APs Figure"') 
+
+            V_array, I_array, V_list, I_list = get_VandI_arrays_lists(filename, folder_file)
+
+            AP_df = build_AP_DF(folder_file, V_array, I_array) 
+            if AP_df.empty:
+                return print(f'No APs in trace for {folder_file}')
+            
+            fig = buildAP_MeanFig(filename, folder_file, AP_df, V_array, forwards_window=50, backwards_window=50)
+            saveAP_MeanFig(fig, cashable_folder_file) 
+        else : fig = getCache(filename, cashable_folder_file)
         fig.show()
-        
+
+
+#old 11/4/24
 def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
@@ -621,7 +593,6 @@ def buildApplicationFig( cell_id=None, folder_file=None, I_set=None, drug=None, 
     except FileNotFoundError: #if no I file exists 
         print(f"no I file found for {cell_id}, I setting used was: {I_set}")
         I_array = np.zeros((len(V_array), 1))
-        # I_array = np.zeros(len(V_array)-1) old df style make list 
 
     # sampeling at 20KHz -->  time (s)
     seconds_per_sweep = len(V_array[:,0]) * 0.00005 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
@@ -636,16 +607,15 @@ def buildApplicationFig( cell_id=None, folder_file=None, I_set=None, drug=None, 
     #plot voltage / time
     ax1.plot(x_V, V_list, c = 'k' if drug is None else color_dict.get(drug, 'k'), lw=1, alpha=0.8) 
 
+    AP_df = build_AP_DF(folder_file, V_array, I_array)
     #label RA APs
-    if pAD_locs is True: 
-        AP_df = build_AP_DF(folder_file, V_array, I_array)
+    if pAD_locs and not AP_df.empty: 
         AP_df = AP_df.dropna(subset=['AP_type'])
         if not AP_df.empty:
             color_cycle = cycle(['salmon', 'cornflowerblue', 'seagreen'])
             color_map = {}
             
             for ap_type in AP_df['AP_type'].unique(): # loop AP_type 
-                
                 if ap_type not in color_map:
                     color_map[ap_type] = next(color_cycle) # assign color 
 
@@ -686,123 +656,66 @@ def buildApplicationFig( cell_id=None, folder_file=None, I_set=None, drug=None, 
 
 ########## AP MATRICS PLOTTERS
 
-def buildAP_MeanFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window=50, input_plot_backwards_window=100):
+#NEW
+def buildAP_MeanFig(filename, folder_file, AP_df, V_array, forwards_window=50, backwards_window=50):
+    '''
+    Input
+        cell_id             (string)    :   used for labeling and caching figure #TODO should add data_type
+        AP_df               (pd.DF)     :   each row a information on a single AP in the corrisponding V_array
+        V_array             (2D array)  :   voltage trace (mV)
+        forwards_window     (int)       :   window after AP peak to plot 
+        backwards_window    (int)       :   window before AP peak to plot
+    Returns
+        fig                             :   figure of each trace plotted and mean trace aligned by peak
+    '''
     # Initialize necessary variables
-    plot_window = input_plot_forwards_window + input_plot_backwards_window
-    sampling_rate = 1e4 
+    plot_window = forwards_window + backwards_window
+    sampling_rate = 2e4 # HARD CODE
     sec_to_ms = 1e3
-    AP_types = ['pAD_true', 'pAD_possible', 'somatic']
-    colors = {'pAD_true': 'salmon', 'pAD_possible': 'orange', 'somatic': 'cornflowerblue'}
-    
-    # Prepare the spike array for each AP type
-    spike_arrays = {AP_type: [] for AP_type in AP_types}
+    color_cycle = cycle(['cornflowerblue', 'salmon', 'seagreen'])
+    color_map = {}
 
-    # Iterate over each AP type to populate spike_arrays
-    for AP_type in AP_types:
-        ap_indices = pAD_dataframe[pAD_dataframe['AP_type'] == AP_type][["upshoot_loc", "AP_sweep_num"]].values
-        for idx in range(len(ap_indices)):
-            lower_bound = max(0, ap_indices[idx, 0] - input_plot_backwards_window)
-            upper_bound = ap_indices[idx, 0] + input_plot_forwards_window
-            spike_arrays[AP_type].append(V_array[lower_bound:upper_bound, ap_indices[idx, 1]])
+    # Label np.NaN APs in AP_df
+    AP_df['AP_type'].fillna('undefined', inplace=True)
 
-    # Generate the plot
+    # Prepare spike arrays and color mapping
+    spike_arrays = {AP_type: [] for AP_type in AP_df['AP_type'].unique()}
+    for ap_type in AP_df['AP_type'].unique():
+        if ap_type not in color_map:
+            color_map[ap_type] = next(color_cycle)
+
+            # Populate spike arrays
+            ap_indices = AP_df[AP_df['AP_type'] == ap_type][["upshoot_location", "sweep"]].values
+            for idx in range(len(ap_indices)):
+                upshoot_location = ap_indices[idx, 0]
+                lower_bound = max(0, upshoot_location - backwards_window)
+                upper_bound = upshoot_location + forwards_window
+                spike_arrays[ap_type].append(V_array[lower_bound:upper_bound, ap_indices[idx, 1]])
+
+    # Plot mean spikes and individual traces
     fig, ax = plt.subplots()
-    for AP_type in AP_types:
-        if spike_arrays[AP_type]:
-            mean_spike = np.mean(np.array(spike_arrays[AP_type]), axis=0)
-            time_ = sec_to_ms * np.arange(0, len(mean_spike)) / sampling_rate
-            ax.plot(time_, mean_spike, color=colors[AP_type], label=f'{AP_type} Mean')
+    for ap_type, spikes in spike_arrays.items():
+        if spikes:
+            # Plot individual traces with low opacity
+            for trace in spikes:
+                time_ms = sec_to_ms * np.arange(0, len(trace)) / sampling_rate
+                ax.plot(time_ms, trace, color=color_map[ap_type], alpha=0.09, linewidth=1)
+
+            # Plot mean spike
+            mean_spike = np.mean(np.array(spikes), axis=0)
+            ax.plot(time_ms, mean_spike, color=color_map[ap_type], label=f'{ap_type} mean voltage (n={len(spikes)})', linewidth=1.2, alpha=1)
 
     # Set plot attributes and show
     ax.legend()
-    plt.title(cell_id)
+    plt.title(f"{getfileinfo(filename, folder_file, 'cell_id')} {getfileinfo(filename, folder_file, 'data_type')}({folder_file})")
     plt.ylabel('Membrane Potential (mV)')
     plt.xlabel('Time (ms)')
     plt.tight_layout()
     plt.show()    
     return fig
 
-# #OLD DJ
-# def buildAP_MeanFig(cell_id, pAD_dataframe, V_array, input_plot_forwards_window  = 50, input_plot_backwards_window= 100):
-#     # Rename vars: 
-#     pAD_df = pAD_dataframe
-#     V      = V_array  
-#     plot_forwards_window        =  input_plot_forwards_window  
-#     plot_backwards_window       =  input_plot_backwards_window
-#     plot_window = plot_forwards_window + plot_backwards_window
-#     sampling_rate               = 1e4 
-#     sec_to_ms                   = 1e3
-    
-#     # pAD subdataframe and indices
-#     pAD_sub_df = pAD_df[pAD_df.pAD =="pAD"] 
-#     pAD_ap_indices = pAD_sub_df[["upshoot_loc" , "AP_loc", "AP_sweep_num"]].values
 
-#     # Somatic subdataframe and indices
-#     Somatic_sub_df = pAD_df[pAD_df.pAD =="Somatic"] 
-#     Somatic_ap_indices = Somatic_sub_df[["upshoot_loc" , "AP_loc", "AP_sweep_num"]].values
-
-#     pAD_spike_array = np.zeros([len(pAD_ap_indices), plot_window  ])
-#     Somatic_spike_array = np.zeros([len(Somatic_ap_indices), plot_window ])
-    
-#     # Plotter for pAD and Somatic Spikes 
-#     fig, ax = plt.subplots()
-#     lines  = []  # initialise empty line list 
-
-#     for idx in range(len(pAD_ap_indices)): 
-#         if plot_backwards_window >=   pAD_ap_indices[:,0][idx]:
-#             plot_backwards_window_ = 0
-#             plot_forwards_window_  = plot_forwards_window + plot_backwards_window  
-#         else: 
-#             plot_backwards_window_ = plot_backwards_window
-#             plot_forwards_window_  = plot_forwards_window
-        
-#         pAD_spike_array[idx,:] = V[ pAD_ap_indices[:,0][idx] - plot_backwards_window_ :  pAD_ap_indices[:,0][idx] +  plot_forwards_window_  ,  pAD_ap_indices[:,-1][idx]    ]
-#         time_                       = sec_to_ms* np.arange(0, len(pAD_spike_array[idx,:])) / sampling_rate  
-#         line, = ax.plot(time_, pAD_spike_array[idx,:] , color = 'salmon', alpha=0.05)
-#         lines.append(line)
-#         #plt.plot(pAD_spike_array[idx,:], color ='grey', label = 'pAD')
-    
-#     if pAD_spike_array.shape[0] > 0 :
-#         line, = ax.plot(time_, np.mean(pAD_spike_array , axis = 0)  , color = 'red')
-#         lines.append(line)
-#     else : # no spikes to plot
-#         pass
-
-#     for idx_ in range(len(Somatic_ap_indices)): 
-        
-#         if plot_backwards_window >=   Somatic_ap_indices[:,0][idx_]:
-#             plot_backwards_window_ = 0
-#             plot_forwards_window_  = plot_forwards_window + plot_backwards_window  
-#         else: 
-#             plot_backwards_window_ = plot_backwards_window
-#             plot_forwards_window_  = plot_forwards_window
-            
-#         Somatic_spike_array[idx_,:] = V[ Somatic_ap_indices[:,0][idx_] - plot_backwards_window_ :  Somatic_ap_indices[:,0][idx_] + plot_forwards_window_   ,  Somatic_ap_indices[:,-1][idx_]    ]
-#         time_                       = sec_to_ms* np.arange(0, len(Somatic_spike_array[idx_,:])) / sampling_rate  
-#         line, = ax.plot(time_,Somatic_spike_array[idx_,:] , color = 'cornflowerblue', alpha=0.05)
-#         lines.append(line)
-#     if pAD_spike_array.shape[0] > 0 :
-#         line, = ax.plot(time_, np.mean(Somatic_spike_array , axis = 0)  , c = 'blue')
-#         lines.append(line)
-#     else : # no spikes to plot
-#         pass
-
-#     # Create the custom legend with the correct colors
-#     legend_elements = [Line2D([0], [0], color='salmon', lw=2, label='pAD Ensemble', alpha=0.2),
-#                        Line2D([0], [0], color='red', lw=2, label= 'pAD Mean'),
-#                        Line2D([0], [0], color='cornflowerblue', lw=2, label='Somatic Ensemble', alpha=0.2),
-#                        Line2D([0], [0], color='blue', lw=2, label='Somatic Mean')]
-    # # Set the legend with the custom elements
-    # ax.legend(handles=legend_elements)
-        
-    # #plt.plot(np.mean(Somatic_spike_array, axis = 0 ) , c = 'blue', label = 'Somatic Mean')
-    # plt.title(cell_id)
-    # plt.ylabel('Membrane Potential (mV)')
-    # plt.xlabel('Time (ms)')
-    # plt.tight_layout()
-    # plt.show()    
-    # return fig 
-
+#OLD
 def buildAP_PhasePlotFig(cell_id, pAD_dataframe, V_array):
     # Initialize necessary variables
     plot_forwards_window = 50

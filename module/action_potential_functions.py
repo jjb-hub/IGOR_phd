@@ -1199,7 +1199,7 @@ def ap_characteristics_extractor_main(folder_file, V_array, critical_num_spikes 
     #     getCache(filename_no_extension, 'feature_df')
 
 
-def build_AP_DF(folder_file, V_array, I_array ):
+def build_AP_DF(folder_file, V_array, I_array):
     '''
     BASE FUNCTION
     Builds a df for a single file where each row is an AP with columns for AP charecteristics.
@@ -1234,7 +1234,9 @@ def build_AP_DF(folder_file, V_array, I_array ):
     # Early return if no APs found
     if np.all(np.isnan(peak_latencies_all)):
         print (f"No APs detected in voltage trace {folder_file}.")
-        return np.nan #ADD TO FIN LENGTH
+        return pd.DataFrame(columns=['folder_file', 'peak_location', 'upshoot_location', 'voltage_threshold',
+           'slope', 'latency', 'peak_voltage', 'height', 'width', 'sweep',
+           'I_injected', 'AP_type'])
 
     # create list of same length peak_locs_corr_all of the current injected at that peak location #GPT HERE IS MY QUESTION
 

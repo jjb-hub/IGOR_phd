@@ -7,7 +7,7 @@ extra code from patch_daddy (old version)
 @author: Debapratim Jana, Jasmine Butler
 """
 
-def loop_stats(df):
+def buildAggregateDfs(df):
     
     combinations = [
                     (["mouseline", "drug"], _getstats), #stats_df to be fed to next function 

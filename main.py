@@ -1,13 +1,12 @@
 ######## ONLY IMPORT THE USER ACCESSIBLE FUNCTIONS HERE ##########
 
 from module.stats import (
-    loop_stats
+    buildAggregateDfs
 )
 
 from module.plotters import (
     build_FP_figs,
     getorbuildApplicationFig, 
-    loopbuildAplicationFigs, 
     getorbuildAP_MeanFig, 
     getorbuildAP_HistogramFig, 
     getorbuildAP_PhasePlotFig, 
@@ -20,7 +19,6 @@ from module.utils import (
     getOrBuildDataTracking,
     subselectDf,
     initiateFileSystem, 
-    saveColors,  
     )
 
 from module.getters import (

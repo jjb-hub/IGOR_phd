@@ -40,9 +40,14 @@ def propagate_I_set(df):
     df['I_set'] = df.apply(lambda row: ap_I_set.get(row['cell_id'], row['I_set']) if pd.isna(row['I_set']) else row['I_set'], axis=1)
     return df
 
-def loop_stats(filename_or_df):
+def buildAggregateDfs(filename_or_df):
+    '''
+    Generates aggregate data frames for FP and APP data ... FP_APP 
+    '''
     df, filename = getExpandedDfIfFilename(filename_or_df)
     df = propagate_I_set(df) 
+    df_raw = df.copy() #copy raw expanded_df subset to return
+    df = df[df['outlier'] != True] # remove labeled outliers
     df_row_order = df['folder_file'].tolist()  # save origional row order
     
     combinations = [
@@ -53,14 +58,14 @@ def loop_stats(filename_or_df):
         df = apply_group_by_funcs(filename, df, groupby_cols, handlingFn) #note that as each function is run the updated df is fed to the next function
     
     df = df.loc[df['folder_file'].isin(df_row_order)]# rearrange the DataFrame to match the original row order
-    return df
+    # return df_raw
 
 def apply_group_by_funcs(filename, df, groupby_cols, handleFn): #creating a list of new values and adding them to the existign df
     res_dfs_li = [] #list of dfs
     for group_info, group_df in df.groupby(groupby_cols):
         res_df = handleFn(filename, group_info, group_df)
         res_dfs_li.append(res_df)
-    new_df = pd.concat(res_dfs_li) # some functions expand expanded_df so all function must return df and only df
+    new_df = pd.concat(res_dfs_li) # some functions expand expanded_df so all function must return df and only df # REALLY DO THEY HERE?
     return new_df
 
 def _update_FP_agg_stats(filename, celltype_cellid_datatype, df):
@@ -69,11 +74,14 @@ def _update_FP_agg_stats(filename, celltype_cellid_datatype, df):
     output: updated FP_agg_stats with a single mean pre and post for each cell_id , measure , treatment_group (cell_type/drug)
     '''
     cell_type, cell_id, data_type = celltype_cellid_datatype
+    df_raw = df.copy() #copy raw expanded_df subset to return
+
+
     if data_type == 'FP':
-        df=df[df['application_order'] <= 1] #remove second aplication data (FP or AP)
+        df=df[df['application_order'] <= 1] #remove second drug aplication data (FP or AP)
         treatment = ', '.join(df[df['drug'] != 'PRE']['drug'].unique())
-        # exluude data without pre and post 
-        if not all(x in df['drug'].unique() for x in ['PRE', treatment ]):
+        
+        if not all(x in df['drug'].unique() for x in ['PRE', treatment ]): # exluude data without pre and post 
                 print(f"{cell_id} does not have all PRE and POST FP data, and therefore excluded.")
                 return df
         
@@ -139,11 +147,14 @@ def _update_FP_agg_stats(filename, celltype_cellid_datatype, df):
                     else:
                         print(f"{unnormalised_measure} for {cell_id} has no common FP current injected.")
                         
-
             updateFPAggStats(filename, update_rows)
+    
+    elif data_type == 'FP_APP':
+        print('build structure ')
+
     else: #not FP data 
         pass
-    return df
+    return df_raw
 
 
 def _update_APP_agg_stats(filename, celltype_datatype_drug, df):
@@ -202,7 +213,7 @@ def _update_APP_agg_stats(filename, celltype_datatype_drug, df):
                 if list_col in ['inputR_PRE', 'inputR_APP', 'inputR_WASH']:
                     if pd.isna(row['I_set']) or row['I_set'] == 'none' :
                         if safe_mean(row[list_col]):
-                            print('k')
+                            print(f"No or unknown I injection - no input R calculated for file {row['folder_file']}")
 
                 mean_row = {
                     "folder_file": row['folder_file'],
@@ -217,7 +228,6 @@ def _update_APP_agg_stats(filename, celltype_datatype_drug, df):
                     "sem": safe_sem(row[list_col])
                 }
                 update_rows.append(mean_row)
-
 
 
         updateAPPAggStats(filename, update_rows) 
