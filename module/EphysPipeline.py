@@ -9,13 +9,14 @@ from module.getters import *
 tqdm.pandas()
 
 @dataclass
-class AccessData:
+class EphysPipeline:
     ' A class for accessing and generating data form the input feature_df. '
     filename: str
     raw_df: Optional[pd.DataFrame] = None
 
     def __post_init__(self):
         self.raw_df = self._get_raw_df()
+        self.cell_df = self._get_cell_df()
         self.FP_df = getCache(self.filename, 'FP_df') if isCached(self.filename, 'FP_df') else None
         self.APP_df = getCache(self.filename, 'APP_df') if isCached(self.filename, 'APP_df') else None
 

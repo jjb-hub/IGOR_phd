@@ -244,8 +244,8 @@ def buildCellDf(filename):
     cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
 
     cell_df['FP'] = np.nan
-    cell_df['APP'] = np.nan
-    cell_df['FP_APP'] = np.nan
+    # cell_df['APP'] = np.nan
+    # cell_df['FP_APP'] = np.nan
     cell_df['access_change'] = np.nan
 
 
