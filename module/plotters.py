@@ -1,7 +1,7 @@
 # module
 from module.stats import buildAggregateDfs, add_statistical_annotation_hues
 from module.utils import *
-from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getCellDf, getFPAggStats, getAPPAggStats, getfileinfo, get_VandI_arrays_lists
+from module.getters import getRawDf, getExpandedDf, getExpandedSubsetDf, getSingleCellDf, getFPAggStats, getAPPAggStats, getfileinfo, get_VandI_arrays_lists
 from module.action_potential_functions import pAD_detection, build_AP_DF
 from module.constants import color_dict, unit_dict, n_minimum
 #external
@@ -428,7 +428,7 @@ def getorbuildApplicationFig(filename, cell_id_or_cell_df, from_scratch=None):
     #fetch relevant rows in expanded_df
     if not isinstance(cell_id_or_cell_df, pd.DataFrame):
         expanded_df = getExpandedDf(filename)
-        cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
+        cell_df = getSingleCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
     else:
         cell_df = cell_id_or_cell_df
     cell_id = cell_df['cell_id'].iloc[0]
@@ -462,7 +462,7 @@ def RA_AP_chatecteristics_plot(filename, cell_id_or_cell_df, data_type = None, f
         # get df of all files for single cell
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = data_type)
+            cell_df = getSingleCellDf(expanded_df, cell_id_or_cell_df, data_type = data_type)
         else:
             cell_df = cell_id_or_cell_df
 
@@ -514,7 +514,7 @@ def getorbuildAP_MeanFig(filename, folder_file, from_scratch=None):
 def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
+            cell_df = getSingleCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -538,7 +538,7 @@ def getorbuildAP_PhasePlotFig(filename, cell_id_or_cell_df, from_scratch=None):
 def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
+            cell_df = getSingleCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]
@@ -561,7 +561,7 @@ def getorbuildAP_PCAFig(filename, cell_id_or_cell_df, from_scratch=None):
 def getorbuildAP_HistogramFig(filename, cell_id_or_cell_df, from_scratch=None):
         if not isinstance(cell_id_or_cell_df, pd.DataFrame):
             expanded_df = getExpandedDf(filename)
-            cell_df = getCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
+            cell_df = getSingleCellDf(expanded_df, cell_id_or_cell_df, data_type = 'APP')
         else:
             cell_df = cell_id_or_cell_df
         cell_id = cell_df['cell_id'].iloc[0]

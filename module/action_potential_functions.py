@@ -1731,8 +1731,8 @@ def mean_inputR_APP_calculator(V_array, I_array, drug_in, drug_out):
     
     for index, V_sweep in enumerate(V_array.T):  # Transpose V_array to iterate over columns/sweeps
         # print(input_R_ohms_V_array)
-        #skip first 3 sweeps as often holding I was being set or cell was not stabelised
-        if index < 2:
+        
+        if index < 2: #skip first 3 sweeps as often holding I was being set or cell was not stabelised
             input_R_ohms_V_array.append(np.nan) #preserve sweeps for APP_splitter
             # print(f"Appended NaN for index {index}.")
             continue

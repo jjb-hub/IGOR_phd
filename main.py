@@ -25,7 +25,7 @@ from module.getters import (
     getRawDf, 
     getExpandedSubsetDf, 
     getExpandedDf, 
-    getCellDf, 
+    getSingleCellDf, 
     buildExpandedDF, 
     getFPAggStats,
     getAPPAggStats

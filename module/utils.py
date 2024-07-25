@@ -7,14 +7,21 @@ import re
 import numpy as np
 import matplotlib.pyplot as plt
 
-#takes filename reads excel as pandas.dataframe
-def getRawDF(filename):
-    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int}, engine='openpyxl')
-    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
-    return (df)
 
 
 ######### IGOR ##########
+
+def load_file(folder_file):
+    path_V, path_I = make_path(folder_file)
+    V_list, V_array = igor_exporter(path_V)
+    I_list, I_array = None, None
+    try:
+        I_list, I_array = igor_exporter(path_I)
+    except FileNotFoundError:
+        I_array = None
+        print(f'I file not found, path: {path_I}')
+    return V_array , I_array
+        
 
 def make_path(folder_file): 
     '''
@@ -88,15 +95,7 @@ def valdidateIdentifier(identifier):
         print("Invalid characters in identifier, replacing with '_' ")
     return sanitized_identifier
 
-#Check filesystem is set up for write operations #TODO put in main and save from constants if youwant in dict no inconstants 
-# def saveColors(filename, color_dict):
-#     subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
-#     checkFileSystem(subcache_dir)
-#     saveJSON(f"{subcache_dir}/color_dict.json", color_dict)
-#     print(f"COLORS {color_dict} SAVED TO {subcache_dir} SUBCACHE")
 
-# def getColors(filename):
-#     return getJSON(f"{CACHE_DIR}/{filename.split('.')[0]}/color_dict.json")
 
 def saveDataTracking(filename, insufficient_data_tracking):
     subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"

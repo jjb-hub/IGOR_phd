@@ -54,6 +54,9 @@ def getRawDf(filename):
 def getExpandedDf(filename):
     return getOrBuildDf(filename, "expanded_df", buildExpandedDF)
 
+def getCellDf (filename):
+    return getOrBuildDf(filename, 'cell_df', buildCellDf)
+
 def getExpandedSubsetDf(filename, cell_type, from_scratch=None):
     return getorbuildSubselectExpandedDF(filename, f"{cell_type}_expanded_df", buildExpandedDF, cell_type, from_scratch)
 
@@ -67,7 +70,7 @@ def getFPAPPAggStats(filename):
     return getOrBuildDf(filename, "FP_APP_agg_stats", buildFPAPPStatsDf)
 
 
-def getCellDf(filename_or_df, cell_id, data_type = None):
+def getSingleCellDf(filename_or_df, cell_id, data_type = None):
     df, filename=getExpandedDfIfFilename(filename_or_df)
     cell_df = df[df['cell_id']==cell_id]
     if data_type is not None:
@@ -215,6 +218,39 @@ def updateAPPAggStats(filename, rows):
     
 ############ BUILDERS ##########
 
+def buildCellDf(filename):
+    ''' 
+    builds cell_df with each row a cell_id and valid data is marked True in the columns 'FP' 'APP' or 'FP_APP'
+    '''
+    df = getRawDf(filename)
+    df['treatment'] = df.apply(lambda row: row['drug'] if row['application_order'] == 1 else np.nan, axis=1) #make treatment column
+
+    def check_unique(series, cell_id):
+        unique_values = series.dropna().unique()
+        if len(unique_values) == 1:
+            return unique_values[0]
+        else:
+            raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
+
+    def apply_check_unique(group):
+        cell_id = group.name  
+        return group.agg({
+            'treatment': lambda series: check_unique(series, cell_id),
+            'cell_type': lambda series: check_unique(series, cell_id), 
+            'cell_subtype':lambda series: check_unique(series, cell_id)
+        })
+
+    # Group by 'cell_id' and apply the function
+    cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
+
+    cell_df['FP'] = np.nan
+    cell_df['APP'] = np.nan
+    cell_df['FP_APP'] = np.nan
+    cell_df['access_change'] = np.nan
+
+
+    return cell_df
+
 
 #row handeler for expandDF
 def buildExpandedDF(filename_or_df): 
@@ -225,10 +261,13 @@ def buildExpandedDF(filename_or_df):
     if not isinstance(filename_or_df, pd.DataFrame):
         print('fetchig raw df')
         df = getRawDf(filename_or_df)
+        cell_df = getCellDf(filename_or_df)
     else:
         df=filename_or_df
-        print ('expanding on provided df')
+        print ('expanding on provided df') #TODO remove find way to add data without rerun
 
+
+    
     # df=propagate_I_set(df)
     og_columns = df.columns.copy() #origional column order
 
@@ -372,7 +411,8 @@ def _handleFile(row):
                 row['PRE_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index < row['drug_in']]
                 row['APP_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if row['drug_out'] >= sweep_index >= row['drug_in']]
                 row['WASH_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index > row['drug_out']]
-                
+            
+            # if valid parameters add True to APP for that cell_if in cell_df
             pass
         
         elif row.data_type == "pAD_hunter":
