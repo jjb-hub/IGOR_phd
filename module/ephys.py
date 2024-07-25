@@ -9,14 +9,14 @@ from module.getters import *
 tqdm.pandas()
 
 @dataclass
-class EphysPipeline:
+class ephys:
     ' A class for accessing and generating data form the input feature_df. '
     filename: str
     raw_df: Optional[pd.DataFrame] = None
 
     def __post_init__(self):
         self.raw_df = self._get_raw_df()
-        self.cell_df = self._get_cell_df()
+        # self.cell_df = self._get_cell_df()
         self.FP_df = getCache(self.filename, 'FP_df') if isCached(self.filename, 'FP_df') else None
         self.APP_df = getCache(self.filename, 'APP_df') if isCached(self.filename, 'APP_df') else None
 
@@ -30,24 +30,72 @@ class EphysPipeline:
     def generate_FP_df(self) -> pd.DataFrame:
         ''' Regenerates FP_df from scratch, 
             Subselects the FP data and extracts data from files, expanding FP_df columns.'''
-        FP_df = self.raw_df[self.raw_df['data_type'] == 'FP'][['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']]
+        
+        initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
+        FP_df = self.raw_df[self.raw_df['data_type'] == 'FP'][initial_columns]
+
         FP_df = FP_df.progress_apply(lambda row: self._handle_extraction(row, self._process_FP_data), axis=1)
+        additional_columns = [col for col in FP_df.columns if col not in initial_columns]
+        FP_df = FP_df[initial_columns + additional_columns]
+
         cache(self.filename, 'FP_df', FP_df)
         return FP_df
     
     def generate_APP_df(self) -> pd.DataFrame:
         """Regenerates APP_df from scratch."""
-        APP_df = self.raw_df [self.raw_df ['data_type'] == 'APP'][['folder_file', 'cell_id', 'data_type', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']]
+        initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        APP_df = self.raw_df [self.raw_df ['data_type'] == 'APP'][initial_columns]
+
         APP_df = APP_df.progress_apply(lambda row: self._handle_extraction(row, self._process_APP_data), axis=1)
+        additional_columns = [col for col in APP_df.columns if col not in initial_columns]
+        APP_df = APP_df[initial_columns + additional_columns]
+
         cache(self.filename, 'APP_df', APP_df)
         return APP_df
 
     def generate_pAD_hunter_df(self) -> pd.DataFrame:
         """Regenerates pAD_hunter_df from scratch."""
-        pAD_hunter_df = self.raw_df [self.raw_df ['data_type'] == 'pAD_hunter'][['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']]
+        initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        pAD_hunter_df = self.raw_df [self.raw_df ['data_type'] == 'pAD_hunter'][initial_columns]
+
         pAD_hunter_df = pAD_hunter_df.apply(lambda row: self._handle_extraction(row, self._process_pAD_hunter_data), axis=1)
+        additional_columns = [col for col in pAD_hunter_df.columns if col not in initial_columns]
+        pAD_hunter_df = pAD_hunter_df[initial_columns + additional_columns]
+
         cache(self.filename, 'pAD_hunter_df', pAD_hunter_df)
         return pAD_hunter_df
+    
+    def generate_cell_df(self) -> pd.DataFrame:
+        """
+        Builds cell_df with each row a cell_id and valid data is marked True in the columns 'data_type'.
+        """
+        df = self.raw_df.copy()
+        df['treatment'] = df.apply(lambda row: row['drug'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
+
+        def check_unique(series, cell_id):
+            unique_values = series.dropna().unique()
+            if len (unique_values) == 0:
+                return None
+            if len(unique_values) == 1:
+                return unique_values[0]
+            else:
+                raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
+
+        def apply_check_unique(group):
+            cell_id = group.name
+            return group.agg({
+                'treatment': lambda series: check_unique(series, cell_id),
+                'cell_type': lambda series: check_unique(series, cell_id),
+                'cell_subtype': lambda series: check_unique(series, cell_id)
+            })
+
+        # Group by 'cell_id' and apply the function
+        cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
+        
+        #TO DO  populate cell_df
+
+
+        return cell_df
 
     # data extractors
     def _process_FP_data(self, row: pd.Series) -> pd.Series:
