@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from typing import Optional
 import traceback
 from tqdm import tqdm
+from itertools import combinations
 from module.utils import * 
-from module.getters import * 
+from module.getters import getRawDf, calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, tau_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator
+
 tqdm.pandas()
 
 @dataclass
@@ -15,10 +17,12 @@ class ephys:
     raw_df: Optional[pd.DataFrame] = None
 
     def __post_init__(self):
+        initiateFileSystem()
         self.raw_df = self._get_raw_df()
-        # self.cell_df = self._get_cell_df()
         self.FP_df = getCache(self.filename, 'FP_df') if isCached(self.filename, 'FP_df') else None
         self.APP_df = getCache(self.filename, 'APP_df') if isCached(self.filename, 'APP_df') else None
+        self.cell_df = getCache(self.filename, 'cell_df') if isCached(self.filename, 'cell_df') else None
+        self.pAD_hunter_df = getCache(self.filename, 'pAD_hunter_df') if isCached( self.filename, 'pAD_hunter_df') else self.generate_pAD_hunter_df()
 
     def _get_raw_df(self) -> pd.DataFrame:
         """
@@ -31,7 +35,7 @@ class ephys:
         ''' Regenerates FP_df from scratch, 
             Subselects the FP data and extracts data from files, expanding FP_df columns.'''
         
-        initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
+        initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
         FP_df = self.raw_df[self.raw_df['data_type'] == 'FP'][initial_columns]
 
         FP_df = FP_df.progress_apply(lambda row: self._handle_extraction(row, self._process_FP_data), axis=1)
@@ -43,7 +47,7 @@ class ephys:
     
     def generate_APP_df(self) -> pd.DataFrame:
         """Regenerates APP_df from scratch."""
-        initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
         APP_df = self.raw_df [self.raw_df ['data_type'] == 'APP'][initial_columns]
 
         APP_df = APP_df.progress_apply(lambda row: self._handle_extraction(row, self._process_APP_data), axis=1)
@@ -67,7 +71,7 @@ class ephys:
     
     def generate_cell_df(self) -> pd.DataFrame:
         """
-        Builds cell_df with each row a cell_id and valid data is marked True in the columns 'data_type'.
+        Builds cell_df with each row a cell_id, access_change reported where possible and valid data is marked True in 'data_type' column i.e. "FP".
         """
         df = self.raw_df.copy()
         df['treatment'] = df.apply(lambda row: row['drug'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
@@ -86,15 +90,75 @@ class ephys:
             return group.agg({
                 'treatment': lambda series: check_unique(series, cell_id),
                 'cell_type': lambda series: check_unique(series, cell_id),
-                'cell_subtype': lambda series: check_unique(series, cell_id)
+                'cell_subtype': lambda series: check_unique(series, cell_id), 
+                # 'I_set' : lambda series: check_unique(series, cell_id) 
             })
 
-        # Group by 'cell_id' and apply the function
         cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
         
-        #TO DO  populate cell_df
+        if self.FP_df is None:
+            self.FP_df = self.generate_FP_df()
 
 
+        def calculate_percentage_diff(group):
+            cell_id = group.name
+            cell_fp_df = self.FP_df[self.FP_df['cell_id'] == cell_id]
+            pre_values = cell_fp_df[cell_fp_df['drug'] == 'PRE'][['R_series', 'folder_file']]
+            non_pre_values = cell_fp_df[cell_fp_df['drug'] != 'PRE'][['R_series', 'folder_file']]
+            
+            # Extract R_series and folder_file
+            pre_series = pre_values['R_series'].dropna().values
+            non_pre_series = non_pre_values['R_series'].dropna().values
+            
+            # Check if there are enough values
+            if len(pre_series) < 2 or len(non_pre_series) < 2:
+                return pd.Series({'access_change': None, 'FP_valid': None})
+            
+            # Generate all combinations of two values
+            pre_combinations = list(combinations(pre_series, 2))
+            non_pre_combinations = list(combinations(non_pre_series, 2))
+            
+            min_diff = float('inf')
+            best_pre_pair = None
+            best_non_pre_pair = None
+            
+            # Calculate percentage difference for all combinations
+            for pre_pair in pre_combinations:
+                pre_mean = np.mean(pre_pair)
+                for non_pre_pair in non_pre_combinations:
+                    non_pre_mean = np.mean(non_pre_pair)
+                    if pre_mean == 0:
+                        continue
+                    percentage_change = (non_pre_mean - pre_mean) / pre_mean * 100
+                    
+                    if percentage_change < min_diff:
+                        min_diff = percentage_change
+                        best_pre_pair = pre_pair
+                        best_non_pre_pair = non_pre_pair
+            
+            if best_pre_pair is None or best_non_pre_pair is None:
+                return pd.Series({'access_change': None, 'FP_valid': None})
+            
+            # Get folder files for the selected pairs
+            pre_folder_files = pre_values[pre_values['R_series'].isin(best_pre_pair)]['folder_file'].tolist() 
+            non_pre_folder_files = non_pre_values[non_pre_values['R_series'].isin(best_non_pre_pair)]['folder_file'].tolist()
+            folder_files = pre_folder_files[0:2] + non_pre_folder_files[0:2]
+            
+            return pd.Series({'access_change': min_diff, 'FP_valid': folder_files})
+
+        diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
+        cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
+
+        if self.APP_df is None:
+            self.APP_df = self.generate_APP_df()
+        filtered_app_df = self.APP_df[ (self.APP_df['valid'] == True) &
+                                    (self.APP_df['application_order'] == 1) &
+                                    (self.APP_df['replication_no'] == 1)]
+        valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
+        cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
+
+
+        cache(self.filename, 'cell_df', cell_df) # CREATE HIGHER FUNCTION TO FETCH 
         return cell_df
 
     # data extractors
@@ -138,6 +202,15 @@ class ephys:
         Processing logic specific to APP data type."""
         V_array, I_array = load_file(row['folder_file'])
 
+        def check_variability(values, threshold=0.30):
+            """Check if variability of values exceeds the given threshold."""
+            values = np.array(values)[~np.isnan(values)]
+            if len(values) <= 1:
+                return True
+            min_val = np.min(values)
+            max_val = np.max(values)
+            return (max_val - min_val) / min_val <= threshold
+
         if I_array is not None and (I_array[:, 0] != 0).any():
             input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
             row['inputR_PRE'] = input_R_PRE
@@ -170,11 +243,29 @@ class ephys:
             row['WASH_pAD_locs'] = [peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and pAD_condition(peak_voltage, threshold)]
         else:
             row['pAD_locs'] = []
+
         row['AP_locs'] = peak_locs_corr_all
         if len(peak_locs_corr_all) > 0:
             row['PRE_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index < row['drug_in']]
             row['APP_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if row['drug_out'] >= sweep_index >= row['drug_in']]
             row['WASH_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index > row['drug_out']]
+        
+        #APP validators
+        if len(peak_voltages_all)>0:
+            if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 20: #HARDCODE minimum 20 mV AP height 
+                # print('Offest issues likely raw data not validated.')
+                row['valid']= False
+            else:
+                row['valid'] = (
+                    check_variability(peak_voltages_all) and
+                    check_variability([row['RMP_PRE']]) and
+                    check_variability([row['inputR_PRE']])
+                    )
+        else:
+            row['valid'] = (
+                check_variability([row['RMP_PRE']]) and
+                check_variability([row['inputR_PRE']])
+                )
         return row
 
     def _process_pAD_hunter_data(self, row: pd.Series) -> pd.Series:

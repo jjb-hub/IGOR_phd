@@ -306,7 +306,7 @@ def _handleFile(row):
     except FileNotFoundError:
         I_list, I_df = None, None
         I_array      = None
-        print('I file not found, path:', path_I)
+        print('is this still called? I file not found, path:', path_I)
 
     try:
         # FP data handeling

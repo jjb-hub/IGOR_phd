@@ -407,7 +407,7 @@ def tau_analyser(folder_file, V_array, I_array, step_current_values, ap_counts, 
         start_index = changes[0] + 1  # The index after the first change
         end_index = changes[1]  # The index before the second change
     else:
-        print(f'Unexpected number of steps in the current trace: {len(changes)}.')
+        # print(f'Unexpected number of steps in the current trace: {len(changes)}.')
         return [np.nan, np.nan, np.nan, RMP]
 
     # Use only the portion of the voltage trace where the current is applied
@@ -624,7 +624,7 @@ def sag_current_analyser(folder_file, voltage_array, current_array, step_current
 
             
         
-    print("No sweep found with negative current injecttion and without action potentials, unable to calculate sag.")
+    # print("No sweep found with negative current injecttion and without action potentials, unable to calculate sag.")
     return [np.nan, np.nan, np.nan, np.nan]
 # #OLD
 # def sag_current_analyser(voltage_array, current_array, input_step_current_values,input_current_avging_window = 0.5): 
@@ -882,7 +882,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         #SLOPE
         average_slope, max_dvdt, max_dvdt_location = calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, AP_latency, sampling_rate)
         if average_slope <= 0 or max_dvdt <= 0:
-            print("Slope/derivative of AP is negative, setting to nan.")
+            # print("Slope/derivative of AP is negative, setting to nan.")
             # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
             average_slope, max_dvdt, max_dvdt_location  = np.nan , np.nan, np.nan
 
@@ -898,7 +898,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
                 #REDO SLOPE
                 average_slope, max_dvdt, max_dvdt_location = calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, AP_latency, sampling_rate)
                 if average_slope <= 0 or max_dvdt <= 0:
-                    print(f"Slope/derivative of AP is negative with new upshoot, setting to nan (sweep: {sweep_index}).")
+                    # print(f"Action potential average slope or max dv/dt is negative with new upshoot, setting to nan (sweep: {sweep_index}).")
                     # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, average_slope, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
                     average_slope, max_dvdt, max_dvdt_location  = np.nan , np.nan, np.nan
                 # REDO LATENCY
@@ -1115,7 +1115,7 @@ def calculate_ap_slope_and_max_dvdt(v_array, upshoot_index, latency, sampling_ra
         v_array_for_slope = v_array[nearest_points]
         # Correct the time_array to start from the first point's time
         time_array -= time_array[0]
-        print("Insufficient points for full linear regression. Using points surrounding max dv/dt for slope calculation.")
+        # print("Insufficient points for full linear regression. Using points surrounding max dv/dt for slope calculation.")
     else:
         v_array_for_slope = v_array[start_slope_index:end_slope_index]
 
@@ -1443,7 +1443,7 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
         # Check for spikes off the current step
         ap_off_step = [peak for peak in sweep_peak_locs if peak < (first_non_zero_index) or peak > (last_non_zero_index+10)] # 10ms buffer added after step
         if ap_off_step:
-            print(f"APs detected off current step at {np.mean(voltage_sweep[V_rest_indices]):.2f}mV in sweep {sweep+1}. ")
+            # print(f"APs detected off current step at {np.mean(voltage_sweep[V_rest_indices]):.2f}mV in sweep {sweep+1}. ") #TODO 
             # plot_APs_off_step(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all, sweep_to_plot=sweep)
             off_step_peak_locs.extend(ap_off_step)
             
@@ -1478,7 +1478,7 @@ def extract_FI_slope_and_rheobased_threshold(folder_file, x, y):
     for points_to_use in [4, 3, 2]:  # Try with 4 points first, then with 3, 2 if needed #started with 3 before 8/4/24
         # Check if there are enough points for a reliable linear fit
         if len(list_of_non_zero) < points_to_use:
-            print("Not enough data points for a reliable fit.")
+            # print("Not enough data points for a reliable fit.")
             return np.nan, np.nan
 
         # Preparing data for linear fit first 3 I steps with APs
@@ -1492,7 +1492,7 @@ def extract_FI_slope_and_rheobased_threshold(folder_file, x, y):
 
         y_variance = np.var(y_fit)
         if y_variance == 0 or np.isnan(y_variance):
-            print(f"Zero or NaN variance in {folder_file}. Skipping fit.")  #usualy unhealthy cells
+            # print(f"Zero or NaN variance in {folder_file}. Skipping fit.")  #usualy unhealthy cells
             return np.nan, np.nan  
          
         # Performing linear fit
@@ -1700,12 +1700,12 @@ def mean_RMP_APP_calculator(V_array, drug_in, drug_out, I_array=None):
     V_array_cleaned  = spike_remover(V_array) #NOT WORKING JJB210427/t8
 
     if I_array is None or (I_array == 0).all() :
-        print(" No I injected or no I data, taking RMP as all.")
+        # print(" No I injected or no I data, taking RMP as all.")
         # list of means of every column
         mean_RMP_sweep_list  = list(np.mean(V_array_cleaned  , axis = 0))
         
     else: # I step in I_array
-        print('I step detected, averaging V when no I injected for each sweep.')
+        # print('I step detected, averaging V when no I injected for each sweep.')
         I_array_adj, V_array_adj = I_array_to_match_V (V_array, I_array)
         zero_current_mask = (I_array_adj == 0) #boolian mask where I == 0
         V_masked = np.where(zero_current_mask, V_array_adj, np.nan) # V where I -- 0
