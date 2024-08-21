@@ -87,12 +87,17 @@ class ephys:
 
         def apply_check_unique(group):
             cell_id = group.name
-            return group.agg({
+            I_set_values = group.loc[(group['data_type'] == 'APP') & (group['replication_no'] == 1) & (group['application_order'] == 1), 'I_set' ].unique()
+            I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
+        
+            aggregated_data = group.agg({
                 'treatment': lambda series: check_unique(series, cell_id),
                 'cell_type': lambda series: check_unique(series, cell_id),
-                'cell_subtype': lambda series: check_unique(series, cell_id), 
-                # 'I_set' : lambda series: check_unique(series, cell_id) 
+                'cell_subtype': lambda series: check_unique(series, cell_id)
             })
+            return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
+
+
 
         cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
         
