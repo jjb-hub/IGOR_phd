@@ -61,6 +61,7 @@ class ephys:
         APP_df = APP_df.progress_apply(lambda row: self._handle_extraction(row, self._process_APP_data), axis=1)
         additional_columns = [col for col in APP_df.columns if col not in initial_columns]
         APP_df = APP_df[initial_columns + additional_columns]
+        self.cell_df = self.generate_cell_df() #regenerate as its related
 
         cache(self.filename, 'APP_df', APP_df)
         return APP_df
@@ -109,6 +110,7 @@ class ephys:
 
         def calculate_percentage_diff(group):
             cell_id = group.name
+            #FIRING PROPERTY 
             cell_fp_df = self.FP_df[self.FP_df['cell_id'] == cell_id]
             pre_values = cell_fp_df[cell_fp_df['drug'] == 'PRE'][['R_series', 'folder_file']]
             non_pre_values = cell_fp_df[cell_fp_df['drug'] != 'PRE'][['R_series', 'folder_file']]
@@ -157,8 +159,7 @@ class ephys:
         diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
         cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
 
-        if self.APP_df is None:
-            self.APP_df = self.generate_APP_df()
+        # APPLICATION FILES
         filtered_app_df = self.APP_df[ (self.APP_df['valid'] == True) &
                                     (self.APP_df['application_order'] == 1) &
                                     (self.APP_df['replication_no'] == 1)]
@@ -209,14 +210,14 @@ class ephys:
         Processing logic specific to APP data type."""
         V_array , I_array, V_list = load_file(row['folder_file'])
 
-        def check_variability(values, threshold=0.30):
+        def check_variability(values, Vairability_threshold=0.50): #HARD CODE vaitability threshold 50%
             """Check if variability of values exceeds the given threshold."""
             values = np.array(values)[~np.isnan(values)]
             if len(values) <= 1:
                 return True
             min_val = np.min(values)
             max_val = np.max(values)
-            return (max_val - min_val) / min_val <= threshold
+            return abs((max_val - min_val) / min_val) <= Vairability_threshold
 
         if I_array is not None and (I_array[:, 0] != 0).any():
             input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
@@ -267,7 +268,7 @@ class ephys:
 
         #APP validators
         if len(peak_voltages_all)>0:
-            if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 20: #HARDCODE minimum 20 mV AP height 
+            if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 10: #HARDCODE minimum 10 mV AP height 
                 # print('Offest issues likely raw data not validated.')
                 row['valid']= False
             else:

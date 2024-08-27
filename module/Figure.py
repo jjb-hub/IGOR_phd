@@ -15,6 +15,7 @@ from module.action_potential_functions import ap_characteristics_extractor_main,
 class DataSelection:
     ''' 
     Attributes:
+        - filename (str): defining the project and feature mapping ie RAW_df in Ephys
         - data_type (str): The data type (e.g., 'APP' or 'FP').
         - cell_type (str | list): The type of cell to filter on (optional) / can inout list 
         - treatment (str | list): The treatment to filter on, i.e. drug applied (optional).
@@ -39,12 +40,11 @@ class DataSelection:
         self.validate_inputs()
         self.valid_files, self.valid_cell_ids = self.get_valid_folder_files()
         self.agg_df = self.get_filtered_data()
-        self.treatment_count_df = getCache(self.filename, 'cell_df') if isCached(self.filename, 'cell_df') else self.generate_treatment_count_df()
+        self.treatment_count_df = self.generate_treatment_count_df()
 
     def validate_inputs(self):
         if self.data_type not in ['FP', 'APP']:
             raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of ['FP', 'APP'].")
-        
         valid_df = self.cell_df[self.cell_df[f'{self.data_type}_valid'].notna()]
         def validate_attribute(attribute, column_name):
             if attribute is not None:
@@ -55,15 +55,14 @@ class DataSelection:
                         raise ValueError(f"Invalid {column_name}(s): {invalid_values}. Must be within {list(valid_values)}.")
                 elif attribute not in valid_values:
                     raise ValueError(f"Invalid {column_name}: {attribute}. Must be within {list(valid_values)}.")
-    
         validate_attribute(self.cell_type, 'cell_type')
         validate_attribute(self.treatment, 'treatment')
         validate_attribute(self.cell_subtype, 'cell_subtype')
    
     def get_valid_folder_files(self):
         """
-        Filters the cell_df based on the input parameters and threshold_access_change.
-        Returns a list of valid folder_files.
+        Filters the cell_df based on the input parameters including threshold_access_change.
+        Returns a list of valid folder_files and cell_ids.
         """
         valid_column = f'{self.data_type}_valid'
         if valid_column not in self.cell_df.columns:
@@ -88,9 +87,9 @@ class DataSelection:
 
     def get_filtered_data(self):
         """
-        Fetches the data_type _df and filters it and returns reordered aggergate df for stats and plotting.
+        Fetches the data_type _df and filters it and returns restructured aggergate df for stats and plotting (one row for each cell_id and time).
         """
-        valid_files = self.get_valid_folder_files()
+        valid_files, valid_cell_ids = self.get_valid_folder_files()
         
         if self.data_type == 'APP':
             filtered_df = self.APP_df[self.APP_df['folder_file'].isin(valid_files)]
@@ -153,7 +152,9 @@ class DataSelection:
             raise ValueError(f"Unsupported data_type: {self.data_type}")
 
     def add_cell_mapping(self, df):
-        '''Adds 'treatment', 'cell_type', 'cell_subtype', 'I_set' columns based off cell_id from cell_df'''
+        '''
+        Adds cell_ feature columns based off cell_id in cell_df.
+        '''
         if 'cell_id' not in df.columns or 'cell_id' not in self.cell_df.columns:
             raise ValueError("Both DataFrames must have 'cell_id' column.")
         
@@ -166,29 +167,45 @@ class DataSelection:
     
 
     def generate_treatment_count_df(self) -> pd.DataFrame:
-        access_filtered_df = self.cell_df[self.cell_df['access_change'].abs() <= self.threshold_access_change]
-        treatment_count_df = access_filtered_df.groupby(['treatment', 'cell_type']).apply(
-            lambda df: pd.Series({
-                'FP_valid': df.loc[df['FP_valid'].apply(lambda x: isinstance(x, list) and len(x) > 0), 'cell_id'].nunique(),
-                'APP_valid': df.loc[df['APP_valid'].apply(lambda x: isinstance(x, str) and len(x) > 0), 'cell_id'].nunique(),
-                'both_valid': df.loc[
-                    (df['FP_valid'].apply(lambda x: isinstance(x, list) and len(x) > 0)) &
-                    (df['APP_valid'].apply(lambda x: isinstance(x, str) and len(x) > 0)),
-                    'cell_id'
-                ].nunique(),
-                # List unique cell_ids 
-                'cell_id_FP': df.loc[df['FP_valid'].apply(lambda x: isinstance(x, list) and len(x) > 0), 'cell_id'].unique().tolist(),
-                'cell_id_APP': df.loc[df['APP_valid'].apply(lambda x: isinstance(x, str) and len(x) > 0), 'cell_id'].unique().tolist()
+        '''
+        Calculates the n for each treatment x cell_type given the threshold_access_change, saved as excel in cache.
+        '''
+
+        def is_valid_app(app_valid):
+            return isinstance(app_valid, str) and len(app_valid) > 0
+        def is_valid_fp(fp_valid):
+            return isinstance(fp_valid, list) and all(isinstance(x, str) for x in fp_valid)
+        def process_group(group_df):
+            valid_fp = group_df[group_df['FP_valid'].apply(is_valid_fp)]
+            valid_app = group_df[group_df['APP_valid'].apply(is_valid_app)]
+
+            fp_count = valid_fp['cell_id'].nunique()
+            app_count = valid_app['cell_id'].nunique()
+            both_valid_count = group_df[
+                group_df['FP_valid'].apply(is_valid_fp) & group_df['APP_valid'].apply(is_valid_app)
+            ]['cell_id'].nunique()
+
+            cell_id_fp = valid_fp['cell_id'].unique().tolist()
+            cell_id_app = valid_app['cell_id'].unique().tolist()
+
+            return pd.Series({
+                'FP_valid_count': fp_count,
+                'APP_valid_count': app_count,
+                'both_valid_count': both_valid_count,
+                'cell_id_FP': cell_id_fp,
+                'cell_id_APP': cell_id_app
             })
-        ).reset_index()
-        cache(self.filename, 'treatment_count_df', treatment_count_df)
-        cache_excel(self.filename, 'treatment_count_df', treatment_count_df)
+        
+        access_filtered_df = self.cell_df[self.cell_df['access_change'].abs() <= self.threshold_access_change]
+        treatment_count_df = access_filtered_df.groupby(['treatment', 'cell_type']).apply(process_group).reset_index()
+        cache(self.filename, f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
+        cache_excel(self.filename, f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
         return treatment_count_df
 
 @dataclass
 class Figure(DataSelection):
     '''
-    Base class for all figures. Handles loading, saving, and plotting of figures.
+    Base class for all figures. Handles loading, saving, and plotting of figures. #TODO loading form cache / genergic function to be redefined in child classes ? #REMI
 
         Attributes:
         - data_type (str): The data type (e.g., 'APP' or 'FP').
@@ -197,26 +214,14 @@ class Figure(DataSelection):
         - cell_subtype (str | list): The subtype of cell to filter on (optional).
         - I_set (str | list): The I_set to filter on (optional).
         - threshold_access_change (float): The threshold for access change filtering (optional, default 30).
-        - extension (str): The file extension for the figure. Defaults to "png".
-        - dependant_var (str): dependant vairable according to data type 
+        - extension (str): The file extension for the figure. Defaults to "png". #TODO
     '''
   
     # extension: ClassVar[str] = "png" # if I make a good casheable class
 
     def __post_init__(self):
         DataSelection.__post_init__(self)
-
-
-    
-    def generate_fig_filename(self) -> str: #redefined in child classes
-        filename_parts = [f"{self.cell_type}"]
-        if self.treatment:
-            filename_parts.append(f"_{self.treatment}")
-        if self.cell_subtype:
-            filename_parts.append(f"_{self.cell_subtype}")
-        if self.I_set:
-            filename_parts.append(f"_{self.I_set}")
-        return "_".join(filename_parts)
+        
 
     def save_figure(self, fig): #ADD load
         """
@@ -349,7 +354,6 @@ class Histogram(Figure):
 @dataclass
 class Application(Figure):
     cell_id: str|list = field(kw_only = True, default = None) # optional pram for plotting specific cell/s application
-    
 
     def __post_init__(self):
         Figure.__post_init__(self)
@@ -361,13 +365,12 @@ class Application(Figure):
     def build_AP_DF(self, folder_file, V_array, I_array) -> pd.DataFrame: #maybe belongs elsewhere 
         '''
         Builds df for single fplder_file  each row an action potential (AP) with columns for AP characteristics.
-        
+        Attributes:
             folder_file (str)  : name of unique file identifier
             V_array (np.ndarray) : 2D voltage array for folder_file
             I_array (np.ndarray) : 2D current array for folder_file
 
         '''
-
         V_array_adj, I_array_adj = normalise_array_length(V_array, I_array, columns_match=True)
         
         # Extract AP characteristics
@@ -468,5 +471,6 @@ class Application(Figure):
                 ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
                 ax1.set_title(cell_id + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
                 plt.tight_layout()
+                plt.show()
                 self.save_figure(fig)
                 
