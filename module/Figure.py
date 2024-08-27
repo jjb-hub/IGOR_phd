@@ -8,7 +8,7 @@ import seaborn as sns
 from typing import Optional
 from module.utils import subselectDf, saveFigure, getCache, isCached, cache, cache_excel, load_file #should become Cashable class
 from module.constants import CACHE_DIR, color_dict
-from module.Ephys import ephys
+from module.Ephys import Ephys
 from module.action_potential_functions import ap_characteristics_extractor_main, normalise_array_length #should become ActionPotential class
 
 @dataclass
@@ -34,9 +34,9 @@ class DataSelection:
 
 
     def __post_init__(self):
-        self.FP_df = getCache(self.filename, 'FP_df') if isCached(self.filename, 'FP_df') else ephys.generate_FP_df
-        self.APP_df = getCache(self.filename, 'APP_df') if isCached(self.filename, 'APP_df') else ephys.generate_APP_df
-        self.cell_df = getCache(self.filename, 'cell_df') if isCached(self.filename, 'cell_df') else ephys.generate_cell_df
+        self.FP_df = getCache(self.filename, 'FP_df') if isCached(self.filename, 'FP_df') else Ephys.generate_FP_df
+        self.APP_df = getCache(self.filename, 'APP_df') if isCached(self.filename, 'APP_df') else Ephys.generate_APP_df
+        self.cell_df = getCache(self.filename, 'cell_df') if isCached(self.filename, 'cell_df') else Ephys.generate_cell_df
         self.validate_inputs()
         self.valid_files, self.valid_cell_ids = self.get_valid_folder_files()
         self.agg_df = self.get_filtered_data()

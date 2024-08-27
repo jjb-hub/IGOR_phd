@@ -11,7 +11,7 @@ from module.getters import getRawDf, calculate_max_firing, ap_characteristics_ex
 tqdm.pandas()
 
 @dataclass
-class ephys:
+class Ephys:
     ''' 
     Organising relational dfs and extracting data form the input feature_df. 
     Attributes:
