@@ -20,7 +20,7 @@ def load_file(folder_file):
     except FileNotFoundError:
         I_array = None
         # print(f'I file not found, path: {path_I}')
-    return V_array , I_array
+    return V_array , I_array, V_list
         
 
 def make_path(folder_file): 
@@ -154,6 +154,14 @@ def cache(filename, identifier, to_cache):
     with open(f'{cache_subdir}/{identifier}.pkl','wb') as file:
         pickle.dump(to_cache, file)
     print(f'CREATED {cache_subdir}/{identifier}.pkl CACHE')
+
+def cache_excel(filename, identifier, to_cache):
+    filename = filename.split(".")[0]
+    cache_subdir = f'{CACHE_DIR}/{filename}'
+    checkFileSystem(cache_subdir)
+    excel_path = f'{cache_subdir}/{identifier}.xlsx'
+    to_cache.to_excel(excel_path, index=False, engine='openpyxl')
+    print(f'CREATED {excel_path} EXCEL CACHE')
 
 #This function gets the dataframes that are cached
 def getCache(filename, identifier):

@@ -907,7 +907,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         # PEAK VOLTAGE
         AP_peak_voltage   = V_array[peak_location]        
         if AP_peak_voltage > 120 :
-            print(f"Artifact detected, index {peak_location}, {AP_peak_voltage:.2f} > 120mV, analising next peak.")
+            # print(f"Artifact detected, index {peak_location}, {AP_peak_voltage:.2f} > 120mV, analising next peak.")
             continue
 
         # VOLTAGE THRESHOLD
@@ -916,7 +916,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         # AP HEIGHT
         AP_height = V_array[peak_location]  - voltage_threshold
         if AP_height > 150 or AP_height < 10: #HARD CODE #TODO
-            print(f"Artifact detected, index {peak_location}, AP height of {AP_height:.2f} mV, analising next peak.")
+            # print(f"Artifact detected, index {peak_location}, AP height of {AP_height:.2f} mV, analising next peak.")
             continue
 
 

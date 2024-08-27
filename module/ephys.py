@@ -44,7 +44,8 @@ class ephys:
 
         cache(self.filename, 'FP_df', FP_df)
         return FP_df
-    
+
+
     def generate_APP_df(self) -> pd.DataFrame:
         """Regenerates APP_df from scratch."""
         initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
@@ -56,6 +57,8 @@ class ephys:
 
         cache(self.filename, 'APP_df', APP_df)
         return APP_df
+    
+
 
     def generate_pAD_hunter_df(self) -> pd.DataFrame:
         """Regenerates pAD_hunter_df from scratch."""
@@ -169,7 +172,7 @@ class ephys:
     # data extractors
     def _process_FP_data(self, row: pd.Series) -> pd.Series:
         """Processing logic specific to FP data type. Could also handle FP_APP data if sufficient to analise."""
-        V_array, I_array = load_file(row['folder_file'])
+        V_array , I_array, V_list = load_file(row['folder_file'])
 
         row["max_firing"] = calculate_max_firing(V_array)
         (peak_voltages_all, peak_latencies_all, v_thresholds_all,
@@ -205,7 +208,7 @@ class ephys:
     def _process_APP_data(self, row: pd.Series) -> pd.Series:
         """Generate APP_df from scratch, 
         Processing logic specific to APP data type."""
-        V_array, I_array = load_file(row['folder_file'])
+        V_array , I_array, V_list = load_file(row['folder_file'])
 
         def check_variability(values, threshold=0.30):
             """Check if variability of values exceeds the given threshold."""
@@ -243,18 +246,26 @@ class ephys:
         if any(pAD_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['pAD'] = True
             row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-            row['PRE_pAD_locs'] = [peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and pAD_condition(peak_voltage, threshold)]
-            row['APP_pAD_locs'] = [peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and pAD_condition(peak_voltage, threshold)]
-            row['WASH_pAD_locs'] = [peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and pAD_condition(peak_voltage, threshold)]
+            row['pADcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and pAD_condition(peak_voltage, threshold)])
+            row['pADcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and pAD_condition(peak_voltage, threshold)])
+            row['pADcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and pAD_condition(peak_voltage, threshold)])
         else:
             row['pAD_locs'] = []
+            row['pADcount_PRE'] = 0
+            row['pADcount_APP'] = 0
+            row['pADcount_WASH'] = 0
 
         row['AP_locs'] = peak_locs_corr_all
         if len(peak_locs_corr_all) > 0:
-            row['PRE_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index < row['drug_in']]
-            row['APP_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if row['drug_out'] >= sweep_index >= row['drug_in']]
-            row['WASH_AP_locs'] = [peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index > row['drug_out']]
-        
+            row['APcount_PRE'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index < row['drug_in']])
+            row['APcount_APP'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if row['drug_out'] >= sweep_index >= row['drug_in']])
+            row['APcount_WASH'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index > row['drug_out']])
+        else:
+            row['AP_locs'] = []
+            row['APcount_PRE'] = 0
+            row['APcount_APP'] = 0
+            row['APcount_WASH'] = 0
+
         #APP validators
         if len(peak_voltages_all)>0:
             if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 20: #HARDCODE minimum 20 mV AP height 
@@ -274,7 +285,7 @@ class ephys:
         return row
 
     def _process_pAD_hunter_data(self, row: pd.Series) -> pd.Series:
-        V_array, I_array = load_file(row['folder_file'])
+        V_array , I_array, V_list = load_file(row['folder_file'])
 
         (peak_voltages_all, peak_latencies_all, v_thresholds_all,
         peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
