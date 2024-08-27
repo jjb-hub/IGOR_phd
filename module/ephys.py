@@ -12,16 +12,23 @@ tqdm.pandas()
 
 @dataclass
 class ephys:
-    ' A class for accessing and generating data form the input feature_df. '
+    ''' 
+    Organising relational dfs and extracting data form the input feature_df. 
+    Attributes:
+        raw_df: excel input mapping folder_files to features
+        FP_df: extraction of firing property data (FP)
+        APP_df: extraction of applications data (APP)
+        cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
+        pAD_hunter_df: last unofficial data_type needs developing* #TODO
+          '''
     filename: str
-    raw_df: Optional[pd.DataFrame] = None
 
     def __post_init__(self):
         initiateFileSystem()
         self.raw_df = self._get_raw_df()
-        self.FP_df = getCache(self.filename, 'FP_df') if isCached(self.filename, 'FP_df') else None
-        self.APP_df = getCache(self.filename, 'APP_df') if isCached(self.filename, 'APP_df') else None
-        self.cell_df = getCache(self.filename, 'cell_df') if isCached(self.filename, 'cell_df') else None
+        self.FP_df = getCache(self.filename, 'FP_df') if isCached(self.filename, 'FP_df') else self.generate_FP_df()
+        self.APP_df = getCache(self.filename, 'APP_df') if isCached(self.filename, 'APP_df') else self.generate_APP_df()
+        self.cell_df = getCache(self.filename, 'cell_df') if isCached(self.filename, 'cell_df') else self.generate_cell_df()
         self.pAD_hunter_df = getCache(self.filename, 'pAD_hunter_df') if isCached( self.filename, 'pAD_hunter_df') else self.generate_pAD_hunter_df()
 
     def _get_raw_df(self) -> pd.DataFrame:
@@ -100,14 +107,6 @@ class ephys:
             })
             return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
 
-
-
-        cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
-        
-        if self.FP_df is None:
-            self.FP_df = self.generate_FP_df()
-
-
         def calculate_percentage_diff(group):
             cell_id = group.name
             cell_fp_df = self.FP_df[self.FP_df['cell_id'] == cell_id]
@@ -153,7 +152,8 @@ class ephys:
             folder_files = pre_folder_files[0:2] + non_pre_folder_files[0:2]
             
             return pd.Series({'access_change': min_diff, 'FP_valid': folder_files})
-
+        
+        cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
         diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
         cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
 
@@ -164,7 +164,6 @@ class ephys:
                                     (self.APP_df['replication_no'] == 1)]
         valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
         cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
-
 
         cache(self.filename, 'cell_df', cell_df) # CREATE HIGHER FUNCTION TO FETCH 
         return cell_df
