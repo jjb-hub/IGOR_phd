@@ -1,21 +1,27 @@
 from module.constants import INPUT_DIR, CACHE_DIR, OUTPUT_DIR
 import os, shutil, itertools, json, time, functools, pickle
 import pandas as pd
-import igor.packed
-import igor.binarywave
+import igor2 as igor
 import os
+import re
+import numpy as np
 import matplotlib.pyplot as plt
 
-######### IMPORT RAW DATA ##########
-
-#takes filename reads excel as pandas.dataframe
-def getRawDF(filename):
-    df = pd.read_excel (f'{INPUT_DIR}/{filename}', converters={'drug_in':int, 'drug_out':int})
-    df['cell_subtype'].fillna('None', inplace=True) #for consistency in lack of subtype specification
-    return (df)
 
 
 ######### IGOR ##########
+
+def load_file(folder_file):
+    path_V, path_I = make_path(folder_file)
+    V_list, V_array = igor_exporter(path_V)
+    I_list, I_array = None, None
+    try:
+        I_list, I_array = igor_exporter(path_I)
+    except FileNotFoundError:
+        I_array = None
+        # print(f'I file not found, path: {path_I}')
+    return V_array , I_array, V_list
+        
 
 def make_path(folder_file): 
     '''
@@ -31,7 +37,11 @@ def make_path(folder_file):
     extension_V = "Soma.ibw" #HARD CODE  
     extension_I = "Soma_outwave.ibw" 
     path_V = data_path + folder_file + extension_V
-    path_I = data_path + folder_file + extension_I
+    try:
+        path_I = data_path + folder_file + extension_I
+    except:
+        path_I = np.nan 
+        
     return path_V, path_I
 
 
@@ -42,8 +52,8 @@ def igor_exporter(path):
     path: path to .ibw file
     Returns
     -------
-    'point_list' : a continious points  (combining sweeps into continious wave)  
-    'igor_df' : a df with each column corisponding to one sweep  
+    'point_list' (list): a continious points  (combining sweeps)  
+    'V_array_2d' (array): a 2d array with each column corisponding to one sweep  
      '''
     igor_file = igor.binarywave.load(path)
     wave = igor_file["wave"]["wData"]
@@ -55,29 +65,58 @@ def igor_exporter(path):
         temp_list = igor_df.iloc[:,i].tolist()
         point_list.extend(temp_list)
         counter = counter - 1
-    return (point_list, igor_df)
+    
+    V_array_2d = np.array(igor_df)
+    
+    return (point_list, V_array_2d)
 
-
-#JJB what is this?
-if __name__ == "__main__": #inbuilt test that will not be excuted unless run inside this file
-    print('igor tester being run...')
-    point_list, igor_df = igor_exporter('/Users/jasminebutler/Desktop/IGOR_phd/input/PatchData/JJB221230/t15Soma.ibw')
-
-
+def get_absolute_column_value (df, column_name):
+    '''
+    Checks for absoloute value in column and returns it.
+    '''
+    if df[column_name].isna().all():
+        return np.nan
+    else:
+        unique_values = df[column_name].unique()
+        if len(unique_values) == 1:
+            return unique_values[0]
+        else:
+            print(f"Error: Multiple unique values found in column '{column_name}'.")
+            return None
 
 ######### CACHE SYSTEM and SAVING ##########
+#figures
+IDENTIFIERS={}
 
-#Check filesystem is set up for write operations
-def saveColors(filename, color_dict):
+def valdidateIdentifier(identifier):
+    invalid_chars_pattern = r'[\/:*?"<>|%\&#$@!=+,;\'`~]'
+    sanitized_identifier = re.sub(invalid_chars_pattern, "_", identifier)
+    if re.search(invalid_chars_pattern, identifier):
+        print("Invalid characters in identifier, replacing with '_' ")
+    return sanitized_identifier
+
+
+
+def saveDataTracking(filename, insufficient_data_tracking):
     subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
+    json_path = f"{subcache_dir}/insufficient_data_tracking.json"
+    print(f"Saving data tracking to: {json_path}") 
     checkFileSystem(subcache_dir)
-    saveJSON(f"{subcache_dir}/color_dict.json", color_dict)
-    print(f"COLORS {color_dict} SAVED TO {subcache_dir} SUBCACHE")
+    saveJSON(f"{subcache_dir}/insufficient_data_tracking.json", insufficient_data_tracking)
+    print(f"DATA TRACKING {insufficient_data_tracking} SAVED TO {subcache_dir} SUBCACHE")
 
-def getColors(filename):
-    return getJSON(f"{CACHE_DIR}/{filename.split('.')[0]}/color_dict.json")
-
-
+def getOrBuildDataTracking(filename):
+    subcache_dir = f"{CACHE_DIR}/{filename.split('.')[0]}"
+    json_path = f"{subcache_dir}/insufficient_data_tracking.json"
+    print(f"Attempting to load data tracking from: {json_path}") 
+    # Check cache 
+    if isCached(filename, 'insufficient_data_tracking', extension='json'):
+        return getJSON(f"{subcache_dir}/insufficient_data_tracking.json")
+    # Build 
+    else:
+        print (f"INITIATING DATA TRACKING")
+        insufficient_data_tracking = {}
+        return insufficient_data_tracking
 
 #This function saves dictionnaries, JSON is a dictionnary text format that you use to not have to reintroduce dictionnaries as variables 
 def saveJSON(path, dict_to_save):
@@ -116,6 +155,14 @@ def cache(filename, identifier, to_cache):
         pickle.dump(to_cache, file)
     print(f'CREATED {cache_subdir}/{identifier}.pkl CACHE')
 
+def cache_excel(filename, identifier, to_cache):
+    filename = filename.split(".")[0]
+    cache_subdir = f'{CACHE_DIR}/{filename}'
+    checkFileSystem(cache_subdir)
+    excel_path = f'{cache_subdir}/{identifier}.xlsx'
+    to_cache.to_excel(excel_path, index=False, engine='openpyxl')
+    print(f'CREATED {excel_path} EXCEL CACHE')
+
 #This function gets the dataframes that are cached
 def getCache(filename, identifier):
     filename = filename.split(".")[0]
@@ -124,9 +171,11 @@ def getCache(filename, identifier):
         return pickle.load(file)
     
 #This checks if a particulat dataframe/dataset is cached, return boolean
-def isCached(filename, identifier):
+def isCached(filename, identifier, extension='pkl'):
     filename = filename.split(".")[0]
-    return os.path.isfile(f'{CACHE_DIR}/{filename}/{identifier}.pkl')
+    print(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
+    return os.path.isfile(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
+
 
 
 ######### SAVE ##########
@@ -152,6 +201,9 @@ def saveAP_PhasePlotFig(fig, identifier):
 
 def saveFP_HistogramFig(fig, identifier):
     saveFigure(fig, identifier, 'FP_Histograms')
+
+def saveAPP_HistogramFig(fig, identifier):
+    saveFigure(fig, identifier, 'APP_Histograms')
 
 def saveAP_PCAFig(fig, identifier):
     saveFigure(fig, identifier, 'PCA_APs')
