@@ -239,52 +239,10 @@ def steady_state_value(V_sweep, I_sweep, step_current_val=None, avg_window=0.5):
     # Calculate the steady state value by averaging over the determined window
     asym_current = np.mean(V_sweep[last_current_point - current_avg_duration:last_current_point])
     return asym_current, hyper, first_current_point, last_current_point
-# #OLD 
-# def steady_state_value(V_sweep, I_sweep, step_current_val=None,  avg_window = 0.5):
-#     ''' 
-#     """
-#     Calculates the steady state value of a voltage trace during a current injection step.
-
-#     Input:
-#         V_sweep (array-like): A 1D time series representing a single voltage trace (single sweep).
-#         I_sweep (array-like): The corresponding 1D time series for the current trace (single sweep).
-#         step_current_val (float, optional): The value of the step current injection in pA. If not provided, it is derived from the unique non-zero value in I_sweep.
-#         avg_window (float, optional): The fraction of the step current duration used for averaging to determine the steady state value. Default is 0.5.
-
-#     Output:
-#         asym_current (float): The steady state value of the voltage trace during the step current injection.
-#         hyper (bool): Indicates whether the step current is hyperpolarizing (True) or not (False).
-#         first_current_point (int): The index of the first timeframe of the step current injection.
-#         last_current_point (int): The index of the last timeframe of the step current injection.
-
-#     Note:
-#         The function determines whether the step current is hyperpolarizing based on the sign of 'step_current_val'.
-#         It calculates the steady state value ('asym_current') by averaging the voltage trace over a window at the end of the current injection step.
-#   '''
-#     if step_current_val == None:
-#         if np.count_nonzero(I_sweep) > 0:
-#             step_current_val = np.unique(I_sweep[I_sweep != 0])[0]
-#         else:
-#             print("Multiple I values in step, unable to calculate steady state.")
-#             return
-
-#     if step_current_val >= 0: #note that 0pA of I injected is not hyperpolarising 
-#         hyper = False
-#         first_current_point = np.where(I_sweep == np.max(I_sweep) )[0][0] 
-#         last_current_point = np.where(I_sweep == np.max(I_sweep) )[0][-1]
-
-#     elif step_current_val < 0 : 
-#         hyper = True 
-#         first_current_point = np.where(I_sweep == np.min(I_sweep) )[0][0] 
-#         last_current_point = np.where(I_sweep == np.min(I_sweep) )[0][-1]
-
-#     current_avg_duration = int(avg_window*(last_current_point - first_current_point))
-#     asym_current  = np.mean(V_sweep[ last_current_point - current_avg_duration : last_current_point  ])
-
-#     return asym_current , hyper  , first_current_point, last_current_point
 
 
-def calculate_max_firing(voltage_array, input_sampling_rate=1e4): #HARD CODE sampeling rate
+#TODO NEVER CALLED
+def calculate_max_firing(voltage_array, input_sampling_rate=2e4): 
     """
     Calculates the maximum firing rate (Hz) of action potentials in a series of voltage traces.
 
@@ -338,7 +296,7 @@ def plot_tau(folder_file, time, normalized_voltage, popt, fit_start, fit_end):
     plt.legend()
     plt.show()
 
-def tau_analyser(folder_file, V_array, I_array, step_current_values, ap_counts, sampling_rate=1e4, avg_window=0.5):
+def tau_analyser(folder_file, V_array, I_array, step_current_values, ap_counts, sampling_rate=2e4, avg_window=0.5):
     """
     Estimates the membrane time constant (tau) and additional parameters for a neuron from voltage traces during step current injections.
     """
@@ -457,113 +415,6 @@ def tau_analyser(folder_file, V_array, I_array, step_current_values, ap_counts, 
 
     return [tau_ms, steady_state_voltage, step_current, RMP]
 
-# def tau_analyser(voltage_array, current_array, input_step_current_values, plotting_viz = False, verbose = False , analysis_mode  = 'max' ,input_sampling_rate = 1e4): 
-
-#     '''
-#     Functin to calculate tau associated with RC charging of cell under positive step current 
-
-#     Input : voltage_array : 2d array containing sweeps of voltage recordings / traces for different step currents
-#             current_array : 2d array containing sweeps of current recordings / traces for different step currents
-#             input_step_current_values : list containing step current values (in pA) 
-#             plotting_viz  :  boolean : whether or not we want to plot/viz 
-#             analysis_mode : str , either 'max' or 'asym'. If 'max' uses max of voltage to find tau, otw used v_steady
-#             input_sampling_rate : float : data acquisition rate as given from Igor. 
-#             verbose : Boolean : if False, suppresses print outputs 
-
-#     #TODO currenly returning only the 1st element as nan in the second and seems inferior quality 
-#     Returns : [ [tau (ms), steady state with I , I step (pA) , steady stats no I (RMP)] , [...] ]
-#     ''' 
-#     # noisy error msg and chunk stuff / exclusion criterion, calculation based on abs max / steady state . 
-
-#     sampling_rate = input_sampling_rate
-#     sec_to_ms = 1e3  
-#     # First we get the tau indices from the voltage trace: 
-#     num_aps_all = num_ap_finder(voltage_array)
-
-#     aps_found = np.array([1 if elem  > 0 else 0 for elem in num_aps_all])
-#     aps_found_idx = np.where(aps_found > 0)[0] 
-#     true_ap_start_idx = voltage_array.shape[-1]
-
-#     for idx in aps_found_idx : 
-#         if idx + 1 in aps_found_idx:
-#             if idx + 2 in aps_found_idx:   # once the 1st instance of spiking is found if 2 subsequent ones are found thats good
-#                             true_ap_start_idx = min(idx, true_ap_start_idx)  
-    
-#     visualisation = plotting_viz
-#     tau_array = [] 
-
-#     num_tau_analysed_counter = 0   
-#     counter = 0                                                      #   as we might potentially skip some step currents as they are too noisy, need to keep track of which/ how many taus are actually analysed (we need two)
-#     if verbose: 
-#         print('Cell starts spiking at trace index start %s' % true_ap_start_idx)
-#     # check noise level: 
-#     while num_tau_analysed_counter <  2 : 
-
-#         tau_idx  =  true_ap_start_idx - 1  -  counter 
-#         if verbose: 
-#             print('Analysing for sweep index %s' % tau_idx)
-#         step_current_val  = input_step_current_values[tau_idx]
-#         asym_current, hyper , current_inj_first_point, current_inj_last_point  = steady_state_value(voltage_array[:, tau_idx], current_array[:, tau_idx], step_current_val)
-#         max_current    = np.max(voltage_array[current_inj_first_point:current_inj_last_point,tau_idx ]) 
-        
-#         thresh_current_asym = (1 - np.exp(-1))*( asym_current - voltage_array[current_inj_first_point - 1 , tau_idx])  + voltage_array[current_inj_first_point - 1 , tau_idx] 
-#         thresh_current_max =  (1 - np.exp(-1))*( max_current - voltage_array[current_inj_first_point - 1 , tau_idx])  + voltage_array[current_inj_first_point - 1 , tau_idx] 
-        
-#         # check first how noisy the signal is : 
-#         current_noise = np.std(voltage_array[ current_inj_first_point:current_inj_last_point,tau_idx] )
-        
-#         # Calculate v resting potential 
-#         v_resting_membrane = np.mean(voltage_array[ 0 : current_inj_first_point, tau_idx]) 
-        
-#         if abs(current_noise + thresh_current_asym - asym_current) <= 0.5 :          # we use asymtotic current for noise characterisation rather than max current 
-#             if verbose: 
-#                 print('Too noisy, skipping current current step...')
-#         else: 
-#             num_tau_analysed_counter += 1 
-#             if visualisation: 
-#                 # Plot it out for sanity check 
-#                 plt.figure(figsize = (12,12))
-#                 time_series = sec_to_ms*np.arange(0, len(voltage_array[:, tau_idx]))/sampling_rate
-#                 plt.plot(time_series, voltage_array[:, tau_idx])
-#                 if analysis_mode == 'max': 
-#                     plt.axhline( (1 - 0*np.exp(-1))*( max_current - voltage_array[current_inj_first_point - 1 , tau_idx])  + voltage_array[current_inj_first_point - 1 , tau_idx] , c = 'r', label = 'Max Current')
-#                     plt.axhline( (1 - np.exp(-1))*( max_current - voltage_array[current_inj_first_point - 1 , tau_idx])  + voltage_array[current_inj_first_point - 1 , tau_idx] , c = 'b',  label = 'Threshold' )
-#                 elif analysis_mode == 'asym':
-#                     plt.axhline( (1 - 0*np.exp(-1))*( asym_current - voltage_array[current_inj_first_point - 1 , tau_idx])  + voltage_array[current_inj_first_point - 1 , tau_idx] , c = 'r', label = 'Asymtotic Current')
-#                     plt.axhline( (1 - np.exp(-1))*( asym_current - voltage_array[current_inj_first_point - 1 , tau_idx])  + voltage_array[current_inj_first_point - 1 , tau_idx] , c = 'b',  label = 'Threshold' )
-#                 else: 
-#                     raise ValueError('Invalid Analysis Mode, can be either max or asym')
-#                 plt.legend()
-#                 plt.ylabel('Membrane Potential (mV)')
-#                 plt.xlabel('Time (ms)')
-#                 plt.show()
-                
-#             if hyper: 
-#                 if verbose: 
-#                     print('Positive current step not used! Hence breaking')
-#                 break
-#             else:  
-#                 # find all time points where voltage is at least 1 - 1/e or ~ 63% of max / asym val depending on analysis_mode
-#                 if analysis_mode == 'max': 
-#                     time_frames =  np.where(voltage_array[:, tau_idx] > thresh_current_max )[0]
-#                 elif analysis_mode == 'asym':
-#                     time_frames =  np.where(voltage_array[:, tau_idx] > thresh_current_asym )[0]
-#                 else : 
-#                     raise ValueError('Invalid Analysis Mode, can be either max or asym')
-
-#                 time_frames_ = time_frames[time_frames > current_inj_first_point]
-#                 tau = sec_to_ms*(time_frames_[0] - current_inj_first_point) / sampling_rate
-
-#                 # tau (ms), steady state with I , I step (pA) , steady stats no I
-#                 tau_temp = [tau, asym_current, step_current_val, v_resting_membrane]
-
-#                 tau_array.append(tau_temp)
-        
-#         counter += 1
-
-#     if num_tau_analysed_counter == 0 : 
-#         return [np.nan, np.nan, np.nan, np.nan]
-#     return tau_array[0]
 
 
 def plot_sag(folder_file, voltage_trace, time_trace, RMP, steady_state_voltage, min_sag_voltage, sag_ratio):
@@ -626,58 +477,6 @@ def sag_current_analyser(folder_file, voltage_array, current_array, step_current
         
     # print("No sweep found with negative current injecttion and without action potentials, unable to calculate sag.")
     return [np.nan, np.nan, np.nan, np.nan]
-# #OLD
-# def sag_current_analyser(voltage_array, current_array, input_step_current_values,input_current_avging_window = 0.5): 
-
-#     '''
-#     Function to calculate sag current from voltage and current traces under hyper polarising current steps
-
-#     Input:
-#     volatge array : 2d array containing sweeps of voltage recordings / traces for different step currents
-#     current array : 2d array containing sweeps of current recordings / traces for different step currents
-#     input_step_current_values : list containing different step currents 
-#     input_current_avging_window : float / fraction representating what portion of step current duration is used for calculating 
-    
-#     Returns : [[ sag(0-1) , steady state with I , I step (pA) , steady stats no I (RMP) ] , [...] ] 
-#     '''
-#     # sag : 0, 1 : works with the hyperpolarising current injection steps and 0 and 1 indices correspond to
-#     # the 1st two (least absolute value) step current injections. Later expand for positive current inj too? 
-#     sag_indices = [0,1,2]
-#     sag_current_all =  [] 
-#     current_avging_window = input_current_avging_window 
-
-#     for sag_idx in sag_indices: 
-
-#         v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(voltage_array[:,sag_idx])
-#         if num_peaks == 0: 
-
-#             asym_current, _ , _ , _  = steady_state_value(voltage_array[:, sag_idx], current_array[:, sag_idx], input_step_current_values[sag_idx])
-#             i_min = min(current_array[:,sag_idx])
-#             first_min_current_point = np.where(current_array[:,sag_idx] == i_min )[0][0] 
-#             last_min_current_point = np.where(current_array[:,sag_idx] == i_min )[0][-1]
-
-#             step_current_dur = last_min_current_point - first_min_current_point
-#             step_current_avg_window = int(current_avging_window*step_current_dur)
-            
-#             # Calculate v resting potential 
-#             v_resting_membrane = np.mean(voltage_array[ 0 : first_min_current_point , sag_idx]) 
-
-#             asym_sag_current = np.mean(voltage_array[  last_min_current_point - step_current_avg_window: last_min_current_point, sag_idx])
-#             min_sag_current_timepoint = np.where( voltage_array[:,sag_idx]  ==  min(voltage_array[:,sag_idx]  ) )[0][0] 
-#             min_sag_current =  min(voltage_array[:,sag_idx]  )
-#             max_sag_current = np.mean(voltage_array[0 : first_min_current_point  - 1   , sag_idx] )
-
-#             sag_current = (asym_sag_current - min_sag_current)  / (  max_sag_current  - asym_sag_current )
-
-#             sag_current_temp = [sag_current, asym_current, input_step_current_values[sag_idx], v_resting_membrane] 
-
-#         elif num_peaks > 0: 
-#             print('Spike found in Sag analysis, skipping')
-#             sag_current_temp = [np.nan, np.nan, np.nan, np.nan] 
-#         # Append Value to existing named tuple
-#         sag_current_all.append(sag_current_temp) 
-
-#     return sag_current_all
 
 
 ########## ACTION POTENTIAL
@@ -1125,27 +924,24 @@ def calculate_ap_slope_and_max_dvdt(v_array, upshoot_index, latency, sampling_ra
     return slope, max_dvdt, max_dvdt_index
 
 
-def ap_characteristics_extractor_main(folder_file, V_array, critical_num_spikes = 1, all_sweeps = False, method = "derivative"): 
+def ap_characteristics_extractor_main(folder_file, V_array): #Locations of peaks (in terms of indices within each sweep)
     '''
       Main function for extracting action potential (AP) characteristics across multiple sweeps of electrophysiological data. 
       It iteratively calls the 'ap_characteristics_extractor_subroutine_derivative' for each selected sweep.
 
     Input:
         V_array (2d array): A pandas DataFrame containing voltage data from electrophysiological recordings.
-        critical_num_spikes (int, optional): The minimum number of spikes required in a sweep to consider it for analysis. Defaults to 1.
-        all_sweeps (bool, optional): If True, analyzes all sweeps; otherwise, selects sweeps based on the number of spikes. Defaults to False.
-        method (str, optional): The method used for extracting AP characteristics. Currently, only "derivative" is supported. Defaults to "derivative".
-
+        
     Returns:
         peak_latencies_all (list):  AP latency across all analyzed sweeps (ms).
         v_thresholds_all (list):  AP Voltage thresholds across all analyzed sweeps (mV).
         peak_slope_all (list):  AP slope rates of change upshoot locations across all analyzed sweeps (mV/ms).
-        peak_locs_corr_all (list):  Corrected locations of AP peaks across all analyzed sweeps.
+        peak_locs_corr_all (list):  Corrected locations of AP peaks across all analyzed sweeps. #locations of peaks within each sweep.
         upshoot_locs_all (list):  Locations of AP thresholds across all analyzed sweeps.
         peak_heights_all (list): AP height (peak to threshold) across all analyzed sweeps (mV).
         peak_fw_all (list):  AP full widths at half maximum (FWHM) of each AP across all analyzed sweeps, if <0 set as peak_latency (ms).
-        peak_indices_all (list): Indices of the peaks within the aggregated list.
-        sweep_indices_all (list): Indices of the sweeps corresponding to each peak in the aggregated list.
+        peak_indices_all (list): Indices of the peaks within the aggregated list. sweep?
+        sweep_indices_all (list): Indices of the sweeps corresponding to each peak in the aggregated list. #which sweep a particular peak belongs to.
     '''
 
     # itterating over sweeps
@@ -1229,7 +1025,7 @@ def build_AP_DF(folder_file, V_array, I_array):
     V_array_adj, I_array_adj = normalise_array_length(V_array, I_array, columns_match=True)
     
     # Extract AP characteristics
-    peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array, all_sweeps=True)
+    peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array)
     
     # Early return if no APs found
     if np.all(np.isnan(peak_latencies_all)):
@@ -1274,7 +1070,7 @@ def pAD_detection(folder_file, V_array):
     '''
 
     # Extract AP characteristics
-    peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array, all_sweeps=True)
+    peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array)
     
     # Early return if no APs found
     if np.all(np.isnan(peak_latencies_all)):
@@ -1665,7 +1461,7 @@ def spike_remover(array):
 
 def APP_splitter(V_array_or_list, drug_in, drug_out):
     '''
-    inputs: V_array_or_list  :  voltage np.array, shape: length x num_sweeps
+    inputs: V_array_or_list  :  voltage np.array, shape: length x num_sweeps | list of mean values for each sweep
             drug_in  :  integer , sweep number when drug was applied (included in APP)
             drug_out :  integer , sweep number when drug was washed out (included in WASH)
 
@@ -1724,27 +1520,22 @@ def mean_inputR_APP_calculator(V_array, I_array, drug_in, drug_out):
     returns :   input_R_PRE, input_R_APP, input_R_WASH 
                 input R for each sweep = current injected / change in V in a list/array 
     '''
-
     I_sweep = getI_array_sweep(I_array)
-
     input_R_ohms_V_array = []
     
     for index, V_sweep in enumerate(V_array.T):  # Transpose V_array to iterate over columns/sweeps
-        # print(input_R_ohms_V_array)
         
         if index < 2: #skip first 3 sweeps as often holding I was being set or cell was not stabelised
             input_R_ohms_V_array.append(np.nan) #preserve sweeps for APP_splitter
-            # print(f"Appended NaN for index {index}.")
             continue
 
         V_sweep, I_sweep =normalise_array_length(V_sweep, I_sweep)
-
-        V_cleaned  = spike_remover(V_sweep) #remove spiking 
+        V_cleaned  = spike_remover(V_sweep) 
 
         #fetch delta_V
         steady_state , hyper  , first_current_point, last_current_point= steady_state_value(V_sweep, I_sweep)  #with I injection
-        rmp = np.nanmean(V_cleaned[I_sweep == 0]) #without I injection
-        delta_V_mV = abs(steady_state - rmp)
+        rmp = np.nanmean(V_cleaned[I_sweep == 0]) #without I injection 
+        delta_V_mV = abs(steady_state - rmp) #change in mV
         #fetch I injected 
         delta_I_pA = abs(np.unique(I_sweep[I_sweep != 0])[0])
         # fectch sweep input R (ohm)
@@ -1753,7 +1544,6 @@ def mean_inputR_APP_calculator(V_array, I_array, drug_in, drug_out):
 
         sweep_input_R_ohms = (delta_V_V / delta_I_A) 
         input_R_ohms_V_array.append(sweep_input_R_ohms)
-        # print(f"Appended value for index {index}. ")
 
     input_R_PRE, input_R_APP, input_R_WASH =APP_splitter(input_R_ohms_V_array, drug_in, drug_out)
 

@@ -22,6 +22,7 @@ class Ephys:
         pAD_hunter_df: last unofficial data_type needs developing* #TODO
           '''
     filename: str
+    sampling_rate: float = 2e4
 
     def __post_init__(self):
         initiateFileSystem()
@@ -48,7 +49,7 @@ class Ephys:
         FP_df = FP_df.progress_apply(lambda row: self._handle_extraction(row, self._process_FP_data), axis=1)
         additional_columns = [col for col in FP_df.columns if col not in initial_columns]
         FP_df = FP_df[initial_columns + additional_columns]
-
+        self.cell_df = self.generate_cell_df() #regenerate as its related
         cache(self.filename, 'FP_df', FP_df)
         return FP_df
 
@@ -179,7 +180,7 @@ class Ephys:
          peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
          upshoot_locs_all, peak_heights_all, peak_fw_all,
          sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(
-            row['folder_file'], V_array, all_sweeps=True)
+            row['folder_file'], V_array)
         
         if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['pAD'] = True
@@ -210,15 +211,54 @@ class Ephys:
         Processing logic specific to APP data type."""
         V_array , I_array, V_list = load_file(row['folder_file'])
 
-        def check_variability(values, Vairability_threshold=0.50): #HARD CODE vaitability threshold 50%
+        def check_variability(values, Vairability_threshold=0.30): 
             """Check if variability of values exceeds the given threshold."""
             values = np.array(values)[~np.isnan(values)]
             if len(values) <= 1:
                 return True
             min_val = np.min(values)
             max_val = np.max(values)
+            # print(f" % var  {abs((max_val - min_val) / min_val)}")
             return abs((max_val - min_val) / min_val) <= Vairability_threshold
+        
+        def group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=0.5):
+            """
+            Groups APs into bursts based on the time difference between them.
+            Condenses each burst into the maximum peak voltage and returns a list of these max values.
+            - peak_locs_corr_all: AP peak locations within sweep
+            - sweep_indices_all: sweep of each AP
+            - peak_voltages_all: List of AP peak voltages 
+            - burst_window_seconds: The time window (in seconds) to consider APs as part of the same burst. Default is 0.5 seconds.
+            """            
+            burst_window_samples = int(burst_window_seconds * self.sampling_rate)
+            bursts = []
+            current_burst = []
 
+            # Iterate over each AP's peak location, voltage, and sweep index
+            for i, (peak_loc, sweep_index) in enumerate(zip(peak_locs_corr_all, sweep_indices_all)):
+                curr_time = (sweep_index * V_array.shape[0] + peak_loc) / self.sampling_rate
+                
+                if not current_burst: #first AP
+                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
+                    continue
+                
+                prev_peak_loc, prev_voltage, prev_time = current_burst[-1]
+                
+                time_diff = curr_time - prev_time
+                time_diff_samples = time_diff * self.sampling_rate
+                
+                if time_diff_samples <= burst_window_samples:
+                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
+                else:
+                    # Finalize the current burst and start a new one
+                    bursts.append(max(voltage for _, voltage, _ in current_burst))
+                    current_burst = [(peak_loc, peak_voltages_all[i], curr_time)]
+            
+            if current_burst:
+                bursts.append(max(voltage for _, voltage, _ in current_burst))
+        
+            return bursts
+        
         if I_array is not None and (I_array[:, 0] != 0).any():
             input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
             row['inputR_PRE'] = input_R_PRE
@@ -232,23 +272,23 @@ class Ephys:
             pass_I_array = None
 
         mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array)
-        row['RMP_PRE'] = mean_RMP_PRE
+        row['RMP_PRE'] = mean_RMP_PRE[1:]
         row['RMP_APP'] = mean_RMP_APP
         row['RMP_WASH'] = mean_RMP_WASH
 
-        (peak_voltages_all, peak_latencies_all, v_thresholds_all,
-            peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
-            upshoot_locs_all, peak_heights_all, peak_fw_all,
-            sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(
-                row.folder_file, V_array, all_sweeps=True)
+     
+        (peak_voltages_all, peak_latencies_all  , v_thresholds_all,
+        peak_slope_all  ,AP_max_dvdt_all,  peak_locs_corr_all, 
+        upshoot_locs_all  , peak_heights_all  , peak_fw_all,
+        peak_indices_all , sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array)
         
         pAD_condition = lambda peak_voltage, threshold: threshold <= -65 and peak_voltage > 20
         if any(pAD_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['pAD'] = True
             row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-            row['pADcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and pAD_condition(peak_voltage, threshold)])
-            row['pADcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and pAD_condition(peak_voltage, threshold)])
-            row['pADcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and pAD_condition(peak_voltage, threshold)])
+            row['pADcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and pAD_condition(peak_voltage, threshold)])
+            row['pADcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and pAD_condition(peak_voltage, threshold)])
+            row['pADcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and pAD_condition(peak_voltage, threshold)])
         else:
             row['pAD_locs'] = []
             row['pADcount_PRE'] = 0
@@ -256,10 +296,11 @@ class Ephys:
             row['pADcount_WASH'] = 0
 
         row['AP_locs'] = peak_locs_corr_all
+        row['peak_voltages_all'] = peak_voltages_all
         if len(peak_locs_corr_all) > 0:
-            row['APcount_PRE'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index < row['drug_in']])
-            row['APcount_APP'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if row['drug_out'] >= sweep_index >= row['drug_in']])
-            row['APcount_WASH'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices) if sweep_index > row['drug_out']])
+            row['APcount_PRE'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index < row['drug_in']])
+            row['APcount_APP'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if row['drug_out'] >= sweep_index >= row['drug_in']])
+            row['APcount_WASH'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index > row['drug_out']])
         else:
             row['AP_locs'] = []
             row['APcount_PRE'] = 0
@@ -268,20 +309,28 @@ class Ephys:
 
         #APP validators
         if len(peak_voltages_all)>0:
-            if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 10: #HARDCODE minimum 10 mV AP height 
-                # print('Offest issues likely raw data not validated.')
-                row['valid']= False
+            if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 30: #HARDCODE minimum 30 mV AP height to declare offset issues
+                row['offset']= True
             else:
+                peak_voltage_burst_max = group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=1)
+
+                if (check_variability(peak_voltage_burst_max, Vairability_threshold=0.5) == False or
+                    check_variability([row['RMP_PRE']]) == False or
+                    check_variability([row['inputR_PRE']], Vairability_threshold=1) == False):
+                    print('check')
+
                 row['valid'] = (
-                    check_variability(peak_voltages_all) and
+                    check_variability(peak_voltage_burst_max, Vairability_threshold=0.5) and
                     check_variability([row['RMP_PRE']]) and
-                    check_variability([row['inputR_PRE']])
+                    check_variability([row['inputR_PRE']], Vairability_threshold=1) #HARD CODE vaitability threshold 
                     )
         else:
             row['valid'] = (
                 check_variability([row['RMP_PRE']]) and
-                check_variability([row['inputR_PRE']])
+                check_variability([row['inputR_PRE']], Vairability_threshold=1)
                 )
+
+ 
         return row
 
     def _process_pAD_hunter_data(self, row: pd.Series) -> pd.Series:

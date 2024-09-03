@@ -17,9 +17,11 @@ def load_file(folder_file):
     I_list, I_array = None, None
     try:
         I_list, I_array = igor_exporter(path_I)
+
     except FileNotFoundError:
         I_array = None
         # print(f'I file not found, path: {path_I}')
+
     return V_array , I_array, V_list
         
 
