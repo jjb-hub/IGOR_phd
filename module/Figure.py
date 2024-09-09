@@ -10,7 +10,7 @@ from statsmodels.stats.multicomp import pairwise_tukeyhsd
 import seaborn as sns
 from typing import Optional
 from module.utils import subselectDf, saveFigure, getCache, isCached, cache, cache_excel, load_file #should become Cashable class
-from module.constants import CACHE_DIR, color_dict
+from module.constants import CACHE_DIR, color_dict, unit_dict
 from module.Ephys import Ephys, APP, FP
 from module.action_potential_functions import ap_characteristics_extractor_main, normalise_array_length #should become ActionPotential class
 
@@ -243,7 +243,7 @@ class Figure(DataSelection):
 class Histogram(Figure):
     dependant_var: str = field(kw_only=True)
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id
-    n_minimum: float = field(kw_only = True, default = 5)
+    n_minimum: float = field(kw_only = True, default = 3)
 
     def __post_init__(self):
         Figure.__post_init__(self)
@@ -324,7 +324,7 @@ class Histogram(Figure):
                 hue_order=['PRE', 'APP', 'WASH'],
                 order=self.order ,
                 data=subset_to_plot,
-                palette='Set2',
+                palette={"PRE":"azure", "APP": "teal", "WASH":"cadetblue"},
                 edgecolor="k",
                 linewidth=1,
                 linestyle="-",
@@ -342,7 +342,7 @@ class Histogram(Figure):
 
 
     def plot_histogram(self):
-        fig, ax = plt.subplots(figsize=(20, 10))
+        fig, ax = plt.subplots(figsize=(15, 10))
         df = self.data
         sns.barplot(
             x='treatment',
@@ -352,7 +352,7 @@ class Histogram(Figure):
             order=self.order ,
             data=df,
             errorbar = 'sd',
-            palette='Set2',
+            palette={"PRE":"azure", "APP": "teal", "WASH":"cadetblue"},
             edgecolor="k",
             ax=ax
         )
@@ -363,7 +363,7 @@ class Histogram(Figure):
             hue_order=self.hue_order,
             order=self.order ,
             data=df,
-            palette='Set2',
+            palette={"PRE":"azure", "APP": "teal", "WASH":"cadetblue"},
             edgecolor="k",
             linewidth=0.5,
             ax=ax, 
@@ -385,11 +385,14 @@ class Histogram(Figure):
         counts = df.groupby('treatment')['cell_id'].nunique()
         for tick, treatment in enumerate(self.order):
             count = counts.get(treatment, 0)
-            ax.text(tick, -0.1, f'n={count}', ha='center', va='top', fontsize=12, color='black', transform=ax.get_xaxis_transform())
+            ax.text(tick, -0.1, f'n={count}', ha='center', va='top', fontsize=24, color='black', transform=ax.get_xaxis_transform())
 
         # Customize plot labels and titles
-        ax.set_ylabel(self.dependant_var, fontsize=14)
-        ax.set_title(f'{self.cell_type} - {self.dependant_var}', fontsize=16)
+        ax.set_ylabel(unit_dict[self.dependant_var], fontsize=24)
+        ax.set_xlabel('')
+        ax.set_title(f'{self.cell_type} - {self.dependant_var}', fontsize=28)
+        ax.tick_params(axis='x', labelsize=24)
+        ax.tick_params(axis='y', labelsize=24)
         plt.tight_layout()
         
         # Save the figure

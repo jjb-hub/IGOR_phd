@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 import traceback
 from tqdm import tqdm
@@ -15,22 +15,22 @@ tqdm.pandas()
 class EphysData:
     
     project: str
-    filename: str = None
     initial_columns: list = None #defined by child classes
     sampling_rate: float = 2e4
+    data_type: str = None #defined by child class
 
     def __post_init__(self):
-        self.raw_df = getRawDf(self.filename)
+        self.filename = f"{self.data_type}_df"
+        self.raw_df = getRawDf(self.project)
         if not isCached(self.project, self.filename):
             cache(self.project, self.filename, self.generate())
         self.df = getCache(self.project, self.filename)
         
     
     def generate(self):
-        ''' Regenerates FP_df from scratch, 
-            Subselects the FP data and extracts data from files, expanding FP_df columns.'''
+        ''' generic generator for dfs.'''
         
-        df = self.raw_df[self.raw_df['data_type'] == 'FP'][self.initial_columns]
+        df = self.raw_df[self.raw_df['data_type'] == self.data_type][self.initial_columns] 
 
         df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1)
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
@@ -81,7 +81,11 @@ class EphysData:
 class FP(EphysData):
     
     filename: str = "FP_df"
-    initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
+    data_type = 'FP'
+  
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
+        super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
         """Processing logic specific to FP data type. Could also handle FP_APP data if sufficient to analise."""
@@ -123,7 +127,8 @@ class APP(EphysData):
     
     filename: str = "APP_df"
     initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
-    
+    data_type = 'APP'
+
     def process(self, row: pd.Series) -> pd.Series:
         """Generate APP_df from scratch, 
         Processing logic specific to APP data type."""
@@ -253,6 +258,7 @@ class APP(EphysData):
         
 class Hunter(EphysData):
     
+    filename: str = "pAD_hunter_df"
     initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -273,20 +279,25 @@ class Hunter(EphysData):
 @dataclass
 class Ephys(EphysData):
     ''' 
-    Organising relational dfs and extracting data form the input feature_df. 
-    Attributes:
+    Buiilding aggregate df wil cell info based off extracted data from each data type: APP, FP and pAD_hunter each with their own class
         raw_df: excel input mapping folder_files to features
+
         FP_df: extraction of firing property data (FP)
         APP_df: extraction of applications data (APP)
-        cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
         pAD_hunter_df: last unofficial data_type needs developing* #TODO
+
+    Ephys class:
+        cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
           '''
+    filename: str = 'cell_df'
     sampling_rate: float = 2e4
     
     def __post_init__(self):
         self.FP_df = FP(self.project, self.filename).df
         self.APP_df = APP(self.project, self.filename).df
         self.hunter_df = Hunter(self.project, self.filename).df
+        super().__post_init__()
+        
     
     def generate(self) -> pd.DataFrame:
         """
