@@ -168,14 +168,14 @@ def cache_excel(filename, identifier, to_cache):
 #This function gets the dataframes that are cached
 def getCache(filename, identifier):
     filename = filename.split(".")[0]
-    print(f'GETTING "{identifier}" FROM "{filename}" CACHE')
+    # print(f'GETTING "{identifier}" FROM "{filename}" CACHE')
     with open(f'{CACHE_DIR}/{filename}/{identifier}.pkl','rb') as file:
         return pickle.load(file)
     
 #This checks if a particulat dataframe/dataset is cached, return boolean
 def isCached(filename, identifier, extension='pkl'):
     filename = filename.split(".")[0]
-    print(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
+    # print(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
     return os.path.isfile(f"{CACHE_DIR}/{filename}/{identifier}.{extension}")
 
 

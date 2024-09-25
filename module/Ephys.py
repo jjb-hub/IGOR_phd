@@ -289,7 +289,7 @@ class Ephys(EphysData):
     Ephys class:
         cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
           '''
-    filename: str = 'cell_df'
+    # filename: str = 'cell_df'
     sampling_rate: float = 2e4
     
     def __post_init__(self):

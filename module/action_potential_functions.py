@@ -1517,7 +1517,7 @@ def mean_inputR_APP_calculator(V_array, I_array, drug_in, drug_out):
                 drug_in  :  integer , sweep number when drug was applied (included in APP)
                 drug_out :  integer , sweep number when drug was washed out (included in WASH)
 
-    returns :   input_R_PRE, input_R_APP, input_R_WASH 
+    returns :   input_R_PRE, input_R_APP, input_R_WASH in MOhms
                 input R for each sweep = current injected / change in V in a list/array 
     '''
     I_sweep = getI_array_sweep(I_array)
@@ -1544,6 +1544,7 @@ def mean_inputR_APP_calculator(V_array, I_array, drug_in, drug_out):
 
         sweep_input_R_ohms = (delta_V_V / delta_I_A) 
         input_R_ohms_V_array.append(sweep_input_R_ohms)
+        sweep_input_R_MOhms = sweep_input_R_ohms / 1e6  # Convert Ohms to Megaohms
 
     input_R_PRE, input_R_APP, input_R_WASH =APP_splitter(input_R_ohms_V_array, drug_in, drug_out)
 

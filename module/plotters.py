@@ -19,11 +19,14 @@ from itertools import cycle
 
 
 ########## BASE PLOTTERS ##########
-def quick_plot_file(filename, folder_file, stacked=False):
+def quick_plot_file(filename, folder_file, stacked=False, n_sweeps=None):
     '''
     Plots any waveform based off folder_file.
     Stacked will plot each column on top of each other, defaults to False.
     '''
+
+
+
     df = getRawDf(filename)
     path_V, path_I = make_path(folder_file)
     
@@ -31,17 +34,17 @@ def quick_plot_file(filename, folder_file, stacked=False):
     _, V_array = igor_exporter(path_V)
     # V_array = np.array(dfV)
     display(df[df['folder_file'] == folder_file])  # Show file info
-    quick_line_plot(V_array, f'Voltage trace for {folder_file}', stacked=stacked)
+    quick_line_plot(V_array, f'Voltage trace for {folder_file}', n_sweeps=n_sweeps, stacked=stacked )
     
     # Attempt to Plot Current Trace
     try:
         _, I_array = igor_exporter(path_I)
         # I_array = np.array(dfI)
-        quick_line_plot(I_array, f'Current (I) trace for {folder_file}', stacked=stacked)
+        quick_line_plot(I_array, f'Current (I) trace for {folder_file}', n_sweeps=n_sweeps,  stacked=stacked)
     except FileNotFoundError:
         print('No I file found', path_I)
 
-def quick_line_plot(plot_array, plottitle, stacked=False):
+def quick_line_plot(plot_array, plottitle, n_sweeps=None, stacked=False):
     '''
     Plots line plot for given array without adding a legend for stacked plots.
     
@@ -52,18 +55,21 @@ def quick_line_plot(plot_array, plottitle, stacked=False):
     '''
     plt.figure()
     num_sweeps = plot_array.shape[1]
+    if n_sweeps is None or n_sweeps > num_sweeps:
+        n_sweeps = num_sweeps 
     
     if stacked:
-        for i in range(num_sweeps):
+        for i in range(n_sweeps):
             plt.plot(plot_array[:, i])  # Plot each sweep
     else:
         # Concatenate sweeps for continuous plotting
-        continuous_plot = plot_array.ravel(order='F')  # Flatten array in column-major order
+        cropped_array = plot_array[:, :n_sweeps] 
+        continuous_plot = cropped_array.ravel(order='F')  # Flatten array in column-major order
         plt.plot(continuous_plot)  # Plot continuous
     
     plt.title(plottitle)
     plt.xlabel('Time in ms')
-    plt.ylabel('Current in pA')
+    plt.ylabel('Voltage (mV)')
     plt.show()
     
 

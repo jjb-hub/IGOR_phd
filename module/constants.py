@@ -23,8 +23,9 @@ color_dict = { #drugs
               "pAD":"orange",
               "Somatic":"blue",
                 #APP figure
-              "PRE":"black",
-              "WASH":"lightsteelblue", 
+              "PRE":"azure",
+              "APP": "teal",
+              "WASH":"cadetblue", 
               'I_display':'cornflowerblue'} 
 
 unit_dict = {'max_firing': 'Firing_(Hz)', 
@@ -37,10 +38,10 @@ unit_dict = {'max_firing': 'Firing_(Hz)',
             'AP_latency': 'AP_latency_(ms)',
             'tau_rc':'ms',
             'sag':'%',
-            'AP_count_AP_locs':'AP_count', #ODD TODO 
-            'AP_count_pAD_locs':'AP_count',
-            'inputR': 'input R (Ohm)',
-            'RMP':'membrane potentiam (mV)',
+            'AP_count':'AP_count', #ODD TODO 
+            'pAD_count':'AP_count',
+            'inputR': 'input R (MOhm)',
+            'RMP':'membrane potential (mV)',
             'AP_dvdt_max': 'dV/dt (V/s)'
             }
 
