@@ -81,7 +81,7 @@ class EphysData:
 class FP(EphysData):
     
     filename: str = "FP_df"
-    data_type = 'FP'
+    data_type: str = 'FP'
   
     def __post_init__(self):
         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
@@ -96,7 +96,7 @@ class FP(EphysData):
          peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
          upshoot_locs_all, peak_heights_all, peak_fw_all,
          sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(
-            row['folder_file'], V_array, all_sweeps=True)
+            row['folder_file'], V_array)
         
         if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['pAD'] = True
@@ -262,7 +262,7 @@ class APP(EphysData):
 class Hunter(EphysData):
     
     filename: str = "pAD_hunter_df"
-    data_type = 'Hunter'
+    data_type: str = 'Hunter'
 
     def __post_init__(self):
         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
@@ -274,7 +274,7 @@ class Hunter(EphysData):
         (peak_voltages_all, peak_latencies_all, v_thresholds_all,
         peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
         upshoot_locs_all, peak_heights_all, peak_fw_all,
-        sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array, all_sweeps=True)
+        sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array)
         
         if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['pAD'] = True
@@ -286,7 +286,7 @@ class Hunter(EphysData):
 @dataclass
 class Ephys(EphysData):
     ''' 
-    Buiilding aggregate df wil cell info based off extracted data from each data type: APP, FP and pAD_hunter each with their own class
+    Buiilding aggregate df with cell info based off extracted data from each data type: APP, FP and pAD_hunter each with their own class
         raw_df: excel input mapping folder_files to features
 
         FP_df: extraction of firing property data (FP)
