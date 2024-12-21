@@ -18,7 +18,7 @@ from module.action_potential_functions import ap_characteristics_extractor_main,
 class DataSelection:
     ''' 
     Attributes:
-        - filename (str): defining the project and feature mapping ie RAW_df in Ephys
+        - project_filename (str): defining the project and feature mapping ie RAW_df in Ephys
         - data_type (str): The data type (e.g., 'APP' or 'FP').
         - cell_type (str | list): The type of cell to filter on (optional) / can inout list 
         - treatment (str | list): The treatment to filter on, i.e. drug applied (optional).
@@ -27,7 +27,7 @@ class DataSelection:
         - threshold_access_change (float): The threshold for access change filtering (optional, default 30).
         '''
     
-    filename: str  = field(kw_only=True)
+    project_filename: str  = field(kw_only=True)
     data_type: str = field(kw_only=True)
     cell_type: str | list = field(kw_only=True, default=None)
     cell_subtype: str | list  = field(kw_only=True, default=None)
@@ -37,9 +37,9 @@ class DataSelection:
 
 
     def __post_init__(self):
-        self.FP_df = FP(self.filename).df
-        self.APP_df = APP(self.filename).df
-        self.cell_df = Ephys(self.filename).df
+        self.FP_df = FP(self.project_filename).df
+        self.APP_df = APP(self.project_filename).df
+        self.cell_df = Ephys(self.project_filename).df
         self.validate_inputs()
         self.valid_files, self.valid_cell_ids = self.get_valid_folder_files()
         self.agg_df = self.get_filtered_data()
@@ -206,8 +206,8 @@ class DataSelection:
             access_filtered_df = self.cell_df
 
         treatment_count_df = access_filtered_df.groupby(['treatment', 'cell_type']).apply(process_group).reset_index()
-        cache(self.filename, f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
-        cache_excel(self.filename, f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
+        cache(self.project_filename, f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
+        cache_excel(self.project_filename, f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
         return treatment_count_df
 
 @dataclass

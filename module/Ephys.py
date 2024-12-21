@@ -14,13 +14,13 @@ tqdm.pandas()
 @dataclass
 class EphysData:
     
-    project: str
+    project: str #name of the excel_filename project_filename in notebook
     initial_columns: list = None #defined by child classes
     sampling_rate: float = 2e4
     data_type: str = None #defined by child class
 
     def __post_init__(self):
-        self.filename = f"{self.data_type}_df"
+        # self.filename = f"{self.data_type}_df"
         self.raw_df = getRawDf(self.project)
         if not isCached(self.project, self.filename):
             cache(self.project, self.filename, self.generate())
@@ -36,7 +36,7 @@ class EphysData:
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
         df = df[self.initial_columns + additional_columns]
 
-        cache(self.filename, self.filename, df)
+        cache(self.project, self.filename, df)
         return df
     
     def process(self):
@@ -126,8 +126,11 @@ class FP(EphysData):
 class APP(EphysData):
     
     filename: str = "APP_df"
-    initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
-    data_type = 'APP'
+    data_type: str = 'APP'
+
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
         """Generate APP_df from scratch, 
@@ -259,8 +262,12 @@ class APP(EphysData):
 class Hunter(EphysData):
     
     filename: str = "pAD_hunter_df"
-    initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
-    
+    data_type = 'Hunter'
+
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        super().__post_init__()
+
     def process(self, row: pd.Series) -> pd.Series:
         V_array , I_array, V_list = load_file(row['folder_file'])
 
@@ -289,14 +296,19 @@ class Ephys(EphysData):
     Ephys class:
         cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
           '''
-    # filename: str = 'cell_df'
+    filename: str = 'cell_df'
     sampling_rate: float = 2e4
     
     def __post_init__(self):
-        self.FP_df = FP(self.project, self.filename).df
-        self.APP_df = APP(self.project, self.filename).df
-        self.hunter_df = Hunter(self.project, self.filename).df
+
+        self.FP_df = FP(self.project).df
+        self.APP_df = APP(self.project).df
+        self.hunter_df = Hunter(self.project).df
         super().__post_init__()
+        # self.FP_df = FP(self.project, self.filename).df
+        # self.APP_df = APP(self.project, self.filename).df
+        # self.hunter_df = Hunter(self.project, self.filename).df
+        # super().__post_init__()
         
     
     def generate(self) -> pd.DataFrame:
