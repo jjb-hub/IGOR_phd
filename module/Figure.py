@@ -3,22 +3,31 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import ClassVar
+# from Cachable import Cachable
 from itertools import cycle
 import statsmodels.api as sm
 from statsmodels.formula.api import mixedlm
+from module.Ephys import EphysData
+import os
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 import seaborn as sns
 from typing import Optional
-from module.utils import subselectDf, saveFigure, getCache, isCached, cache, cache_excel, load_file #should become Cashable class
+from module.utils import  subselectDf, saveFigure, getCache, isCached, cache, cache_excel #should become Cashable class
 from module.constants import CACHE_DIR, color_dict, unit_dict
 from module.Ephys import Ephys, APP, FP
+from module.Cachable import Cachable
 from module.action_potential_functions import ap_characteristics_extractor_main, normalise_array_length #should become ActionPotential class
 
+# Root directory for projects #HACKY SHIT should have a project or filesystem class to prevent dupicate code
+ROOT = f"{os.getcwd()}/PROJECTS"
+if not os.path.exists(ROOT):
+    os.mkdir(ROOT)
+
 @dataclass
-class DataSelection:
+class DataSelection (Cachable): 
     ''' 
     Attributes:
-        - project_filename (str): defining the project and feature mapping ie RAW_df in Ephys
+        - project (str): defining the project and feature mapping ie RAW_df in Ephys
         - data_type (str): The data type (e.g., 'APP' or 'FP').
         - cell_type (str | list): The type of cell to filter on (optional) / can inout list 
         - treatment (str | list): The treatment to filter on, i.e. drug applied (optional).
@@ -27,7 +36,7 @@ class DataSelection:
         - threshold_access_change (float): The threshold for access change filtering (optional, default 30).
         '''
     
-    project_filename: str  = field(kw_only=True)
+    project: str  = field(kw_only=True)
     data_type: str = field(kw_only=True)
     cell_type: str | list = field(kw_only=True, default=None)
     cell_subtype: str | list  = field(kw_only=True, default=None)
@@ -37,9 +46,18 @@ class DataSelection:
 
 
     def __post_init__(self):
-        self.FP_df = FP(self.project_filename).df
-        self.APP_df = APP(self.project_filename).df
-        self.cell_df = Ephys(self.project_filename).df
+
+        super().__init__(cache_dir=f"{ROOT}/{self.project}/cache")#HACKY SHIT 
+        self.location = f"{ROOT}/{self.project}"
+        self.input_dir = self._checkFileSystem("input")
+        self.output_dir = self._checkFileSystem("output")
+        self.figure_output_dir = self._checkFileSystem("figures")
+
+        self.FP_df = FP(self.project).df
+        self.APP_df = APP(self.project).df
+        #addd Hunter when ready
+        self.cell_df = Ephys(self.project).df
+        # super().__post_init__()
         self.validate_inputs()
         self.valid_files, self.valid_cell_ids = self.get_valid_folder_files()
         self.agg_df = self.get_filtered_data()
@@ -124,6 +142,7 @@ class DataSelection:
             agg_APP_df = self.add_cell_mapping(agg_APP_df)
 
             return agg_APP_df
+        
 
         elif self.data_type == 'FP':
             filtered_df = self.FP_df[self.FP_df['folder_file'].isin(valid_files)].copy()
@@ -158,7 +177,7 @@ class DataSelection:
 
     def add_cell_mapping(self, df):
         '''
-        Adds cell_ feature columns based off cell_id in cell_df.
+        Adds cell feature columns based off cell_id in cell_df.
         '''
         if 'cell_id' not in df.columns or 'cell_id' not in self.cell_df.columns:
             raise ValueError("Both DataFrames must have 'cell_id' column.")
@@ -170,6 +189,7 @@ class DataSelection:
     
         return df.merge(self.cell_df[columns_to_map].drop_duplicates(), on='cell_id', how='left')
     
+
 
     def generate_treatment_count_df(self) -> pd.DataFrame:
         '''
@@ -206,12 +226,13 @@ class DataSelection:
             access_filtered_df = self.cell_df
 
         treatment_count_df = access_filtered_df.groupby(['treatment', 'cell_type']).apply(process_group).reset_index()
-        cache(self.project_filename, f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
-        cache_excel(self.project_filename, f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
+        self.cache(f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
+        self.save_excel( f'treatment_count_df_{self.threshold_access_change}', treatment_count_df)
         return treatment_count_df
 
 @dataclass
 class Figure(DataSelection):
+    
     '''
     Base class for all figures. Handles loading, saving, and plotting of figures. #TODO loading form cache / genergic function to be redefined in child classes ? #REMI
 
@@ -228,25 +249,42 @@ class Figure(DataSelection):
     # extension: ClassVar[str] = "png" # if I make a good casheable class
 
     def __post_init__(self):
-        DataSelection.__post_init__(self)
+        # DataSelection.__post_init__(self)
+        super().__post_init__()
         
+    def save_plot(self, fig, filename: str, formats=('png', 'svg')):
+        """
+        Saves a plot in specified formats to the figure directory.
 
-    def save_figure(self, fig): #ADD load
+        Parameters:
+        ----------
+        fig : matplotlib.figure.Figure
+            The matplotlib figure to save.
+        filename : str
+            The base name of the file (without extension).
+        formats : tuple, optional
+            Formats to save the plot (default: ('png', 'svg')).
         """
-        Save the generated figure as SVG and PNG.
-        """
-        saveFigure(fig, self.fig_filename, 'figure')
+        for fmt in formats:
+            filepath = os.path.join(self.figure_output_dir, f"{filename}.{fmt}")
+            fig.savefig(filepath, format=fmt, bbox_inches='tight', dpi=300)
+        plt.close(fig)
+        print(f"Saved figure: {filename} in formats: {formats}")
+
 
 
 
 @dataclass
 class Histogram(Figure):
+    filename: str = None
     dependant_var: str = field(kw_only=True)
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id
     n_minimum: float = field(kw_only = True, default = 3)
 
     def __post_init__(self):
-        Figure.__post_init__(self)
+        self.filename = f"{self.dependant_var}_{self.specify}" #TODO this should be handeled better 
+        # Figure.__post_init__(self)
+        super().__post_init__()
         self.check_valid_dependant_var()
         self.fig_filename = self.generate_fig_filename()
         self.data = self.filter_n_minimum(self.agg_df)
@@ -394,9 +432,11 @@ class Histogram(Figure):
         ax.tick_params(axis='x', labelsize=24)
         ax.tick_params(axis='y', labelsize=24)
         plt.tight_layout()
+        plt.show()
         
         # Save the figure
-        self.save_figure(fig)
+        self.save_plot(fig, f"Histogram")
+        
 
 
 @dataclass
@@ -407,7 +447,9 @@ class Application(Figure):
 
 
     def __post_init__(self):
-        Figure.__post_init__(self)
+        self.filename = f"{self.dependant_var}_{self.specify}" # TODO handel better 
+        # Figure.__post_init__(self)
+        super().__post_init__()
         if self.cell_id == None:
             self.cell_id = self.valid_cell_ids
         self.fig = self.plot_applications()
@@ -465,7 +507,7 @@ class Application(Figure):
 
             for folder_file, cell_id, I_set, drug, drug_in, drug_out, application_order, pAD_locs in cell_sub_df[['folder_file','cell_id', 'I_set', 'drug', 'drug_in', 'drug_out', 'application_order', 'pAD_locs']].values:
                 self.fig_filename = f"{cell_id}_application{application_order}"
-                V_array , I_array, V_list = load_file(folder_file)
+                V_array , I_array, V_list = IGOR_load_file(folder_file)
                 if I_array is None:
                     I_array = np.zeros((len(V_array), 1))
 
@@ -524,5 +566,4 @@ class Application(Figure):
                 ax1.set_title(cell_id + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
                 plt.tight_layout()
                 plt.show()
-                self.save_figure(fig)
-                
+                self.save_plot(fig, f"{cell_id}_APP_{str(application_order)}")

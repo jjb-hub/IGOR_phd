@@ -1,5 +1,5 @@
 ####### FUNCTION THAT DEAL WITH SAVING INFORMATIONS ABOUT EXPERIMENTS ###########
-from module.utils import saveDataTracking
+# from module.utils import saveDataTracking
 import json
 
 

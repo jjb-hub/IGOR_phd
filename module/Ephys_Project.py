@@ -5,6 +5,7 @@ from typing import Optional
 from module.Cachable import Cachable
 import traceback
 from tqdm import tqdm
+from IPython.display import display
 from itertools import combinations
 from module.utils import * 
 from module.getters import getRawDf, calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, tau_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator
@@ -18,45 +19,140 @@ if not os.path.exists(ROOT):
 
 
 @dataclass
-class EphysData (Cachable):
-    
-    project: str #name of the excel_filename project_filename in notebook
-    initial_columns: list = None #defined by child classes
-    sampling_rate: float = 2e4
-    data_type: str = None #defined by child class
+class Project(Cachable):
+    '''
+    Class for handeling file system for a project. 
+    '''
+    project: str
+    input_dir: str = field(init=False)
+    output_dir: str = field(init=False)
+    figure_output_dir: str = field(init=False)
 
     def __post_init__(self):
         super().__init__(cache_dir=f"{ROOT}/{self.project}/cache")
         self.location = f"{ROOT}/{self.project}"
         self.input_dir = self._checkFileSystem("input")
         self.output_dir = self._checkFileSystem("output")
-        
+        self.figure_output_dir = self._checkFileSystem("figures")
+        self.feature_df = self.load_xlsx('features')
 
-        # self.raw_df = getRawDf(self.project)
-        self.raw_df = self._load('features')
-
-        if  self.isCached(self.filename): #filename defined by child class
-            self.df = self.getCache(self.filename)
-        else:
-            self.df = self.generate()
-        
-    def _load(self, filename: str):
+    def load_xlsx(self, filename: str):
         """Loads data from cache or an Excel file."""
         if self.isCached(filename):
             return self.getCache(filename)
         else:
-            df = pd.read_excel(os.path.join(self.input_dir, f"{filename}.xlsx"), converters={'drug_in':int, 'drug_out':int}) #HARD CODE 
-            df['cell_subtype'].fillna(np.nan, inplace=True)
-            self.cache(filename, df)  
-            return df  
+            filepath = os.path.join(self.input_dir, f"{filename}.xlsx")
+            if os.path.exists(filepath):
+                
+                if filename =='features':
+                    df = pd.read_excel(filepath, converters={'drug_in':int, 'drug_out':int}) #eventualy replace with validator of feature df
+                    df['cell_subtype'].fillna(np.nan, inplace=True)
+                else:
+                    df = pd.read_excel(filepath)
+
+                self.cache(filename, df)
+                return df
+            raise FileNotFoundError(f"Excel file {filename} not found in {self.input_dir}")
+            
+
+    def IGOR_load(self, folder_file):
+        path_V, path_I = self.make_path(folder_file)
+        V_list, V_array = self.igor_exporter(path_V)
+        I_list, I_array = None, None
+        try:
+            I_list, I_array = self.igor_exporter(path_I)
+        except FileNotFoundError:
+            I_array = None
+        return V_array, I_array, V_list
+
+    def make_path(self, folder_file): 
+        """Generates file paths for voltage and current data."""
+        if not isinstance(folder_file, str) or pd.isna(folder_file):
+            raise ValueError(f"Invalid folder_file: {folder_file}")
+        extension_V = "Soma.ibw"  # Voltage data file extension
+        extension_I = "Soma_outwave.ibw"  # Current data file extension
+
+        path_V = os.path.join(self.input_dir, 'PatchData',  folder_file + extension_V)
+        path_I = os.path.join(self.input_dir, 'PatchData', folder_file + extension_I)
+        return path_V, path_I
+
+    def igor_exporter(self, path):
+        """Loads and processes .ibw files using igor binarywave."""
+        igor_file = igor.binarywave.load(path)
+        wave = igor_file["wave"]["wData"]
+        igor_df = pd.DataFrame(wave)
+        point_list = igor_df.values.flatten().tolist()
+        V_array_2d = igor_df.to_numpy()
+        return point_list, V_array_2d
+    
+
+    def inspect_IGOR_file(self, folder_file, stacked=False, n_sweeps=None):
+        '''
+        Plots any waveform based off folder_file.
+        Stacked will plot each column on top of each other, defaults to False.
+        '''
+        feature_df = self.load_xlsx('features')
+        V_array , I_array, V_list = self.IGOR_load(folder_file)
+        display(feature_df[feature_df['folder_file'] == folder_file])  # Show file info
+        self.quick_line_plot(V_array, f'Voltage trace for {folder_file}', 'Voltage (mV)', n_sweeps=n_sweeps, stacked=stacked )
+        try:
+            self.quick_line_plot(I_array, f'Current (I) trace for {folder_file}', 'Current (pA)', n_sweeps=n_sweeps,  stacked=stacked) #TODO add if check shape hwen no I 
+        except FileNotFoundError:
+            print(f'No I file found for {folder_file}')
+
+    def quick_line_plot(self, plot_array, plottitle, y_label,  n_sweeps=None, stacked=False):
+        '''
+        Plots line plot for given array without adding a legend for stacked plots.
+        
+        Parameters:
+            plot_array (numpy.ndarray): 2D array to plot, where each column is a sweep.
+            plottitle (str): Title for the plot.
+            stacked (bool): If True, plots each sweep stacked. If False, concatenates sweeps.
+        '''
+        plt.figure()
+        num_sweeps = plot_array.shape[1]
+        if n_sweeps is None or n_sweeps > num_sweeps:
+            n_sweeps = num_sweeps 
+        
+        if stacked:
+            for i in range(n_sweeps):
+                plt.plot(plot_array[:, i])  # Plot each sweep
+        else:
+            # Concatenate sweeps for continuous plotting
+            cropped_array = plot_array[:, :n_sweeps] 
+            continuous_plot = cropped_array.ravel(order='F')  # Flatten array in column-major order
+            plt.plot(continuous_plot)  # Plot continuous
+        
+        plt.title(plottitle)
+        plt.xlabel('Time in ms')
+        plt.ylabel(y_label)
+        plt.show()
+
+
+
+
+@dataclass
+class EphysData (Project):
+    
+    # project: str #name of the excel_filename project_filename in notebook
+    initial_columns: list = None #defined by child classes
+    sampling_rate: float = 2e4
+    data_type: str = None #defined by child class
+    filename: str = None # defined by child class
+
+
+    def __post_init__(self):
+        super().__post_init__()
+        if  self.isCached(self.filename): 
+            self.df = self.getCache(self.filename)
+        else:
+            self.df = self.generate()
         
 
-    
    
     def generate(self):
-        ''' generic generator for dfs.'''
-        
-        df = self.raw_df[self.raw_df['data_type'] == self.data_type][self.initial_columns] 
+        ''' generic generator for dfs'''
+        df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns] 
 
         df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1)
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
@@ -102,72 +198,14 @@ class EphysData (Cachable):
         return row
     
 
-    def IGOR_load_file(self, folder_file):
-        path_V, path_I = self.make_path(folder_file)
-        V_list, V_array = self.igor_exporter(path_V)
-        I_list, I_array = None, None
-        try:
-            I_list, I_array = self.igor_exporter(path_I)
-
-        except FileNotFoundError:
-            I_array = None
-            # print(f'I file not found, path: {path_I}')
-
-        return V_array , I_array, V_list
-            
-
-    def make_path(self, folder_file): 
-        '''
-        Parameters       
-        ----------
-        folder_file : 'folder_file'
-        Returns
-        -------
-        path_V : string - path for V data 
-        path_I : string - path for I data 
-        '''
-        if not isinstance(folder_file, str) or pd.isna(folder_file):
-            raise ValueError(f"Invalid folder_file: {folder_file}")
-        data_path = f'{self.input_dir}/PatchData/'
-        extension_V = "Soma.ibw" #HARD CODE  
-        extension_I = "Soma_outwave.ibw" 
-        path_V = data_path + folder_file + extension_V
-        try:
-            path_I = data_path + folder_file + extension_I
-        except:
-            path_I = np.nan 
-        return path_V, path_I
-
-
-    def igor_exporter(self, path):
-        ''' 
-        Parameters
-        ----------
-        path: path to .ibw file
-        Returns
-        -------
-        'point_list' (list): a continious points  (combining sweeps)  
-        'V_array_2d' (array): a 2d array with each column corisponding to one sweep  
-        '''
-        igor_file = igor.binarywave.load(path)
-        wave = igor_file["wave"]["wData"]
-        igor_df = pd.DataFrame(wave)
-        point_list = list()
-        counter = len(igor_df.columns)
-        for i in range(len(igor_df.columns)):
-            temp_list = igor_df.iloc[:,i].tolist()
-            point_list.extend(temp_list)
-            counter = counter - 1
-        
-        V_array_2d = np.array(igor_df)
-        return (point_list, V_array_2d)
-
+    
 
 @dataclass
 class FP(EphysData):
     
     filename: str = "FP_df"
     data_type: str = 'FP'
+    
   
     def __post_init__(self):
         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
@@ -175,7 +213,7 @@ class FP(EphysData):
     
     def process(self, row: pd.Series) -> pd.Series:
         """Processing logic specific to FP data type. Could also handle FP_APP data if sufficient to analise."""
-        V_array , I_array, V_list = self.IGOR_load_file(row['folder_file'])
+        V_array , I_array, V_list = self.IGOR_load(row['folder_file'])
 
         row["max_firing"] = calculate_max_firing(V_array)
         (peak_voltages_all, peak_latencies_all, v_thresholds_all,
@@ -221,55 +259,8 @@ class APP(EphysData):
     def process(self, row: pd.Series) -> pd.Series:
         """Generate APP_df from scratch, 
         Processing logic specific to APP data type."""
-        V_array , I_array, V_list = self.IGOR_load_file(row['folder_file'])
+        V_array , I_array, V_list = self.IGOR_load(row['folder_file'])
 
-        def check_variability(values, Vairability_threshold=0.30): 
-            """Check if variability of values exceeds the given threshold."""
-            values = np.array(values)[~np.isnan(values)]
-            if len(values) <= 1:
-                return True
-            min_val = np.min(values)
-            max_val = np.max(values)
-            # print(f" % var  {abs((max_val - min_val) / min_val)}")
-            return abs((max_val - min_val) / min_val) <= Vairability_threshold
-        
-        def group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=0.5):
-            """
-            Groups APs into bursts based on the time difference between them.
-            Condenses each burst into the maximum peak voltage and returns a list of these max values.
-            - peak_locs_corr_all: AP peak locations within sweep
-            - sweep_indices_all: sweep of each AP
-            - peak_voltages_all: List of AP peak voltages 
-            - burst_window_seconds: The time window (in seconds) to consider APs as part of the same burst. Default is 0.5 seconds.
-            """            
-            burst_window_samples = int(burst_window_seconds * self.sampling_rate)
-            bursts = []
-            current_burst = []
-
-            # Iterate over each AP's peak location, voltage, and sweep index
-            for i, (peak_loc, sweep_index) in enumerate(zip(peak_locs_corr_all, sweep_indices_all)):
-                curr_time = (sweep_index * V_array.shape[0] + peak_loc) / self.sampling_rate
-                
-                if not current_burst: #first AP
-                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
-                    continue
-                
-                prev_peak_loc, prev_voltage, prev_time = current_burst[-1]
-                
-                time_diff = curr_time - prev_time
-                time_diff_samples = time_diff * self.sampling_rate
-                
-                if time_diff_samples <= burst_window_samples:
-                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
-                else:
-                    # Finalize the current burst and start a new one
-                    bursts.append(max(voltage for _, voltage, _ in current_burst))
-                    current_burst = [(peak_loc, peak_voltages_all[i], curr_time)]
-            
-            if current_burst:
-                bursts.append(max(voltage for _, voltage, _ in current_burst))
-        
-            return bursts
         
         if I_array is not None and (I_array[:, 0] != 0).any():
             input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
@@ -331,27 +322,77 @@ class APP(EphysData):
             row['APcount_WASH'] = 0
 
         #APP validators by vairability in PRE / basleine
+        def check_variability(values, Vairability_threshold=0.30): 
+            """Check if variability of values exceeds the given threshold."""
+            values = np.array(values)[~np.isnan(values)]
+            if len(values) <= 1:
+                return True
+            min_val = np.min(values)
+            max_val = np.max(values)
+            print(f" % var  {abs((max_val - min_val) / min_val)}")
+            return abs((max_val - min_val) / min_val) <= Vairability_threshold
+        
+        def group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=0.5):
+            """
+            Groups APs into bursts based on the time difference between them.
+            Condenses each burst into the maximum peak voltage and returns a list of these max values.
+            - peak_locs_corr_all: AP peak locations within sweep
+            - sweep_indices_all: sweep of each AP
+            - peak_voltages_all: List of AP peak voltages 
+            - burst_window_seconds: The time window (in seconds) to consider APs as part of the same burst. Default is 0.5 seconds.
+            """            
+            burst_window_samples = int(burst_window_seconds * self.sampling_rate)
+            bursts = []
+            current_burst = []
+            # Iterate over each AP's peak location, voltage, and sweep index
+            for i, (peak_loc, sweep_index) in enumerate(zip(peak_locs_corr_all, sweep_indices_all)):
+                curr_time = (sweep_index * V_array.shape[0] + peak_loc) / self.sampling_rate
+                
+                if not current_burst: #first AP
+                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
+                    continue
+                
+                prev_peak_loc, prev_voltage, prev_time = current_burst[-1]
+                
+                time_diff = curr_time - prev_time
+                time_diff_samples = time_diff * self.sampling_rate
+                
+                if time_diff_samples <= burst_window_samples:
+                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
+                else:
+                    # Finalize the current burst and start a new one
+                    bursts.append(max(voltage for _, voltage, _ in current_burst))
+                    current_burst = [(peak_loc, peak_voltages_all[i], curr_time)]
+            
+            if current_burst:
+                bursts.append(max(voltage for _, voltage, _ in current_burst))
+            return bursts
+        
+
         if len(peak_voltages_all)>0:
             if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 30: #HARDCODE minimum 30 mV AP height to declare offset issues
                 row['offset']= True
             else:
                 peak_voltage_burst_max = group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=1)
 
-                if (check_variability(peak_voltage_burst_max, Vairability_threshold=0.5) == False or
-                    check_variability([row['RMP_PRE']]) == False or
-                    check_variability([row['inputR_PRE']], Vairability_threshold=1) == False):
-                    print('check') #CHECK TODO JAS
+                if (check_variability(peak_voltage_burst_max, Vairability_threshold=1.11) == False or
+                    check_variability([row['RMP_PRE']],  Vairability_threshold=0.4) == False 
+                    # check_variability([row['inputR_PRE']], Vairability_threshold=1) == False
+                    ):
+                    print(f'APP file {row.folder_file} excluded due to AP or RMP vairability.') #CHECK TODO JAS
 
                 row['valid'] = (
-                    check_variability(peak_voltage_burst_max, Vairability_threshold=0.5) and
-                    check_variability([row['RMP_PRE']]) and
-                    check_variability([row['inputR_PRE']], Vairability_threshold=1) #HARD CODE vaitability threshold 
+                    check_variability(peak_voltage_burst_max, Vairability_threshold=1) and
+                    check_variability([row['RMP_PRE']]) 
+                    # check_variability([row['inputR_PRE']], Vairability_threshold=1) #HARD CODE vaitability threshold 
                     )
         else:
             row['valid'] = (
-                check_variability([row['RMP_PRE']]) and
-                check_variability([row['inputR_PRE']], Vairability_threshold=1)
+                check_variability([row['RMP_PRE']]) 
+                # check_variability([row['inputR_PRE']], Vairability_threshold=1)
                 )
+
+
         return row
         
 class Hunter(EphysData):
@@ -364,7 +405,7 @@ class Hunter(EphysData):
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
-        V_array , I_array, V_list = self.IGOR_load_file(row['folder_file'])
+        V_array , I_array, V_list = self.IGOR_load(row['folder_file'])
 
         (peak_voltages_all, peak_latencies_all, v_thresholds_all,
         peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
@@ -382,7 +423,7 @@ class Hunter(EphysData):
 class Ephys(EphysData):
     ''' 
     Buiilding aggregate df with cell info based off extracted data from each data type: APP, FP and pAD_hunter each with their own class
-        raw_df: excel input mapping folder_files to features
+        feature_df: excel input mapping folder_files to features
 
         FP_df: extraction of firing property data (FP)
         APP_df: extraction of applications data (APP)
@@ -395,19 +436,18 @@ class Ephys(EphysData):
     sampling_rate: float = 2e4
     
     def __post_init__(self):
-
+        
         self.FP_df = FP(self.project).df
         self.APP_df = APP(self.project).df
-        self.hunter_df = Hunter(self.project).df
+        # self.hunter_df = Hunter(self.project).df some issue with 
         super().__post_init__()
-    
         
     
     def generate(self) -> pd.DataFrame:
         """
         Builds cell_df with each row a cell_id, access_change reported where possible and valid data is marked True in 'data_type' column i.e. "FP".
         """
-        df = self.raw_df.copy()
+        df = self.feature_df.copy()
         df['treatment'] = df.apply(lambda row: row['drug'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
 
         def check_unique(series, cell_id):
@@ -483,10 +523,13 @@ class Ephys(EphysData):
         cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
 
         # APPLICATION FILES
-        filtered_app_df = self.APP_df[ (self.APP_df['valid'] == True) &
+        filtered_app_df = self.APP_df[ 
+                                    # (self.APP_df['valid'] == True) & vaildators based on vairability - changing exclusion criteria 
                                     (self.APP_df['application_order'] == 1) &
                                     (self.APP_df['replication_no'] == 1)]
         valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
         cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
+
         self.cache("cell_df", cell_df)
+        self.save_excel("cell_df", cell_df)
         return cell_df
