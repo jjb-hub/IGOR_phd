@@ -5,6 +5,7 @@ output
 .DS_Store
 __pycache__
 input
+figures
 debug.py
 cache
 ephys_phd.db
