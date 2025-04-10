@@ -7,14 +7,14 @@ from typing import ClassVar
 from itertools import cycle
 import statsmodels.api as sm
 from statsmodels.formula.api import mixedlm
-from module.Ephys import EphysData
 import os
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 import seaborn as sns
 from typing import Optional
 from module.utils import  subselectDf, saveFigure, getCache, isCached, cache, cache_excel #should become Cashable class
 from module.constants import CACHE_DIR, color_dict, unit_dict
-from module.Ephys import Ephys, APP, FP
+# from module.Ephys import Ephys, APP, FP, EphysData # I THINK THIS IS OLD?
+from module.Ephys_Project import Ephys, APP, FP, Project
 from module.Cachable import Cachable
 from module.action_potential_functions import ap_characteristics_extractor_main, normalise_array_length #should become ActionPotential class
 
@@ -441,13 +441,18 @@ class Histogram(Figure):
 
 @dataclass
 class Application(Figure):
+
+    '''Plot a single APP file from cell_id or list of.'''
+    project: str = field(kw_only = True)
     cell_id: str|list = field(kw_only = True, default = None) # optional pram for plotting specific cell/s application
     plot_all_APs: bool = field(kw_only=True, default=False)
     valid_only: bool = field(kw_only=True, default=False)
 
 
+
+
     def __post_init__(self):
-        self.filename = f"{self.dependant_var}_{self.specify}" # TODO handel better 
+        # self.filename = f"{self.dependant_var}_{self.specify}" # TODO handel better 
         # Figure.__post_init__(self)
         super().__post_init__()
         if self.cell_id == None:
@@ -499,7 +504,7 @@ class Application(Figure):
     
     def plot_applications(self):
         for cell_id in self.cell_id:
-
+            self.filename = f'{cell_id}_application'
             # Fetch folder_file for the specific cell_id
             cell_sub_df = self.APP_df[self.APP_df['cell_id'] == cell_id]
             if self.valid_only == True:
@@ -507,14 +512,15 @@ class Application(Figure):
 
             for folder_file, cell_id, I_set, drug, drug_in, drug_out, application_order, pAD_locs in cell_sub_df[['folder_file','cell_id', 'I_set', 'drug', 'drug_in', 'drug_out', 'application_order', 'pAD_locs']].values:
                 self.fig_filename = f"{cell_id}_application{application_order}"
-                V_array , I_array, V_list = IGOR_load_file(folder_file)
+                V_array , I_array, V_list = Project(self.project).IGOR_load(folder_file)
                 if I_array is None:
                     I_array = np.zeros((len(V_array), 1))
 
                 # sampeling at 20KHz -->  time (s)
                 seconds_per_sweep = len(V_array[:,0]) * 0.00005 # multiplying this  by drug_in/out will give you the point at the end of the sweep in seconds
-                x_V = np.arange(len(V_list)) * 0.00005 
-                # x_V = np.arange(V_array.shape[0] * V_array.shape[1]) * 0.00005 
+                # x_V = np.arange(len(V_list)) * 0.00005 #trying to rewmove list handeling 10_4_25
+                
+                x_V = np.arange(V_array.shape[0] * V_array.shape[1]) * 0.00005 
                 x_I = np.arange(len(I_array)) * 0.00005 
 
                 #build figure 
@@ -523,7 +529,12 @@ class Application(Figure):
                 ax2 = plt.subplot2grid((11, 8), (8, 0), rowspan = 2, colspan=11)
 
                 #plot voltage / time
-                ax1.plot(x_V, V_list, c = 'k' if drug is None else color_dict.get(drug, 'k'), lw=1, alpha=0.8) 
+                n_sweeps = V_array.shape[1]  # Number of sweeps based on the second dimension of V_array
+                cropped_array = V_array[:, :n_sweeps]  # Crop the array to match the number of sweeps
+                continuous_plot = cropped_array.ravel(order='F')  # Flatten the array in column-major (Fortran) order
+                ax1.plot(x_V, continuous_plot, c='k' if drug is None else color_dict.get(drug, 'k'), lw=1, alpha=0.8)  # Plot voltage
+
+                # ax1.plot(x_V, V_list, c = 'k' if drug is None else color_dict.get(drug, 'k'), lw=1, alpha=0.8) #trying to rewmove list handeling 10_4_25
 
                 AP_df = self.build_AP_DF(folder_file, V_array, I_array)
                 if self.plot_all_APs and not AP_df.empty: 

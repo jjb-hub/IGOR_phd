@@ -81,8 +81,9 @@ class Project(Cachable):
         igor_file = igor.binarywave.load(path)
         wave = igor_file["wave"]["wData"]
         igor_df = pd.DataFrame(wave)
-        point_list = igor_df.values.flatten().tolist()
         V_array_2d = igor_df.to_numpy()
+        point_list = V_array_2d.ravel(order='F') #igor_df.values.flatten().tolist() was not working SAD data
+        
         return point_list, V_array_2d
     
 
@@ -133,6 +134,8 @@ class Project(Cachable):
 
 @dataclass
 class EphysData (Project):
+
+    '''Generic data_type extractor, child classes process the data nd make aggregate dfs'''
     
     # project: str #name of the excel_filename project_filename in notebook
     initial_columns: list = None #defined by child classes
@@ -329,7 +332,7 @@ class APP(EphysData):
                 return True
             min_val = np.min(values)
             max_val = np.max(values)
-            print(f" % var  {abs((max_val - min_val) / min_val)}")
+            # print(f" % var  {abs((max_val - min_val) / min_val)}")
             return abs((max_val - min_val) / min_val) <= Vairability_threshold
         
         def group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=0.5):
