@@ -82,8 +82,7 @@ class Project(Cachable):
         wave = igor_file["wave"]["wData"]
         igor_df = pd.DataFrame(wave)
         V_array_2d = igor_df.to_numpy()
-        point_list = V_array_2d.ravel(order='F') #igor_df.values.flatten().tolist() was not working SAD data
-        
+        point_list = V_array_2d.ravel(order='F') 
         return point_list, V_array_2d
     
 
@@ -225,10 +224,7 @@ class FP(EphysData):
          sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(
             row['folder_file'], V_array)
         
-        if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-            row['pAD'] = True
-            row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-
+       
         step_current_values, ap_counts, V_rest, off_step_peak_locs, ap_frequencies_Hz = extract_FI_x_y(
             row['folder_file'], V_array, I_array, peak_locs_corr_all, sweep_indices_all)
         FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(
@@ -246,6 +242,21 @@ class FP(EphysData):
 
         row["tau_rc"] = tau_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
         row["sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
+
+         #fetch FP data for this cell and use the average threshold to define the pAD 
+        try:
+            cell_threshold = np.mean(row['voltage_threshold'])
+        except:
+            cell_threshold = -45 #so when you -20 is 65 for cells without FP
+
+        pAD_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
+
+
+        # if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+        if any(pAD_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+            row['pAD'] = True
+            row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+
 
         return row
     
@@ -295,7 +306,7 @@ class APP(EphysData):
             FP_cell_id_PRE = FP_df[(FP_df['cell_id'] == row['cell_id']) & (FP_df['drug'] == 'PRE')]
             cell_threshold = (FP_cell_id_PRE['voltage_threshold'].apply(lambda x: sum(x) / len(x) if isinstance(x, list) else x)).mean()
         except:
-            cell_threshold = -65
+            cell_threshold = -45 #so when you -20 is 65 for cells without FP
 
         pAD_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
 
@@ -475,6 +486,9 @@ class Ephys(EphysData):
             return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
 
         def calculate_percentage_diff(group):
+            """
+            Selects the two PRE and two non-PRE FP files with the most similar R_series values to compute access change. 
+            If several have the same access chose the filder_files that have the least mising values."""
             cell_id = group.name
             #FIRING PROPERTY 
             cell_fp_df = self.FP_df[self.FP_df['cell_id'] == cell_id]
@@ -514,16 +528,44 @@ class Ephys(EphysData):
             if best_pre_pair is None or best_non_pre_pair is None:
                 return pd.Series({'access_change': None, 'FP_valid': None})
             
-            # Get folder files for the selected pairs
+            # folder_file filtered on access
             pre_folder_files = pre_values[pre_values['R_series'].isin(best_pre_pair)]['folder_file'].tolist() 
             non_pre_folder_files = non_pre_values[non_pre_values['R_series'].isin(best_non_pre_pair)]['folder_file'].tolist()
-            folder_files = pre_folder_files[0:2] + non_pre_folder_files[0:2]
-            
-            return pd.Series({'access_change': min_diff, 'FP_valid': folder_files})
-        
+
+            # filter folder_files on extracted features and absence of pAD
+            if len(pre_folder_files) > 2 or len(non_pre_folder_files) > 2:
+                FP_feature_cols = [
+                    'AP_peak_voltages', 'AP_slope', 'AP_width', 'FI_slope',
+                    'max_firing', 'rheobased_threshold', 'sag', 'tau_rc', 'voltage_threshold'
+                ]
+                
+                pre_df = cell_fp_df[cell_fp_df['drug'] == 'PRE'].copy()
+                non_pre_df = cell_fp_df[cell_fp_df['drug'] != 'PRE'].copy()
+                
+                # Only keep rows that match the selected best R_series
+                pre_df = pre_df[pre_df['R_series'].isin(best_pre_pair)]
+                non_pre_df = non_pre_df[non_pre_df['R_series'].isin(best_non_pre_pair)]
+                
+                # Count missing values in relevant columns
+                pre_df['missing_count'] = pre_df[FP_feature_cols].isna().sum(axis=1)
+                non_pre_df['missing_count'] = non_pre_df[FP_feature_cols].isna().sum(axis=1)
+
+                # Sort and select top 2
+                pre_folder_files = pre_df.sort_values(by='missing_count')['folder_file'].iloc[:2].tolist()
+                non_folder_files = non_pre_df.sort_values(by='missing_count')['folder_file'].iloc[:2].tolist()
+            else:
+                # Safe fallback if only 1–2 values are returned, keep them directly
+                pre_folder_files = pre_folder_files[:2]
+                non_folder_files = non_pre_folder_files[:2]
+
+            return pd.Series({'access_change': min_diff, 'FP_valid': pre_folder_files + non_folder_files})
+
+
+                    
         cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
         diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
         cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
+        
 
         # APPLICATION FILES
         filtered_app_df = self.APP_df[ 
@@ -532,6 +574,8 @@ class Ephys(EphysData):
                                     (self.APP_df['replication_no'] == 1)]
         valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
         cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
+
+        cell_df
 
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)
