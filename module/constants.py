@@ -20,7 +20,7 @@ color_dict = { #drugs
               "LSD_CNQX_APP5": 'purple',
               "MDL":'blue', 
                 #AP figures
-              "pAD":"orange",
+              "RA":"orange",
               "Somatic":"blue",
                 #APP figure
               "PRE":"azure",
@@ -33,13 +33,14 @@ unit_dict = {'max_firing': 'Firing_(Hz)',
             'rheobased_threshold': 'Rheobase_Threshold_(pA)',
             'FI_slope': 'Firing_Frequency_/_Current_(pA)',
             'AP_height': ' AP_Height_(mV)', 
-            'AP_slope': 'AP_slope_(V_s^-1)',
+            'AP_decay_dvdt': 'AP_decay_(V/s)',
+            'AP_rise_dvdt': 'AP_rise_(V/s)',
             'AP_width': 'AP_width_(s) ',
             'AP_latency': 'AP_latency_(ms)',
             'tau_rc':'ms',
             'sag':'%',
             'AP_count':'AP_count', #ODD TODO 
-            'pAD_count':'AP_count',
+            'RA_count':'AP_count',
             'inputR': 'input R (MOhm)',
             'RMP':'membrane potential (mV)',
             'AP_dvdt_max': 'dV/dt (V/s)'

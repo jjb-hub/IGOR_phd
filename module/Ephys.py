@@ -1,492 +1,497 @@
-import os
-import pandas as pd
-from dataclasses import dataclass, field
-from typing import Optional
-from module.Cachable import Cachable
-import traceback
-from tqdm import tqdm
-from itertools import combinations
-from module.utils import * 
-from module.getters import getRawDf, calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, tau_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator
+# import os
+# import pandas as pd
+# from dataclasses import dataclass, field
+# from typing import Optional
+# from module.Cachable import Cachable
+# import traceback
+# from tqdm import tqdm
+# from itertools import combinations
+# from module.utils import * 
+# from module.getters import getRawDf, calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, tau_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator
 
-tqdm.pandas()
+# tqdm.pandas()
 
-# Root directory for projects
-ROOT = f"{os.getcwd()}/PROJECTS"
-if not os.path.exists(ROOT):
-    os.mkdir(ROOT)
+# # Root directory for projects
+# ROOT = f"{os.getcwd()}/PROJECTS"
+# if not os.path.exists(ROOT):
+#     os.mkdir(ROOT)
 
 
-@dataclass
-class EphysData (Cachable):
+# @dataclass
+# class EphysData (Cachable):
     
-    project: str #name of the excel_filename project_filename in notebook
-    initial_columns: list = None #defined by child classes
-    sampling_rate: float = 2e4
-    data_type: str = None #defined by child class
+#     project: str #name of the excel_filename project_filename in notebook
+#     initial_columns: list = None #defined by child classes
+#     sampling_rate: float = 2e4
+#     data_type: str = None #defined by child class
 
-    def __post_init__(self):
-        super().__init__(cache_dir=f"{ROOT}/{self.project}/cache")
-        self.location = f"{ROOT}/{self.project}"
-        self.input_dir = self._checkFileSystem("input")
-        self.output_dir = self._checkFileSystem("output")
+#     def __post_init__(self):
+#         super().__init__(cache_dir=f"{ROOT}/{self.project}/cache")
+#         self.location = f"{ROOT}/{self.project}"
+#         self.input_dir = self._checkFileSystem("input")
+#         self.output_dir = self._checkFileSystem("output")
         
 
-        # self.raw_df = getRawDf(self.project)
-        self.raw_df = self._load('features')
+#         # self.raw_df = getRawDf(self.project)
+#         self.raw_df = self._load('features')
 
-        if  self.isCached(self.filename): #filename defined by child class
-            self.df = self.getCache(self.filename)
-        else:
-            self.df = self.generate()
+#         if  self.isCached(self.filename): #filename defined by child class
+#             self.df = self.getCache(self.filename)
+#         else:
+#             self.df = self.generate()
         
-    def _load(self, filename: str):
-        """Loads data from cache or an Excel file."""
-        if self.isCached(filename):
-            return self.getCache(filename)
-        else:
-            df = pd.read_excel(os.path.join(self.input_dir, f"{filename}.xlsx"), converters={'drug_in':int, 'drug_out':int}) #HARD CODE 
-            df['cell_subtype'].fillna(np.nan, inplace=True)
-            self.cache(filename, df)  
-            return df  
+#     def _load(self, filename: str):
+#         """Loads data from cache or an Excel file."""
+#         if self.isCached(filename):
+#             return self.getCache(filename)
+#         else:
+#             df = pd.read_excel(os.path.join(self.input_dir, f"{filename}.xlsx"), converters={'drug_in':int, 'drug_out':int}) #HARD CODE 
+#             df['cell_subtype'].fillna(np.nan, inplace=True)
+#             self.cache(filename, df)  
+#             return df  
         
-
-    
    
-    def generate(self):
-        ''' generic generator for dfs.'''
+#     def generate(self):
+#         ''' generic generator for dfs.'''
         
-        df = self.raw_df[self.raw_df['data_type'] == self.data_type][self.initial_columns] 
+#         df = self.raw_df[self.raw_df['data_type'] == self.data_type][self.initial_columns] 
 
-        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1)
-        additional_columns = [col for col in df.columns if col not in self.initial_columns]
-        df = df[self.initial_columns + additional_columns]
-        # cache(self.project, self.filename, df)
-        self.cache(self.filename, df)
-        return df
+#         df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1)
+#         additional_columns = [col for col in df.columns if col not in self.initial_columns]
+#         df = df[self.initial_columns + additional_columns]
+#         # cache(self.project, self.filename, df)
+#         self.cache(self.filename, df)
+#         return df
     
-    def process(self):
-        raise NotImplementedError
+#     def process(self):
+#         raise NotImplementedError
     
-    def _handle_extraction(self, row: pd.Series, process_function) -> pd.Series:
-        '''Error handeling to add rows 'error' and 'ran' to each df made. '''
-        row = row.copy()
-        error_msg = None
-        error_traceback = None
+#     def _handle_extraction(self, row: pd.Series, process_function) -> pd.Series:
+#         '''Error handeling to add rows 'error' and 'ran' to each df made. '''
+#         row = row.copy()
+#         error_msg = None
+#         error_traceback = None
 
-        def log_error(msg, tb):
-            nonlocal error_msg
-            nonlocal error_traceback
-            error_msg = msg
-            error_traceback = tb
+#         def log_error(msg, tb):
+#             nonlocal error_msg
+#             nonlocal error_traceback
+#             error_msg = msg
+#             error_traceback = tb
 
-        try:
-            row = process_function(row)
-        except Exception as e:
-            error_type = type(e).__name__
-            error_tb = traceback.format_exc()
-            lines = error_tb.split('\n')
-            relevant_tb = [lines[idx - 1].strip() for idx, line in enumerate(lines) if f'{error_type}: {str(e)}' in line]
+#         try:
+#             row = process_function(row)
+#         except Exception as e:
+#             error_type = type(e).__name__
+#             error_tb = traceback.format_exc()
+#             lines = error_tb.split('\n')
+#             relevant_tb = [lines[idx - 1].strip() for idx, line in enumerate(lines) if f'{error_type}: {str(e)}' in line]
 
-            log_error(f'{error_type}: {str(e)}', relevant_tb)
-            error_traceback = relevant_tb
+#             log_error(f'{error_type}: {str(e)}', relevant_tb)
+#             error_traceback = relevant_tb
         
-        if error_msg:
-            row['error'] = error_msg
-            row['traceback'] = error_traceback
-            print(f'{row.cell_id} error message logged: {error_msg}')
-            print(f'{row.cell_id} traceback: {error_traceback}')
-        else:
-            row['error'] = 'ran'
-            row['traceback'] = None
-        return row
+#         if error_msg:
+#             row['error'] = error_msg
+#             row['traceback'] = error_traceback
+#             print(f'{row.cell_id} error message logged: {error_msg}')
+#             print(f'{row.cell_id} traceback: {error_traceback}')
+#         else:
+#             row['error'] = 'ran'
+#             row['traceback'] = None
+#         return row
     
+#     @staticmethod
+#     def IGOR_load_file(folder_file, input_dir):
 
-    def IGOR_load_file(self, folder_file):
-        path_V, path_I = self.make_path(folder_file)
-        V_list, V_array = self.igor_exporter(path_V)
-        I_list, I_array = None, None
-        try:
-            I_list, I_array = self.igor_exporter(path_I)
+#         def make_path( folder_file): 
+#             '''
+#             Parameters       
+#             ----------
+#             folder_file : 'folder_file'
+#             Returns
+#             -------
+#             path_V : string - path for V data 
+#             path_I : string - path for I data 
+#             '''
+#             if not isinstance(folder_file, str) or pd.isna(folder_file):
+#                 raise ValueError(f"Invalid folder_file: {folder_file}")
+#             data_path = f'{input_dir}/PatchData/'
+#             extension_V = "Soma.ibw" #HARD CODE  
+#             extension_I = "Soma_outwave.ibw" 
+#             path_V = data_path + folder_file + extension_V
+#             try:
+#                 path_I = data_path + folder_file + extension_I
+#             except:
+#                 path_I = np.nan 
+#             return path_V, path_I
+        
+#         def igor_exporter( path):
+#             ''' 
+#             Parameters
+#             ----------
+#             path: path to .ibw file
+#             Returns
+#             -------
+#             'point_list' (list): a continious points  (combining sweeps)  
+#             'V_array_2d' (array): a 2d array with each column corisponding to one sweep  
+#             '''
+#             igor_file = igor.binarywave.load(path)
+#             wave = igor_file["wave"]["wData"]
+#             igor_df = pd.DataFrame(wave)
+#             point_list = list()
+#             counter = len(igor_df.columns)
+#             for i in range(len(igor_df.columns)):
+#                 temp_list = igor_df.iloc[:,i].tolist()
+#                 point_list.extend(temp_list)
+#                 counter = counter - 1
+#             V_array_2d = np.array(igor_df)
+#             return (point_list, V_array_2d)
+        
 
-        except FileNotFoundError:
-            I_array = None
-            # print(f'I file not found, path: {path_I}')
+#         path_V, path_I = make_path(folder_file)
+#         V_list, V_array = igor_exporter(path_V)
+#         I_list, I_array = None, None
+#         try:
+#             I_list, I_array = igor_exporter(path_I)
+#         except FileNotFoundError:
+#             I_array = None
+#             # print(f'I file not found, path: {path_I}')
 
-        return V_array , I_array, V_list
+#         return V_array , I_array, V_list
             
 
-    def make_path(self, folder_file): 
-        '''
-        Parameters       
-        ----------
-        folder_file : 'folder_file'
-        Returns
-        -------
-        path_V : string - path for V data 
-        path_I : string - path for I data 
-        '''
-        if not isinstance(folder_file, str) or pd.isna(folder_file):
-            raise ValueError(f"Invalid folder_file: {folder_file}")
-        data_path = f'{self.input_dir}/PatchData/'
-        extension_V = "Soma.ibw" #HARD CODE  
-        extension_I = "Soma_outwave.ibw" 
-        path_V = data_path + folder_file + extension_V
-        try:
-            path_I = data_path + folder_file + extension_I
-        except:
-            path_I = np.nan 
-        return path_V, path_I
 
 
-    def igor_exporter(self, path):
-        ''' 
-        Parameters
-        ----------
-        path: path to .ibw file
-        Returns
-        -------
-        'point_list' (list): a continious points  (combining sweeps)  
-        'V_array_2d' (array): a 2d array with each column corisponding to one sweep  
-        '''
-        igor_file = igor.binarywave.load(path)
-        wave = igor_file["wave"]["wData"]
-        igor_df = pd.DataFrame(wave)
-        point_list = list()
-        counter = len(igor_df.columns)
-        for i in range(len(igor_df.columns)):
-            temp_list = igor_df.iloc[:,i].tolist()
-            point_list.extend(temp_list)
-            counter = counter - 1
-        
-        V_array_2d = np.array(igor_df)
-        return (point_list, V_array_2d)
 
-
-@dataclass
-class FP(EphysData):
+# @dataclass
+# class FP(EphysData):
     
-    filename: str = "FP_df"
-    data_type: str = 'FP'
+#     filename: str = "FP_df"
+#     data_type: str = 'FP'
   
-    def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
-        super().__post_init__()
+#     def __post_init__(self):
+#         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
+#         super().__post_init__()
     
-    def process(self, row: pd.Series) -> pd.Series:
-        """Processing logic specific to FP data type. Could also handle FP_APP data if sufficient to analise."""
-        V_array , I_array, V_list = self.IGOR_load_file(row['folder_file'])
+#     def process(self, row: pd.Series) -> pd.Series:
+#         """Processing logic specific to FP data type. Could also handle FP_APP data if sufficient to analise."""
+#         V_array , I_array, V_list = EphysData.IGOR_load_file(row['folder_file'], self.input_dir)
 
-        row["max_firing"] = calculate_max_firing(V_array)
-        (peak_voltages_all, peak_latencies_all, v_thresholds_all,
-         peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
-         upshoot_locs_all, peak_heights_all, peak_fw_all,
-         sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(
-            row['folder_file'], V_array)
+#         row["max_firing"] = calculate_max_firing(V_array)
+
+#         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row.folder_file, V_array)
+
+#         # (peak_voltages_all, peak_latencies_all, v_thresholds_all,
+#         #  peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
+#         #  upshoot_locs_all, peak_heights_all, peak_fw_all,
+#         #  sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(
+#         #     row['folder_file'], V_array)
         
-        if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-            row['pAD'] = True
-            row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+#         if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+#             row['RA'] = True
+#             row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
 
-        step_current_values, ap_counts, V_rest, off_step_peak_locs, ap_frequencies_Hz = extract_FI_x_y(
-            row['folder_file'], V_array, I_array, peak_locs_corr_all, sweep_indices_all)
-        FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(
-            row['folder_file'], step_current_values, ap_counts)
-        row["rheobased_threshold"] = rheobase_threshold
-        row["FI_slope"] = FI_slope
+#         step_current_values, ap_counts, V_rest, off_step_peak_locs, ap_frequencies_Hz = extract_FI_x_y(
+#             row['folder_file'], V_array, I_array, peak_locs_corr_all, sweep_indices_all)
+#         FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(
+#             row['folder_file'], step_current_values, ap_counts)
+#         row["rheobased_threshold"] = rheobase_threshold
+#         row["FI_slope"] = FI_slope
 
-        row['AP_peak_voltages'] = peak_voltages_all[:10]
-        row["voltage_threshold"] = v_thresholds_all[:10]
-        row["AP_height"] = peak_heights_all[:10]
-        row["AP_width"] = peak_fw_all[:10]
-        row["AP_slope"] = peak_slope_all[:10]
-        row["AP_latency"] = peak_latencies_all[:10]
-        row["AP_dvdt_max"] = AP_max_dvdt_all[:10]
+#         row['AP_peak_voltages'] = peak_voltages_all[:10]
+#         row["voltage_threshold"] = v_thresholds_all[:10]
+#         row["AP_height"] = peak_heights_all[:10]
+#         row["AP_width"] = peak_fw_all[:10]
+#         row["AP_slope"] = peak_rise_all[:10]
+#         row["AP_latency"] = peak_latencies_all[:10]
+#         row["AP_dvdt_max"] = peak_max_dvdt_all[:10]
 
-        row["tau_rc"] = tau_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
-        row["sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
+#         row["tau_rc"] = tau_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
+#         row["sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
 
-        return row
+#         return row
     
-@dataclass
-class APP(EphysData):
+# @dataclass
+# class APP(EphysData):
     
-    filename: str = "APP_df"
-    data_type: str = 'APP'
+#     filename: str = "APP_df"
+#     data_type: str = 'APP'
 
-    def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
-        super().__post_init__()
+#     def __post_init__(self):
+#         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+#         super().__post_init__()
 
-    def process(self, row: pd.Series) -> pd.Series:
-        """Generate APP_df from scratch, 
-        Processing logic specific to APP data type."""
-        V_array , I_array, V_list = self.IGOR_load_file(row['folder_file'])
+#     def process(self, row: pd.Series) -> pd.Series:
+#         """Generate APP_df from scratch, 
+#         Processing logic specific to APP data type."""
+#         V_array , I_array, V_list = EphysData.IGOR_load_file(row['folder_file'], self.input_dir)
 
-        def check_variability(values, Vairability_threshold=0.30): 
-            """Check if variability of values exceeds the given threshold."""
-            values = np.array(values)[~np.isnan(values)]
-            if len(values) <= 1:
-                return True
-            min_val = np.min(values)
-            max_val = np.max(values)
-            # print(f" % var  {abs((max_val - min_val) / min_val)}")
-            return abs((max_val - min_val) / min_val) <= Vairability_threshold
+#         def check_variability(values, Vairability_threshold=0.30): 
+#             """Check if variability of values exceeds the given threshold."""
+#             values = np.array(values)[~np.isnan(values)]
+#             if len(values) <= 1:
+#                 return True
+#             min_val = np.min(values)
+#             max_val = np.max(values)
+#             # print(f" % var  {abs((max_val - min_val) / min_val)}")
+#             return abs((max_val - min_val) / min_val) <= Vairability_threshold
         
-        def group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=0.5):
-            """
-            Groups APs into bursts based on the time difference between them.
-            Condenses each burst into the maximum peak voltage and returns a list of these max values.
-            - peak_locs_corr_all: AP peak locations within sweep
-            - sweep_indices_all: sweep of each AP
-            - peak_voltages_all: List of AP peak voltages 
-            - burst_window_seconds: The time window (in seconds) to consider APs as part of the same burst. Default is 0.5 seconds.
-            """            
-            burst_window_samples = int(burst_window_seconds * self.sampling_rate)
-            bursts = []
-            current_burst = []
+#         def group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=0.5):
+#             """
+#             Groups APs into bursts based on the time difference between them.
+#             Condenses each burst into the maximum peak voltage and returns a list of these max values.
+#             - peak_locs_corr_all: AP peak locations within sweep
+#             - sweep_indices_all: sweep of each AP
+#             - peak_voltages_all: List of AP peak voltages 
+#             - burst_window_seconds: The time window (in seconds) to consider APs as part of the same burst. Default is 0.5 seconds.
+#             """            
+#             burst_window_samples = int(burst_window_seconds * self.sampling_rate)
+#             bursts = []
+#             current_burst = []
 
-            # Iterate over each AP's peak location, voltage, and sweep index
-            for i, (peak_loc, sweep_index) in enumerate(zip(peak_locs_corr_all, sweep_indices_all)):
-                curr_time = (sweep_index * V_array.shape[0] + peak_loc) / self.sampling_rate
+#             # Iterate over each AP's peak location, voltage, and sweep index
+#             for i, (peak_loc, sweep_index) in enumerate(zip(peak_locs_corr_all, sweep_indices_all)):
+#                 curr_time = (sweep_index * V_array.shape[0] + peak_loc) / self.sampling_rate
                 
-                if not current_burst: #first AP
-                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
-                    continue
+#                 if not current_burst: #first AP
+#                     current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
+#                     continue
                 
-                prev_peak_loc, prev_voltage, prev_time = current_burst[-1]
+#                 prev_peak_loc, prev_voltage, prev_time = current_burst[-1]
                 
-                time_diff = curr_time - prev_time
-                time_diff_samples = time_diff * self.sampling_rate
+#                 time_diff = curr_time - prev_time
+#                 time_diff_samples = time_diff * self.sampling_rate
                 
-                if time_diff_samples <= burst_window_samples:
-                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
-                else:
-                    # Finalize the current burst and start a new one
-                    bursts.append(max(voltage for _, voltage, _ in current_burst))
-                    current_burst = [(peak_loc, peak_voltages_all[i], curr_time)]
+#                 if time_diff_samples <= burst_window_samples:
+#                     current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
+#                 else:
+#                     # Finalize the current burst and start a new one
+#                     bursts.append(max(voltage for _, voltage, _ in current_burst))
+#                     current_burst = [(peak_loc, peak_voltages_all[i], curr_time)]
             
-            if current_burst:
-                bursts.append(max(voltage for _, voltage, _ in current_burst))
+#             if current_burst:
+#                 bursts.append(max(voltage for _, voltage, _ in current_burst))
         
-            return bursts
+#             return bursts
         
-        if I_array is not None and (I_array[:, 0] != 0).any():
-            input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
-            row['inputR_PRE'] = input_R_PRE
-            row['inputR_APP'] = input_R_APP
-            row['inputR_WASH'] = input_R_WASH
-            pass_I_array = I_array
-        else:
-            row['inputR_PRE'] = []
-            row['inputR_APP'] = []
-            row['inputR_WASH'] = []
-            pass_I_array = None
+#         if I_array is not None and (I_array[:, 0] != 0).any():
+#             input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
+#             row['inputR_PRE'] = input_R_PRE
+#             row['inputR_APP'] = input_R_APP
+#             row['inputR_WASH'] = input_R_WASH
+#             pass_I_array = I_array
+#         else:
+#             row['inputR_PRE'] = []
+#             row['inputR_APP'] = []
+#             row['inputR_WASH'] = []
+#             pass_I_array = None
 
-        mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array)
-        row['RMP_PRE'] = mean_RMP_PRE[1:]
-        row['RMP_APP'] = mean_RMP_APP
-        row['RMP_WASH'] = mean_RMP_WASH
+#         mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array)
+#         row['RMP_PRE'] = mean_RMP_PRE[1:]
+#         row['RMP_APP'] = mean_RMP_APP
+#         row['RMP_WASH'] = mean_RMP_WASH
 
-     
-        (peak_voltages_all, peak_latencies_all  , v_thresholds_all,
-        peak_slope_all  ,AP_max_dvdt_all,  peak_locs_corr_all, 
-        upshoot_locs_all  , peak_heights_all  , peak_fw_all,
-        peak_indices_all , sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array)
+#         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row.folder_file, V_array)
+
+#         # (peak_voltages_all, peak_latencies_all  , v_thresholds_all,
+#         # peak_slope_all  ,AP_max_dvdt_all,  peak_locs_corr_all, 
+#         # upshoot_locs_all  , peak_heights_all  , peak_fw_all,
+#         # peak_indices_all , sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array)
         
 
-        #fetch FP data for this cell and use the average threshold to define the pAD 
-        FP_df = self.getCache("FP_df")
-        try:
-            FP_cell_id_PRE = FP_df[(FP_df['cell_id'] == row['cell_id']) & (FP_df['drug'] == 'PRE')]
-            cell_threshold = (FP_cell_id_PRE['voltage_threshold'].apply(lambda x: sum(x) / len(x) if isinstance(x, list) else x)).mean()
-        except:
-            cell_threshold = -65
+#         #fetch FP data for this cell and use the average threshold to define the RA
+#         FP_df = self.getCache("FP_df")
+#         try:
+#             FP_cell_id_PRE = FP_df[(FP_df['cell_id'] == row['cell_id']) & (FP_df['drug'] == 'PRE')]
+#             cell_threshold = (FP_cell_id_PRE['voltage_threshold'].apply(lambda x: sum(x) / len(x) if isinstance(x, list) else x)).mean()
+#         except:
+#             cell_threshold = -65
 
-        pAD_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
+#         RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
 
-        if any(pAD_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-            row['pAD'] = True
-            row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-            row['pADcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and pAD_condition(peak_voltage, threshold)])
-            row['pADcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and pAD_condition(peak_voltage, threshold)])
-            row['pADcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and pAD_condition(peak_voltage, threshold)])
-        else:
-            row['pAD_locs'] = []
-            row['pADcount_PRE'] = 0
-            row['pADcount_APP'] = 0
-            row['pADcount_WASH'] = 0
+#         if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+#             row['RA'] = True
+#             row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+#             row['RAcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and pRAcondition(peak_voltage, threshold)])
+#             row['RAcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and pRAcondition(peak_voltage, threshold)])
+#             row['RAcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and pRAcondition(peak_voltage, threshold)])
+#         else:
+#             row['RA_locs'] = []
+#             row['RAcount_PRE'] = 0
+#             row['RAcount_APP'] = 0
+#             row['RAcount_WASH'] = 0
 
-        row['AP_locs'] = peak_locs_corr_all
-        row['peak_voltages_all'] = peak_voltages_all
+#         row['AP_locs'] = peak_locs_corr_all
+#         row['peak_voltages_all'] = peak_voltages_all
 
-        if len(peak_locs_corr_all) > 0:
-            row['APcount_PRE'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index < row['drug_in']])
-            row['APcount_APP'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if row['drug_out'] >= sweep_index >= row['drug_in']])
-            row['APcount_WASH'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index > row['drug_out']])
-        else:
-            row['AP_locs'] = []
-            row['APcount_PRE'] = 0
-            row['APcount_APP'] = 0
-            row['APcount_WASH'] = 0
+#         if len(peak_locs_corr_all) > 0:
+#             row['APcount_PRE'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index < row['drug_in']])
+#             row['APcount_APP'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if row['drug_out'] >= sweep_index >= row['drug_in']])
+#             row['APcount_WASH'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index > row['drug_out']])
+#         else:
+#             row['AP_locs'] = []
+#             row['APcount_PRE'] = 0
+#             row['APcount_APP'] = 0
+#             row['APcount_WASH'] = 0
 
-        #APP validators by vairability in PRE / basleine
-        if len(peak_voltages_all)>0:
-            if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 30: #HARDCODE minimum 30 mV AP height to declare offset issues
-                row['offset']= True
-            else:
-                peak_voltage_burst_max = group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=1)
+#         #APP validators by vairability in PRE / basleine
+#         if len(peak_voltages_all)>0:
+#             if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 30: #HARDCODE minimum 30 mV AP height to declare offset issues
+#                 row['offset']= True
+#             else:
+#                 peak_voltage_burst_max = group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=1)
 
-                if (check_variability(peak_voltage_burst_max, Vairability_threshold=0.5) == False or
-                    check_variability([row['RMP_PRE']]) == False or
-                    check_variability([row['inputR_PRE']], Vairability_threshold=1) == False):
-                    print('check') #CHECK TODO JAS
+#                 if (check_variability(peak_voltage_burst_max, Vairability_threshold=0.5) == False or
+#                     check_variability([row['RMP_PRE']]) == False or
+#                     check_variability([row['inputR_PRE']], Vairability_threshold=1) == False):
+#                     print('check') #CHECK TODO JAS
 
-                row['valid'] = (
-                    check_variability(peak_voltage_burst_max, Vairability_threshold=0.5) and
-                    check_variability([row['RMP_PRE']]) and
-                    check_variability([row['inputR_PRE']], Vairability_threshold=1) #HARD CODE vaitability threshold 
-                    )
-        else:
-            row['valid'] = (
-                check_variability([row['RMP_PRE']]) and
-                check_variability([row['inputR_PRE']], Vairability_threshold=1)
-                )
-        return row
+#                 row['valid'] = (
+#                     check_variability(peak_voltage_burst_max, Vairability_threshold=0.5) and
+#                     check_variability([row['RMP_PRE']], Vairability_threshold=0.30) and
+#                     check_variability([row['inputR_PRE']], Vairability_threshold=1) #HARD CODE vaitability threshold 
+#                     )
+#         else:
+#             row['valid'] = (
+#                 check_variability([row['RMP_PRE']]) and
+#                 check_variability([row['inputR_PRE']], Vairability_threshold=1)
+#                 )
+#         return row
         
-class Hunter(EphysData):
-    '''Handels data type Hunter currently just fetching the pAD locations.'''
-    filename: str = "pAD_hunter_df"
-    data_type: str = 'Hunter'
+# class Hunter(EphysData):
+#     '''Handels data type Hunter currently just fetching the RA locations.'''
+#     filename: str = "RA_hunter_df"
+#     data_type: str = 'Hunter'
 
-    def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
-        super().__post_init__()
+#     def __post_init__(self):
+#         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+#         super().__post_init__()
 
-    def process(self, row: pd.Series) -> pd.Series:
-        V_array , I_array, V_list = self.IGOR_load_file(row['folder_file'])
+#     def process(self, row: pd.Series) -> pd.Series:
+#         V_array , I_array, V_list = EphysData.IGOR_load_file(row['folder_file'], self.input_dir)
 
-        (peak_voltages_all, peak_latencies_all, v_thresholds_all,
-        peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
-        upshoot_locs_all, peak_heights_all, peak_fw_all,
-        sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array)
+#         (peak_voltages_all, peak_latencies_all, v_thresholds_all,
+#         peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
+#         upshoot_locs_all, peak_heights_all, peak_fw_all,
+#         sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array)
         
-        if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-            row['pAD'] = True
-            row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-        return row
+#         if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+#             row['RA'] = True
+#             row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+#         return row
 
 
 
-@dataclass
-class Ephys(EphysData):
-    ''' 
-    Buiilding aggregate df with cell info based off extracted data from each data type: APP, FP and pAD_hunter each with their own class
-        raw_df: excel input mapping folder_files to features
+# @dataclass
+# class Ephys(EphysData):
+#     ''' 
+#     Buiilding aggregate df with cell info based off extracted data from each data type: APP, FP and RA_hunter each with their own class
+#         raw_df: excel input mapping folder_files to features
 
-        FP_df: extraction of firing property data (FP)
-        APP_df: extraction of applications data (APP)
-        pAD_hunter_df: last unofficial data_type needs developing* #TODO
+#         FP_df: extraction of firing property data (FP)
+#         APP_df: extraction of applications data (APP)
+#         RA_hunter_df: last unofficial data_type needs developing* #TODO
 
-    Ephys class:
-        cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
-          '''
-    filename: str = 'cell_df'
-    sampling_rate: float = 2e4
+#     Ephys class:
+#         cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
+#           '''
+#     filename: str = 'cell_df'
+#     sampling_rate: float = 2e4
     
-    def __post_init__(self):
+#     def __post_init__(self):
 
-        self.FP_df = FP(self.project).df
-        self.APP_df = APP(self.project).df
-        self.hunter_df = Hunter(self.project).df
-        super().__post_init__()
+#         self.FP_df = FP(self.project).df
+#         self.APP_df = APP(self.project).df
+#         self.hunter_df = Hunter(self.project).df
+#         super().__post_init__()
     
         
     
-    def generate(self) -> pd.DataFrame:
-        """
-        Builds cell_df with each row a cell_id, access_change reported where possible and valid data is marked True in 'data_type' column i.e. "FP".
-        """
-        df = self.raw_df.copy()
-        df['treatment'] = df.apply(lambda row: row['drug'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
+#     def generate(self) -> pd.DataFrame:
+#         """
+#         Builds cell_df with each row a cell_id, access_change reported where possible and valid data is marked True in 'data_type' column i.e. "FP".
+#         """
+#         df = self.raw_df.copy()
+#         df['treatment'] = df.apply(lambda row: row['drug'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
 
-        def check_unique(series, cell_id):
-            unique_values = series.dropna().unique()
-            if len (unique_values) == 0:
-                return None
-            if len(unique_values) == 1:
-                return unique_values[0]
-            else:
-                raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
+#         def check_unique(series, cell_id):
+#             unique_values = series.dropna().unique()
+#             if len (unique_values) == 0:
+#                 return None
+#             if len(unique_values) == 1:
+#                 return unique_values[0]
+#             else:
+#                 raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
 
-        def apply_check_unique(group):
-            cell_id = group.name
-            I_set_values = group.loc[(group['data_type'] == 'APP') & (group['replication_no'] == 1) & (group['application_order'] == 1), 'I_set' ].unique()
-            I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
+#         def apply_check_unique(group):
+#             cell_id = group.name
+#             I_set_values = group.loc[(group['data_type'] == 'APP') & (group['replication_no'] == 1) & (group['application_order'] == 1), 'I_set' ].unique()
+#             I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
         
-            aggregated_data = group.agg({
-                'treatment': lambda series: check_unique(series, cell_id),
-                'cell_type': lambda series: check_unique(series, cell_id),
-                'cell_subtype': lambda series: check_unique(series, cell_id)
-            })
-            return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
+#             aggregated_data = group.agg({
+#                 'treatment': lambda series: check_unique(series, cell_id),
+#                 'cell_type': lambda series: check_unique(series, cell_id),
+#                 'cell_subtype': lambda series: check_unique(series, cell_id)
+#             })
+#             return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
 
-        def calculate_percentage_diff(group):
-            cell_id = group.name
-            #FIRING PROPERTY 
-            cell_fp_df = self.FP_df[self.FP_df['cell_id'] == cell_id]
-            pre_values = cell_fp_df[cell_fp_df['drug'] == 'PRE'][['R_series', 'folder_file']]
-            non_pre_values = cell_fp_df[cell_fp_df['drug'] != 'PRE'][['R_series', 'folder_file']]
+#         def calculate_percentage_diff(group):
+#             cell_id = group.name
+#             #FIRING PROPERTY 
+#             cell_fp_df = self.FP_df[self.FP_df['cell_id'] == cell_id]
+#             pre_values = cell_fp_df[cell_fp_df['drug'] == 'PRE'][['R_series', 'folder_file']]
+#             non_pre_values = cell_fp_df[cell_fp_df['drug'] != 'PRE'][['R_series', 'folder_file']]
             
-            # Extract R_series and folder_file
-            pre_series = pre_values['R_series'].dropna().values
-            non_pre_series = non_pre_values['R_series'].dropna().values
+#             # Extract R_series and folder_file
+#             pre_series = pre_values['R_series'].dropna().values
+#             non_pre_series = non_pre_values['R_series'].dropna().values
             
-            # Check if there are enough values
-            if len(pre_series) < 2 or len(non_pre_series) < 2:
-                return pd.Series({'access_change': None, 'FP_valid': None})
+#             # Check if there are enough values
+#             if len(pre_series) < 2 or len(non_pre_series) < 2:
+#                 return pd.Series({'access_change': None, 'FP_valid': None})
             
-            # Generate all combinations of two values
-            pre_combinations = list(combinations(pre_series, 2))
-            non_pre_combinations = list(combinations(non_pre_series, 2))
+#             # Generate all combinations of two values
+#             pre_combinations = list(combinations(pre_series, 2))
+#             non_pre_combinations = list(combinations(non_pre_series, 2))
             
-            min_diff = float('inf')
-            best_pre_pair = None
-            best_non_pre_pair = None
+#             min_diff = float('inf')
+#             best_pre_pair = None
+#             best_non_pre_pair = None
             
-            # Calculate percentage difference for all combinations
-            for pre_pair in pre_combinations:
-                pre_mean = np.mean(pre_pair)
-                for non_pre_pair in non_pre_combinations:
-                    non_pre_mean = np.mean(non_pre_pair)
-                    if pre_mean == 0:
-                        continue
-                    percentage_change = (non_pre_mean - pre_mean) / pre_mean * 100
+#             # Calculate percentage difference for all combinations
+#             for pre_pair in pre_combinations:
+#                 pre_mean = np.mean(pre_pair)
+#                 for non_pre_pair in non_pre_combinations:
+#                     non_pre_mean = np.mean(non_pre_pair)
+#                     if pre_mean == 0:
+#                         continue
+#                     percentage_change = (non_pre_mean - pre_mean) / pre_mean * 100
                     
-                    if percentage_change < min_diff:
-                        min_diff = percentage_change
-                        best_pre_pair = pre_pair
-                        best_non_pre_pair = non_pre_pair
+#                     if percentage_change < min_diff:
+#                         min_diff = percentage_change
+#                         best_pre_pair = pre_pair
+#                         best_non_pre_pair = non_pre_pair
             
-            if best_pre_pair is None or best_non_pre_pair is None:
-                return pd.Series({'access_change': None, 'FP_valid': None})
+#             if best_pre_pair is None or best_non_pre_pair is None:
+#                 return pd.Series({'access_change': None, 'FP_valid': None})
             
-            # Get folder files for the selected pairs
-            pre_folder_files = pre_values[pre_values['R_series'].isin(best_pre_pair)]['folder_file'].tolist() 
-            non_pre_folder_files = non_pre_values[non_pre_values['R_series'].isin(best_non_pre_pair)]['folder_file'].tolist()
-            folder_files = pre_folder_files[0:2] + non_pre_folder_files[0:2]
+#             # Get folder files for the selected pairs
+#             pre_folder_files = pre_values[pre_values['R_series'].isin(best_pre_pair)]['folder_file'].tolist() 
+#             non_pre_folder_files = non_pre_values[non_pre_values['R_series'].isin(best_non_pre_pair)]['folder_file'].tolist()
+#             folder_files = pre_folder_files[0:2] + non_pre_folder_files[0:2]
             
-            return pd.Series({'access_change': min_diff, 'FP_valid': folder_files})
+#             return pd.Series({'access_change': min_diff, 'FP_valid': folder_files})
         
-        cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
-        diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
-        cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
+#         cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
+#         diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
+#         cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
 
-        # APPLICATION FILES
-        filtered_app_df = self.APP_df[ (self.APP_df['valid'] == True) &
-                                    (self.APP_df['application_order'] == 1) &
-                                    (self.APP_df['replication_no'] == 1)]
-        valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
-        cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
-        self.cache("cell_df", cell_df)
-        return cell_df
+
+
+#         # APPLICATION FILES
+#         filtered_app_df = self.APP_df[ (self.APP_df['valid'] != False) &
+#                                     (self.APP_df['application_order'] == 1) &
+#                                     (self.APP_df['replication_no'] == 1)]
+#         valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
+#         cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
+#         self.cache("cell_df", cell_df)
+#         return cell_df

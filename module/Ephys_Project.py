@@ -7,8 +7,10 @@ import traceback
 from tqdm import tqdm
 from IPython.display import display
 from itertools import combinations
-from module.utils import * 
-from module.getters import getRawDf, calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, tau_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator
+import igor2 as igor
+import numpy as np
+import matplotlib.pyplot as plt
+from module.action_potential_functions import calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, tau_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator
 
 tqdm.pandas()
 
@@ -156,7 +158,8 @@ class EphysData (Project):
         ''' generic generator for dfs'''
         df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns] 
 
-        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1)
+        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
+        # df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
         df = df[self.initial_columns + additional_columns]
         # cache(self.project, self.filename, df)
@@ -165,6 +168,14 @@ class EphysData (Project):
     
     def process(self):
         raise NotImplementedError
+    
+    def _debug_extraction(self, row: pd.Series, process_function) -> pd.Series:
+        '''Direct processing without error catching — use during debugging.'''
+        row = row.copy()
+        row = process_function(row)  # Let any exception raise naturally
+        row['error'] = 'ran'
+        row['traceback'] = None
+        return row
     
     def _handle_extraction(self, row: pd.Series, process_function) -> pd.Series:
         '''Error handeling to add rows 'error' and 'ran' to each df made. '''
@@ -218,17 +229,14 @@ class FP(EphysData):
         V_array , I_array, V_list = self.IGOR_load(row['folder_file'])
 
         row["max_firing"] = calculate_max_firing(V_array)
-        (peak_voltages_all, peak_latencies_all, v_thresholds_all,
-         peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
-         upshoot_locs_all, peak_heights_all, peak_fw_all,
-         sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(
-            row['folder_file'], V_array)
+        peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row['folder_file'], V_array)        
         
-       
-        step_current_values, ap_counts, V_rest, off_step_peak_locs, ap_frequencies_Hz = extract_FI_x_y(
-            row['folder_file'], V_array, I_array, peak_locs_corr_all, sweep_indices_all)
-        FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(
-            row['folder_file'], step_current_values, ap_counts)
+        if len(peak_voltages_all)==0: #returns is no APs are detected
+            return row
+        
+        step_current_values, ap_counts, V_rest, off_step_peak_locs, ap_frequencies_Hz = extract_FI_x_y(row['folder_file'], V_array, I_array, peak_locs_corr_all, sweep_indices_all)
+        FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(row['folder_file'], step_current_values, ap_counts)
+
         row["rheobased_threshold"] = rheobase_threshold
         row["FI_slope"] = FI_slope
 
@@ -236,27 +244,30 @@ class FP(EphysData):
         row["voltage_threshold"] = v_thresholds_all[:10]
         row["AP_height"] = peak_heights_all[:10]
         row["AP_width"] = peak_fw_all[:10]
-        row["AP_slope"] = peak_slope_all[:10]
+        row["AP_rise_dvdt"] = peak_rise_all[:10]
+        row["AP_decay_dvdt"] = peak_decay_all[:10]
         row["AP_latency"] = peak_latencies_all[:10]
-        row["AP_dvdt_max"] = AP_max_dvdt_all[:10]
+        row["AP_dvdt_max"] = peak_max_dvdt_all[:10]
 
         row["tau_rc"] = tau_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
         row["sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
 
-         #fetch FP data for this cell and use the average threshold to define the pAD 
+         #fetch FP data for this cell and use the average threshold to define the RA 
         try:
             cell_threshold = np.mean(row['voltage_threshold'])
         except:
             cell_threshold = -45 #so when you -20 is 65 for cells without FP
 
-        pAD_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
+        RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
 
+        if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+            row['RA'] = True
+            row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+            row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
 
-        # if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-        if any(pAD_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-            row['pAD'] = True
-            row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-
+        # FP FILE VALIDATOR
+        if np.mean(np.array(peak_voltages_all[:10])[~np.isnan(peak_voltages_all[:10])]) < 15: #mean of first 11 AP peaks is less than 15mV the file is marked invalid
+            row['valid'] = False 
 
         return row
     
@@ -289,18 +300,13 @@ class APP(EphysData):
             pass_I_array = None
 
         mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array)
-        row['RMP_PRE'] = mean_RMP_PRE[1:]
+        row['RMP_PRE'] = mean_RMP_PRE[2:]
         row['RMP_APP'] = mean_RMP_APP
         row['RMP_WASH'] = mean_RMP_WASH
 
-     
-        (peak_voltages_all, peak_latencies_all  , v_thresholds_all,
-        peak_slope_all  ,AP_max_dvdt_all,  peak_locs_corr_all, 
-        upshoot_locs_all  , peak_heights_all  , peak_fw_all,
-        peak_indices_all , sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array)
-        
+        peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row.folder_file, V_array)
 
-        #fetch FP data for this cell and use the average threshold to define the pAD 
+        #fetch FP data for this cell and use the average threshold to define the RA 
         FP_df = self.getCache("FP_df")
         try:
             FP_cell_id_PRE = FP_df[(FP_df['cell_id'] == row['cell_id']) & (FP_df['drug'] == 'PRE')]
@@ -308,19 +314,22 @@ class APP(EphysData):
         except:
             cell_threshold = -45 #so when you -20 is 65 for cells without FP
 
-        pAD_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
+        RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
 
-        if any(pAD_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-            row['pAD'] = True
-            row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-            row['pADcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and pAD_condition(peak_voltage, threshold)])
-            row['pADcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and pAD_condition(peak_voltage, threshold)])
-            row['pADcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and pAD_condition(peak_voltage, threshold)])
+        if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+            row['RA'] = True
+            row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+            row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
+            row['RAcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and RA_condition(peak_voltage, threshold)])
+            row['RAcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and RA_condition(peak_voltage, threshold)])
+            row['RAcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and RA_condition(peak_voltage, threshold)])
+            #row['RA_per_min'] = len(row['RA_locs']) / trace_time_in_min
         else:
-            row['pAD_locs'] = []
-            row['pADcount_PRE'] = 0
-            row['pADcount_APP'] = 0
-            row['pADcount_WASH'] = 0
+            row['RA_locs'] = []
+            row['RAcount_PRE'] = 0
+            row['RAcount_APP'] = 0
+            row['RAcount_WASH'] = 0
+            #row['RA_per_min'] = 0
 
         row['AP_locs'] = peak_locs_corr_all
         row['peak_voltages_all'] = peak_voltages_all
@@ -335,7 +344,7 @@ class APP(EphysData):
             row['APcount_APP'] = 0
             row['APcount_WASH'] = 0
 
-        #APP validators by vairability in PRE / basleine
+        # GENERIC functions
         def check_variability(values, Vairability_threshold=0.30): 
             """Check if variability of values exceeds the given threshold."""
             values = np.array(values)[~np.isnan(values)]
@@ -361,57 +370,54 @@ class APP(EphysData):
             # Iterate over each AP's peak location, voltage, and sweep index
             for i, (peak_loc, sweep_index) in enumerate(zip(peak_locs_corr_all, sweep_indices_all)):
                 curr_time = (sweep_index * V_array.shape[0] + peak_loc) / self.sampling_rate
-                
                 if not current_burst: #first AP
                     current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
                     continue
-                
                 prev_peak_loc, prev_voltage, prev_time = current_burst[-1]
-                
                 time_diff = curr_time - prev_time
                 time_diff_samples = time_diff * self.sampling_rate
-                
                 if time_diff_samples <= burst_window_samples:
                     current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
                 else:
                     # Finalize the current burst and start a new one
                     bursts.append(max(voltage for _, voltage, _ in current_burst))
                     current_burst = [(peak_loc, peak_voltages_all[i], curr_time)]
-            
             if current_burst:
                 bursts.append(max(voltage for _, voltage, _ in current_burst))
             return bursts
         
+        def unidirectional_trend(values, threshold=20):
+            '''Check for a unidirectional trend that surpasses the threshold, if present returns False'''
+            value_diff = np.diff(values)
+            is_increasing = all(value_diff > 0)   # True if all differences are positive
+            is_decreasing = all(value_diff < 0)   # True if all differences are negative
+            total_change = abs(values[-1] - values[0])
+            if (is_increasing or is_decreasing) and total_change >= threshold:
+                return False  # data is not valid
+            return True  
+        
+        # APP FILE INVALIDATORS 
+        if check_variability([row['RMP_PRE']],Vairability_threshold=0.3)  == False: #assigns True if < vairability threshold
+            row['valid'] = False 
 
-        if len(peak_voltages_all)>0:
-            if np.mean(np.array(peak_voltages_all)[~np.isnan(peak_voltages_all)]) < 30: #HARDCODE minimum 30 mV AP height to declare offset issues
+        if len(peak_voltages_all)>0: # if APs 
+            if np.mean(np.nanmean(peak_voltages_all)) < 15: #HARDCODE minimum 15 mV AP height to declare offset issues
                 row['offset']= True
-            else:
-                peak_voltage_burst_max = group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=1)
 
-                if (check_variability(peak_voltage_burst_max, Vairability_threshold=1.11) == False or
-                    check_variability([row['RMP_PRE']],  Vairability_threshold=0.4) == False 
-                    # check_variability([row['inputR_PRE']], Vairability_threshold=1) == False
-                    ):
-                    print(f'APP file {row.folder_file} excluded due to AP or RMP vairability.') #CHECK TODO JAS
+            peak_voltage_burst_max = group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=1)
+            ap_burst_valid = unidirectional_trend(peak_voltage_burst_max, threshold=10)
+            if ap_burst_valid == False:
+                row['valid'] = False
 
-                row['valid'] = (
-                    check_variability(peak_voltage_burst_max, Vairability_threshold=1) and
-                    check_variability([row['RMP_PRE']]) 
-                    # check_variability([row['inputR_PRE']], Vairability_threshold=1) #HARD CODE vaitability threshold 
-                    )
-        else:
-            row['valid'] = (
-                check_variability([row['RMP_PRE']]) 
-                # check_variability([row['inputR_PRE']], Vairability_threshold=1)
-                )
-
+        rmp_valid = unidirectional_trend([np.mean(mean_RMP_PRE), np.mean(mean_RMP_APP), np.mean(mean_RMP_WASH)], threshold=20) #assigns True if 
+        if  rmp_valid == False:
+            row['valid'] = False
 
         return row
         
 class Hunter(EphysData):
-    '''Handels data type Hunter currently just fetching the pAD locations.'''
-    filename: str = "pAD_hunter_df"
+    '''Handels data type Hunter currently just fetching the RA locations.'''
+    filename: str = "RA_hunter_df"
     data_type: str = 'Hunter'
 
     def __post_init__(self):
@@ -421,14 +427,13 @@ class Hunter(EphysData):
     def process(self, row: pd.Series) -> pd.Series:
         V_array , I_array, V_list = self.IGOR_load(row['folder_file'])
 
-        (peak_voltages_all, peak_latencies_all, v_thresholds_all,
-        peak_slope_all, AP_max_dvdt_all, peak_locs_corr_all,
-        upshoot_locs_all, peak_heights_all, peak_fw_all,
-        sweep_indices, sweep_indices_all) = ap_characteristics_extractor_main(row.folder_file, V_array)
+
+        peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row.folder_file, V_array)
+
         
         if any(threshold <= -65 and peak_voltage > 20 for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-            row['pAD'] = True
-            row['pAD_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+            row['RA'] = True
+            row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
         return row
 
 
@@ -436,12 +441,12 @@ class Hunter(EphysData):
 @dataclass
 class Ephys(EphysData):
     ''' 
-    Buiilding aggregate df with cell info based off extracted data from each data type: APP, FP and pAD_hunter each with their own class
+    Buiilding aggregate df with cell info based off extracted data from each data type: APP, FP and RA_hunter each with their own class
         feature_df: excel input mapping folder_files to features
 
         FP_df: extraction of firing property data (FP)
         APP_df: extraction of applications data (APP)
-        pAD_hunter_df: last unofficial data_type needs developing* #TODO
+        RA_hunter_df: last unofficial data_type needs developing* #TODO
 
     Ephys class:
         cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
@@ -532,11 +537,11 @@ class Ephys(EphysData):
             pre_folder_files = pre_values[pre_values['R_series'].isin(best_pre_pair)]['folder_file'].tolist() 
             non_pre_folder_files = non_pre_values[non_pre_values['R_series'].isin(best_non_pre_pair)]['folder_file'].tolist()
 
-            # filter folder_files on extracted features and absence of pAD
+            # filter folder_files on extracted features and absence of RA
             if len(pre_folder_files) > 2 or len(non_pre_folder_files) > 2:
                 FP_feature_cols = [
-                    'AP_peak_voltages', 'AP_slope', 'AP_width', 'FI_slope',
-                    'max_firing', 'rheobased_threshold', 'sag', 'tau_rc', 'voltage_threshold'
+                    'AP_peak_voltages', 'AP_rise_dvdt', 'AP_width', 'FI_slope',
+                    'max_firing', 'rheobased_threshold', 'sag', 'tau_rc', 'voltage_threshold', 'AP_decay_dvdt'
                 ]
                 
                 pre_df = cell_fp_df[cell_fp_df['drug'] == 'PRE'].copy()
@@ -565,17 +570,30 @@ class Ephys(EphysData):
         cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
         diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
         cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
-        
+
 
         # APPLICATION FILES
         filtered_app_df = self.APP_df[ 
                                     # (self.APP_df['valid'] == True) & vaildators based on vairability - changing exclusion criteria 
+                                    (self.APP_df['valid'] != False) & 
                                     (self.APP_df['application_order'] == 1) &
                                     (self.APP_df['replication_no'] == 1)]
         valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
         cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
 
-        cell_df
+        # Check RA status in FP_df and APP_df
+        fp_ra_df = self.FP_df[self.FP_df['RA'] == True][['cell_id', 'folder_file', 'RA_per_min']] #FP and APP dataframes where RA is True
+        app_ra_df = self.APP_df[self.APP_df['RA'] == True][['cell_id', 'folder_file', 'RA_per_min']]
+        combined_ra_df = pd.concat([fp_ra_df, app_ra_df])
+
+        ra_folder_files = combined_ra_df.groupby('cell_id')['folder_file'].apply(list).to_dict()
+
+        ra_avg_per_min = combined_ra_df.groupby('cell_id')['RA_per_min'].mean().to_dict() #average RA_per_min per cell_id
+
+        cell_df['RA'] = cell_df['cell_id'].isin(ra_folder_files)
+        cell_df['RA_folder_file'] = cell_df['cell_id'].map(ra_folder_files)
+        cell_df['RA_per_min'] = cell_df['cell_id'].map(ra_avg_per_min)
+
 
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)
