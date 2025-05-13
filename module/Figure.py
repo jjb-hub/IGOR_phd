@@ -69,7 +69,7 @@ class DataSelection (Cachable):
         self.treatment_count_df = self.generate_treatment_count_df()
 
     def validate_inputs(self):
-        if self.data_type not in ['FP', 'APP']:
+        if self.data_type not in ['FP', 'APP']: #TODO add pAD_hunter
             raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of ['FP', 'APP'].")
         valid_df = self.cell_df[self.cell_df[f'{self.data_type}_valid'].notna()]
         def validate_attribute(attribute, column_name):
@@ -95,6 +95,7 @@ class DataSelection (Cachable):
             raise ValueError(f"{valid_column} column does not exist in cell_df.")
         
         filtered_cell_df = self.cell_df.copy()
+        #apply filters 
         if self.cell_type is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['cell_type'].isin([self.cell_type] if isinstance(self.cell_type, str) else self.cell_type)]
         if self.treatment is not None:
@@ -103,12 +104,14 @@ class DataSelection (Cachable):
             filtered_cell_df = filtered_cell_df[filtered_cell_df['cell_subtype'].isin([self.cell_subtype] if isinstance(self.cell_subtype, str) else self.cell_subtype)]
         if self.I_set is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['I_set'].isin([self.I_set] if isinstance(self.I_set, str) else self.I_set)]
-
         if self.threshold_access_change is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['access_change'].abs() <= self.threshold_access_change]
 
         valid_cell_ids = filtered_cell_df['cell_id'].tolist()
         valid_files = filtered_cell_df[valid_column].dropna().tolist()
+        if not valid_files:
+            print("No valid files found for data selection.")
+            return [],[]
         valid_files = [item for sublist in valid_files for item in sublist] if isinstance(valid_files[0], list) else valid_files
 
         return valid_files, valid_cell_ids
@@ -117,10 +120,10 @@ class DataSelection (Cachable):
         """
         Fetches the data_type _df and filters it and returns restructured aggergate df for stats and plotting (one row for each cell_id and time).
         """
-        valid_files, valid_cell_ids = self.get_valid_folder_files()
+        # valid_files, valid_cell_ids = self.get_valid_folder_files()
         
         if self.data_type == 'APP':
-            filtered_df = self.APP_df[self.APP_df['folder_file'].isin(valid_files)]
+            filtered_df = self.APP_df[self.APP_df['folder_file'].isin(self.valid_files)]
             #column names {dependant_vairable}_{time}
             timepoints = ['PRE', 'APP', 'WASH']
             columns = {
@@ -137,11 +140,32 @@ class DataSelection (Cachable):
                 current_data = filtered_df[['cell_id'] + existing_columns].copy()
                 current_data['time'] = timepoint
                 current_data.rename(columns=time_specific_columns, inplace=True)
-                # aggregate
+                # aggregate mean data
                 for col in ['RMP', 'inputR']:
                     if col in current_data.columns:
+                        current_data[f'sweep_{col}'] = current_data[col]
                         current_data[col] = current_data[col].apply(lambda x: np.nanmean(x) if isinstance(x, list) and len(x) > 0 else (np.nan if isinstance(x, list) else x))
-
+                # APs per sweep for each timepoint (returns a zero-padded list)
+                for sweep_col in ['AP_sweep_locs', 'RA_sweep_locs']:
+                    if sweep_col in filtered_df.columns:
+                        base = sweep_col.split('_')[0]  # 'AP' or 'RA'
+                        colname = f'sweep_{base}_count'
+                        current_data[colname] = filtered_df.apply(
+                            lambda row: (
+                                [] if not isinstance(row[sweep_col], list)
+                                else [
+                                    row[sweep_col].count(s) for s in range(
+                                        len(row.get(f'inputR_{timepoint}', []))
+                                    )
+                                    if (
+                                        (timepoint == 'PRE' and s < row['drug_in']) or
+                                        (timepoint == 'APP' and row['drug_in'] <= s < row['drug_out']) or
+                                        (timepoint == 'WASH' and s >= row['drug_out'])
+                                    )
+                                ]
+                            ),
+                            axis=1
+                        )
                 reshaped_data.append(current_data)
             agg_APP_df = pd.concat(reshaped_data, ignore_index=True)
             agg_APP_df = self.add_cell_mapping(agg_APP_df)
@@ -150,7 +174,7 @@ class DataSelection (Cachable):
         
 
         elif self.data_type == 'FP':
-            filtered_df = self.FP_df[self.FP_df['folder_file'].isin(valid_files)].copy()
+            filtered_df = self.FP_df[self.FP_df['folder_file'].isin(self.valid_files)].copy()
             filtered_df['time'] = filtered_df['drug'].apply(lambda x: 'WASH' if x != 'PRE' else 'PRE')
             #columns to keep
             filtered_df = filtered_df[['cell_id', 'time', 'AP_decay_dvdt', 'AP_rise_dvdt',
@@ -319,92 +343,6 @@ class DataSelection (Cachable):
         return AP_df
 
 
-######## OLD INCORPERATED ABOVE
-    # def build_AP_df(self, cell_id) -> pd.DataFrame:   #TODO DEBUG chekc I injected and drug assignment apply to plotter 
-    #     '''
-    #     Builds df for single folder_file  each row an action potential (AP) with columns for AP characteristics 
-    #     for all valid folder_files for a given cell.
-    #     '''
-    
-    #     cell_info = self.cell_df[self.cell_df['cell_id']== cell_id].copy()
-    #     cell_AP_df = pd.DataFrame(columns = ['folder_file', 'peak_location', 'upshoot_location', 'voltage_threshold',
-    #            'slope', 'latency', 'peak_voltage', 'height', 'width', 'sweep', 
-    #            'I_injected', 'AP_type', 'data_type', 'drug'])
-
-    #     folder_file = cell_info['APP_valid'].iloc[0] # SINGLE VALID APP file per cell_id
-    #     data_type = 'APP'
-    #     drug_in = self.APP_df[self.APP_df['folder_file']==folder_file]['drug_in'].iloc[0]
-    #     drug_out = self.APP_df[self.APP_df['folder_file']==folder_file]['drug_out'].iloc[0]
-    #     drug_used = self.APP_df[self.APP_df['folder_file']==folder_file]['drug'].iloc[0]
-
-    #     AP_df_raw = self.folder_file_AP_df(cell_id, folder_file)
-    #     AP_df_raw['data_type'] = data_type
-    #     AP_df_raw['drug'] = [
-    #                                 f"PRE_{drug_used}" if sweep < drug_in
-    #                                 else f"APP_{drug_used}" if drug_in <= sweep <= drug_out
-    #                                 else f"WASH_{drug_used}"
-    #                                 for sweep in AP_df_raw['sweep']
-    #                                 ]
-    #     cell_AP_df = pd.concat([cell_AP_df, AP_df_raw], ignore_index=True)
-
-    #     for folder_file in cell_info['FP_valid'].iloc[0]:
-    #         data_type = 'FP'
-    #         drug_used = self.FP_df[self.FP_df['folder_file']==folder_file]['drug'].iloc[0]
-
-    #         AP_df_raw = self.folder_file_AP_df(cell_id, folder_file)
-    #         AP_df_raw['data_type'] = data_type
-    #         AP_df_raw['drug'] = data_type if data_type == 'PRE' else f"WASH_{cell_info['treatment'].iloc[0]}"
-    #         cell_AP_df = pd.concat([cell_AP_df, AP_df_raw], ignore_index=True)
-
-    #     return cell_AP_df
-
-#  def build_cell_AP_df(self, cell_id) -> pd.DataFrame: 
-#         '''
-#         Builds df for single cell  each row an action potential (AP) with columns for AP characteristics.
-#         Attributes:
-#             folder_file (str)  : name of unique file identifier
-#             V_array (np.ndarray) : 2D voltage array for folder_file
-#             I_array (np.ndarray) : 2D current array for folder_file
-
-#         AP_df included the V_array for all APs in APP and RA traces and off step and first step APs from FP traces
-
-#         '''
-
-#         # Extract AP characteristics
-#         (peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all,
-#          peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all,
-#          peak_fw_all, peak_indices_all, sweep_indices_all) = ap_characteristics_extractor_main(folder_file, V_array)
-        
-#         # Early return if no APs found
-#         if np.all(np.isnan(peak_latencies_all)):
-#             print(f"No APs detected in voltage trace {folder_file} for {cell_id}.")
-#             return pd.DataFrame(columns=['folder_file', 'data_type' 'peak_location', 'upshoot_location', 'voltage_threshold',
-#                                          'slope', 'latency', 'peak_voltage', 'height', 'width', 'sweep',
-#                                          'I_injected', 'AP_type'])
-
-#         # Create DataFrame of APs
-#         AP_df = pd.DataFrame({
-#             'folder_file': folder_file,
-#             'data_type': data_type,
-#             'peak_location': peak_locs_corr_all,
-#             'upshoot_location': upshoot_locs_all,
-#             'voltage_threshold': v_thresholds_all,
-#             'slope': peak_slope_all,
-#             'latency': peak_latencies_all,
-#             'peak_voltage': peak_voltages_all,
-#             'height': peak_heights_all,
-#             'width': peak_fw_all,
-#             'sweep': sweep_indices_all,
-#             'I_injected': [I_array[loc, 0] for loc in peak_locs_corr_all],  # Sweep index is 0 as I_array is identical
-#             'AP_type': 'somatic'  
-#         })
-        
-#         # PRE FP VOLTAGE THRESHOLD - 20mV SORTING ACTION POTENTIALS
-#         this_cells_df = self.cell_df[self.cell_df['cell_id']==cell_id]
-#         mean_voltage_threshold = self.FP_df[self.FP_df['folder_file'].isin(this_cells_df['FP_valid'].values[0][:2])]['voltage_threshold'].explode().astype(float).mean()
-#         AP_df.loc[(AP_df['voltage_threshold'] < mean_voltage_threshold-20 ), 'AP_type'] = 'RA_AP'
-#         return AP_df
-
 @dataclass
 class Figure(DataSelection):
     
@@ -426,7 +364,26 @@ class Figure(DataSelection):
     def __post_init__(self):
         # DataSelection.__post_init__(self)
         super().__post_init__()
-        
+    
+    def filter_n_minimum(self,df):
+        df = df.dropna(subset=[self.dependant_var]).reset_index(drop=True)
+        group_sizes = df.groupby(['treatment', 'time']).size()
+        insufficient_groups = group_sizes[group_sizes < self.n_minimum]
+        if not insufficient_groups.empty:
+            print(f"Warning: The following groups have less than {self.n_minimum} samples and will be excluded:")
+            print(insufficient_groups)
+            df = df[~df[['treatment', 'time']].apply(tuple, axis=1).isin(insufficient_groups.index)].reset_index(drop=True)
+        if df.empty:
+            print("No groups meet the minimum sample size requirement. Statistical analysis will not be performed.")
+            return None
+        else:
+            return df
+    
+    def check_valid_dependant_var(self):
+            if self.dependant_var not in self.agg_df.columns:
+                dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'I_set']]
+                raise ValueError(f"Invalid dependant variable: {self.dependant_var}. Valid dv's : {dvs}")
+    
     def save_plot(self, fig, filename: str, formats=('png', 'svg')):
         """
         Saves a plot in specified formats to the figure directory.
@@ -457,46 +414,14 @@ class Histogram(Figure):
     n_minimum: float = field(kw_only = True, default = 3)
 
     def __post_init__(self):
-        self.filename = f"{self.dependant_var}_{self.specify}" #TODO this should be handeled better 
-        # Figure.__post_init__(self)
+        self.filename = f"{self.dependant_var}_{self.specify}" 
         super().__post_init__()
         self.check_valid_dependant_var()
-        self.fig_filename = self.generate_fig_filename()
         self.data = self.filter_n_minimum(self.agg_df)
         self.stats = self.generate_statistics()
         self.order = [t for t in color_dict.keys() if t in self.data['treatment'].unique()]
         self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()]
         self.fig = self.plot_histogram()
-
-
-    def check_valid_dependant_var(self):
-            if self.dependant_var not in self.agg_df.columns:
-                dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'I_set']]
-                raise ValueError(f"Invalid dependant variable: {self.dependant_var}. Valid dv's : {dvs}")
-    
-    def generate_fig_filename(self) -> str:
-        filename_parts = [f"{self.dependant_var}_{self.cell_type}"]
-        if self.treatment:
-            filename_parts.append(f"_{self.treatment}")
-        if self.cell_subtype:
-            filename_parts.append(f"_{self.cell_subtype}")
-        if self.I_set:
-            filename_parts.append(f"_{self.I_set}")
-        return "_".join(filename_parts)
-    
-    def filter_n_minimum(self,df):
-        df = df.dropna(subset=[self.dependant_var]).reset_index(drop=True)
-        group_sizes = df.groupby(['treatment', 'time']).size()
-        insufficient_groups = group_sizes[group_sizes < self.n_minimum]
-        if not insufficient_groups.empty:
-            print(f"Warning: The following groups have less than {self.n_minimum} samples and will be excluded:")
-            print(insufficient_groups)
-            df = df[~df[['treatment', 'time']].apply(tuple, axis=1).isin(insufficient_groups.index)].reset_index(drop=True)
-        if df.empty:
-            print("No groups meet the minimum sample size requirement. Statistical analysis will not be performed.")
-            return None
-        else:
-            return df
         
     def generate_statistics(self):
         #mixed effects models --> Tukey
@@ -610,8 +535,138 @@ class Histogram(Figure):
         plt.show()
         
         # Save the figure
-        self.save_plot(fig, f"Histogram")
+        self.save_plot(fig, self.filename)
+
+
+
+@dataclass
+class AggregateApplication(Figure):
+    filename: str = None
+    sweep_in_s: float = field(kw_only = True, default = 20)
+    dependant_var: str = field(kw_only=True) #  'RMP', 'inputR', 'RA_count', 'AP_count'
+    bin_size: float = field(kw_only = True, default = 3) #sweeps to pool default 3 3x20sec - 1min
+    n_minimum: float = field(kw_only = True, default = 3)
+
+
+    def __post_init__(self):
+        self.filename = f"{self.dependant_var}_{self.bin_size}" 
+        super().__post_init__()
+        self.check_valid_dependant_var()
+        self.data = self.filter_n_minimum(self.agg_df)
         
+        self.timepoints = ['PRE', 'APP', 'WASH']
+        self.colors = {'PRE': 'lightgrey', 'APP': 'black', 'WASH': 'grey'} #black preset will be changed in plot
+        self.binned_data = self.process_data(self.data)
+        self.plot()
+
+    def process_data(self, df):
+        '''
+        Creates a df to plot with columns cell_id time data then loops rows to bin data +++++++++++ does % baselin if RMP or input R
+        '''
+        column_to_bin = f'sweep_{self.dependant_var}'
+        binned_rows = []
+        for _, row in df.iterrows():
+            data = row[column_to_bin]
+            if not isinstance(data, list) or len(data) == 0:
+                print(f"{row['cell_id']} for {row['time']} is empty or invalid.")
+                continue
+            binned = [
+                np.mean(data[i:i + self.bin_size])
+                for i in range(0, len(data), self.bin_size)
+                if len(data[i:i + self.bin_size]) == self.bin_size
+            ]
+            binned_rows.append({
+                'cell_id': row['cell_id'],
+                'time': row['time'],
+                'binned_values': binned
+            })
+
+        binned_df = pd.DataFrame(binned_rows)
+
+        if self.dependant_var in ['RMP', 'inputR']:
+            normalized_rows = []
+            for cell_id, group in binned_df.groupby('cell_id'):
+                pre_row = group[group['time'] == 'PRE']
+                if pre_row.empty:
+                    print(f"No PRE data for {cell_id}, skipping normalization.")  
+                    continue
+                baseline_vals = pre_row.iloc[0]['binned_values']
+                baseline_mean = np.mean(baseline_vals) 
+                for _, row in group.iterrows():
+                    norm_vals = [(val / baseline_mean) * 100 for val in row['binned_values']]  
+                    normalized_rows.append({
+                        'cell_id': row['cell_id'],
+                        'time': row['time'],
+                        'binned_values': norm_vals
+                    })
+        normalised_binned_df = pd.DataFrame(normalized_rows)
+        return normalised_binned_df
+
+    def plot(self):
+        fig, ax = plt.subplots(figsize=(10, 5))
+        time_per_bin_min = (self.sweep_in_s * self.bin_size) / 60
+        padding = 0 * time_per_bin_min  # HARD CODE ADJUST
+        section_widths = {}
+        legend_handles = {}
+        cell_counts = self.cell_df[self.cell_df['cell_id'].isin(self.binned_data['cell_id'])].groupby('treatment')['cell_id'].nunique().to_dict()
+
+
+        for timepoint in self.timepoints:
+            max_bins = self.binned_data[self.binned_data['time'] == timepoint]['binned_values'].apply(len).max()
+            section_widths[timepoint] = max_bins * time_per_bin_min if max_bins else 0
+
+        for cell_id, cell_data in self.binned_data.groupby('cell_id'):
+            x_offset = 0
+            prev_endpoint = None  
+
+            for idx, timepoint in enumerate(self.timepoints):
+                tp_data = cell_data[cell_data['time'] == timepoint]
+                if tp_data.empty:
+                    continue
+
+                binned_vals = tp_data.iloc[0]['binned_values']
+                n_bins = len(binned_vals)
+                x_vals = np.arange(n_bins) * time_per_bin_min + x_offset
+                y_vals = binned_vals
+
+                if timepoint in ['APP', 'WASH']:
+                    drug = self.cell_df[self.cell_df['cell_id'] == cell_id]['treatment'].iloc[0]
+                    color = color_dict.get(drug, 'k')
+                    alpha = 0.5 if timepoint == 'WASH' else 1.0
+                    label = f"{drug} (n={cell_counts.get(drug, 0)})" if timepoint == 'APP' else None
+                else:
+                    color = self.colors[timepoint]
+                    label = None
+                    alpha = 1.0
+
+                if label is not None and label not in legend_handles:
+                    legend_handles[label] = ax.plot([], [], color=color, alpha=alpha, label=label)[0]
+                ax.plot(x_vals, y_vals, color=color, alpha=alpha, linewidth=1)  
+
+                # connector between last timepoint and current one
+                if prev_endpoint is not None:  
+                    connector_x = [prev_endpoint[0], x_vals[0]]  
+                    connector_y = [prev_endpoint[1], y_vals[0]]  
+                    ax.plot(connector_x, connector_y, color=color, linestyle=':', alpha=0.2, linewidth=0.5) 
+
+                prev_endpoint = (x_vals[-1], y_vals[-1])  
+                x_offset += section_widths[timepoint] + padding
+
+        cumulative_offset = 0
+        for timepoint in self.timepoints[:-1]:
+            cumulative_offset += section_widths[timepoint] + padding
+            ax.axvline(cumulative_offset, color='lightgrey', linestyle='--', linewidth=0.8)
+
+        ax.set_title(f'{self.dependant_var} ')
+        ax.set_xlabel("Time (min)")
+        ax.set_ylabel(f"{unit_dict[self.dependant_var]} as % of baseline")
+        ax.legend(fontsize='small', loc='upper right')
+        ax.spines[['top', 'right']].set_visible(False)
+        plt.tight_layout()
+        plt.show()
+
+
+       
 @dataclass
 class Application(Figure):
 
@@ -629,6 +684,7 @@ class Application(Figure):
             self.cell_id = self.valid_cell_ids
         self.fig = self.plot_applications()
 
+    
     def plot_applications(self):
         color_map = {'RA': 'red', 'somatic': 'blue'}
         alpha_map = {'RA': 0.6, 'somatic': 0.2}
@@ -705,6 +761,8 @@ class Application(Figure):
                 plt.show()
                 self.save_plot(fig, f"{cell_id}_APP_{str(application_order)}")
                 
+
+
 
 @dataclass
 class RA_AP_analysis(Figure):

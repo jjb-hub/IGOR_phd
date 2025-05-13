@@ -299,8 +299,8 @@ class APP(EphysData):
             row['inputR_WASH'] = []
             pass_I_array = None
 
-        mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array)
-        row['RMP_PRE'] = mean_RMP_PRE[2:]
+        mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array) #mean per sweep
+        row['RMP_PRE'] = mean_RMP_PRE
         row['RMP_APP'] = mean_RMP_APP
         row['RMP_WASH'] = mean_RMP_WASH
 
@@ -319,6 +319,7 @@ class APP(EphysData):
         if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['RA'] = True
             row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+            row['RA_sweep_locs'] = [sweep_indices_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
             row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
             row['RAcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and RA_condition(peak_voltage, threshold)])
             row['RAcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and RA_condition(peak_voltage, threshold)])
@@ -332,6 +333,7 @@ class APP(EphysData):
             #row['RA_per_min'] = 0
 
         row['AP_locs'] = peak_locs_corr_all
+        row['AP_sweep_locs'] = sweep_indices_all
         row['peak_voltages_all'] = peak_voltages_all
 
         if len(peak_locs_corr_all) > 0:
