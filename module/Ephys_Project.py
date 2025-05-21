@@ -324,13 +324,11 @@ class APP(EphysData):
             row['RAcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and RA_condition(peak_voltage, threshold)])
             row['RAcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and RA_condition(peak_voltage, threshold)])
             row['RAcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and RA_condition(peak_voltage, threshold)])
-            #row['RA_per_min'] = len(row['RA_locs']) / trace_time_in_min
         else:
             row['RA_locs'] = []
             row['RAcount_PRE'] = 0
             row['RAcount_APP'] = 0
             row['RAcount_WASH'] = 0
-            #row['RA_per_min'] = 0
 
         row['AP_locs'] = peak_locs_corr_all
         row['AP_sweep_locs'] = sweep_indices_all

@@ -525,7 +525,7 @@ def calculate_derivative(voltage_array, sampling_rate):
 
 
 
-def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index, main_plot = False, input_sampling_rate = 2e4 , input_smoothing_kernel = 1.5, input_plot_window = 500 , input_slide_window = 200, input_gradient_order  = 1, ap_backwards_window = 50 , input_ap_fwhm_window = 100 , input_pre_ap_baseline_forwards_window = 50, input_significance_factor = 8 ):
+def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index,  input_sampling_rate = 2e4 ,  ap_backwards_window = 50 , input_pre_ap_baseline_forwards_window = 50):
     '''
     Extracts detailed characteristics of action potentials (APs) from voltage data within a specified sweep.
 
@@ -533,7 +533,6 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         df_V_arr (2d array): A pandas DataFrame containing voltage data from electrophysiological recordings. cols == sweeps
         sweep_index (int): The index of the sweep in the DataFrame from which AP characteristics are to be extracted.
 
-                main_plot (bool, optional): If set to True, generates a main plot. Defaults to False.
                 input_sampling_rate (float, optional): The sampling rate of the data in Hz. Defaults to 20000 Hz.
                 input_smoothing_kernel (float, optional): The size of the smoothing kernel to apply to the voltage data. Defaults to 1.5.
                 input_plot_window (int, optional): The window size for plotting the data. Defaults to 500.
@@ -556,7 +555,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
     pre_ap_baseline_forwards_window = input_pre_ap_baseline_forwards_window 
     sampling_rate    = input_sampling_rate
     sec_to_ms        = 1e3 
-    min_ap_peak_voltage =  0 # peak voltage cutoff 0mV HARD CODE ensuring positive peaks
+    min_ap_peak_voltage =  -10 # peak voltage cutoff -10mV HARD CODE 
     ap_width_min = 0.1 # ms
     ap_width_max = 4 # ms
 
@@ -647,7 +646,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
                         peak_free_upshoot_loc_array = np.where(peak_free_x_  <  0)[0]   # indices where the second derivative is -ive (x_)  indicating a negative change in derivitive .˙. 
                         ap_backwards_window = peak_free_ap_backwards_window #redefine backwards window
                         if len(peak_free_upshoot_loc_array) ==0 :
-                            print ('fuk')
+                            print ('fuk - upshoot detection gone wrong manualy inspect')
                         upshoot_loc_in_window_bin  = peak_free_upshoot_loc_array[0]
                         upshoot_loc_array = peak_free_upshoot_loc_array
 
@@ -662,7 +661,6 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         if len(peaks_on_slope)>0:
             # print(f"PEAKS ON AP SLOPE: sweep {sweep_index}  peak index {peak_location}, analising next peak.")
             continue
-
 
         # VOLTAGE THRESHOLD
         voltage_threshold = V_array[upshoot_location]
@@ -984,24 +982,25 @@ def old_calculate_ap_slope_and_max_dvdt(V_array, upshoot_index, latency, samplin
 
 def ap_characteristics_extractor_main(folder_file, V_array): #Locations of peaks (in terms of indices within each sweep) #add rise_speed
     '''
-      Main function for extracting action potential (AP) characteristics across multiple sweeps of electrophysiological data. 
-      It iteratively calls the 'ap_characteristics_extractor_subroutine_derivative' for each selected sweep.
+    Extracts action potential (AP) features from multiple voltage sweeps.
 
-    Input:
-        V_array (2d array): A pandas DataFrame containing voltage data from electrophysiological recordings.
-        
+    Parameters:
+        folder_file : str - Identifier for the data file/folder.
+        V_array : 2D array - Voltage traces (time x sweeps).
+
     Returns:
-        peak_latencies_all (list):  AP latency across all analyzed sweeps (ms).
-        v_thresholds_all (list):  AP Voltage thresholds across all analyzed sweeps (mV).
-        peak_rise_dvdt_all (list):  rising speed AP rates of change  - upshoot locations across all analyzed sweeps (mV/ms).
-        peak_rise_dvdt_all (list):  decay speed AP rates of change  - upshoot locations across all analyzed sweeps (mV/ms).
-        peak_max_dvdt_all (list):  max AP rates of change - upshoot locations across all analyzed sweeps (mV/ms).
-        peak_locs_corr_all (list):  Corrected locations of AP peaks across all analyzed sweeps. #locations of peaks within each sweep.
-        upshoot_locs_all (list):  Locations of AP thresholds across all analyzed sweeps.
-        peak_heights_all (list): AP height (peak to threshold) across all analyzed sweeps (mV).
-        peak_fw_all (list):  AP full widths at half maximum (FWHM) of each AP across all analyzed sweeps, if <0 set as peak_latency (ms).
-        peak_indices_all (list): Indices of the peaks within the aggregated list. sweep?
-        sweep_indices_all (list): Indices of the sweeps corresponding to each peak in the aggregated list. #which sweep a particular peak belongs to.
+        peak_voltages_all : list of float — AP peak voltages (mV)
+        peak_latencies_all : list of float — Latency of AP peaks (ms)
+        v_thresholds_all : list of float — Voltage thresholds (mV)
+        peak_rise_all : list of float — Rise speed (20–80% of height, mV/ms)
+        peak_max_dvdt_all : list of float — Max dV/dt during upstroke (mV/ms)
+        peak_locs_corr_all : list of int — Index of AP peaks
+        upshoot_locs_all : list of int — Index of AP thresholds
+        peak_heights_all : list of float — AP height (mV)
+        peak_fw_all : list of float — AP width (ms)
+        peak_indices_all : list of int — Index within total list of peaks
+        sweep_indices_all : list of int — Sweep index for each AP
+        peak_decay_all : list of float — Decay speed (20–80% of height, mV/ms)
     '''
 
     # itterating over sweeps

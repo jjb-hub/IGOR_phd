@@ -151,21 +151,23 @@ class DataSelection (Cachable):
                         base = sweep_col.split('_')[0]  # 'AP' or 'RA'
                         colname = f'sweep_{base}_count'
                         current_data[colname] = filtered_df.apply(
-                            lambda row: (
-                                [] if not isinstance(row[sweep_col], list)
-                                else [
-                                    row[sweep_col].count(s) for s in range(
-                                        len(row.get(f'inputR_{timepoint}', []))
-                                    )
+                            lambda row: [
+                                (
+                                    row[sweep_col].count(s)
                                     if (
-                                        (timepoint == 'PRE' and s < row['drug_in']) or
-                                        (timepoint == 'APP' and row['drug_in'] <= s < row['drug_out']) or
-                                        (timepoint == 'WASH' and s >= row['drug_out'])
-                                    )
-                                ]
-                            ),
+                                        isinstance(row[sweep_col], list) and
+                                        (
+                                            (timepoint == 'PRE' and s < row.get('drug_in', float('inf'))) or
+                                            (timepoint == 'APP' and row.get('drug_in', -1) <= s < row.get('drug_out', float('inf'))) or
+                                            (timepoint == 'WASH' and s >= row.get('drug_out', float('inf')))
+                                        )
+                                    ) else 0
+                                )
+                                for s in range(len(row.get(f'RMP_{timepoint}', [])))
+                            ],
                             axis=1
                         )
+
                 reshaped_data.append(current_data)
             agg_APP_df = pd.concat(reshaped_data, ignore_index=True)
             agg_APP_df = self.add_cell_mapping(agg_APP_df)
@@ -333,7 +335,7 @@ class DataSelection (Cachable):
             AP_df.loc[(AP_df['voltage_threshold'] < mean_voltage_threshold-20 ), 'AP_type'] = 'RA'
         except(IndexError, TypeError):
             print(f" Cell {cell_id} has no valid FP to assess voltage threshold, setting RMP<-60mV")
-            AP_df.loc[(AP_df['voltage_threshold'] < -60) & (AP_df['peak_voltage'] > 20), 'AP_type'] = 'RA'
+            AP_df.loc[(AP_df['voltage_threshold'] < -60) , 'AP_type'] = 'RA'
 
         if file_data_type == 'FP':
             AP_df_positive = AP_df[AP_df['I_injected'] > 0].iloc[:20] #HARD CODE keeping first 20 APs on + I step
@@ -546,6 +548,7 @@ class AggregateApplication(Figure):
     dependant_var: str = field(kw_only=True) #  'RMP', 'inputR', 'RA_count', 'AP_count'
     bin_size: float = field(kw_only = True, default = 3) #sweeps to pool default 3 3x20sec - 1min
     n_minimum: float = field(kw_only = True, default = 3)
+    normalise: bool = field(kw_only = True, default = False)
 
 
     def __post_init__(self):
@@ -553,118 +556,221 @@ class AggregateApplication(Figure):
         super().__post_init__()
         self.check_valid_dependant_var()
         self.data = self.filter_n_minimum(self.agg_df)
-        
         self.timepoints = ['PRE', 'APP', 'WASH']
         self.colors = {'PRE': 'lightgrey', 'APP': 'black', 'WASH': 'grey'} #black preset will be changed in plot
-        self.binned_data = self.process_data(self.data)
-        self.plot()
+        # self.binned_data = self.process_data(self.data)
+        # self.plot()                       #OLD CODE segregated data
+        self.continuous_plot()
 
-    def process_data(self, df):
-        '''
-        Creates a df to plot with columns cell_id time data then loops rows to bin data +++++++++++ does % baselin if RMP or input R
-        '''
-        column_to_bin = f'sweep_{self.dependant_var}'
-        binned_rows = []
-        for _, row in df.iterrows():
-            data = row[column_to_bin]
-            if not isinstance(data, list) or len(data) == 0:
-                print(f"{row['cell_id']} for {row['time']} is empty or invalid.")
-                continue
-            binned = [
-                np.mean(data[i:i + self.bin_size])
-                for i in range(0, len(data), self.bin_size)
-                if len(data[i:i + self.bin_size]) == self.bin_size
-            ]
-            binned_rows.append({
-                'cell_id': row['cell_id'],
-                'time': row['time'],
-                'binned_values': binned
-            })
 
-        binned_df = pd.DataFrame(binned_rows)
 
-        if self.dependant_var in ['RMP', 'inputR']:
-            normalized_rows = []
-            for cell_id, group in binned_df.groupby('cell_id'):
-                pre_row = group[group['time'] == 'PRE']
-                if pre_row.empty:
-                    print(f"No PRE data for {cell_id}, skipping normalization.")  
-                    continue
-                baseline_vals = pre_row.iloc[0]['binned_values']
-                baseline_mean = np.mean(baseline_vals) 
-                for _, row in group.iterrows():
-                    norm_vals = [(val / baseline_mean) * 100 for val in row['binned_values']]  
-                    normalized_rows.append({
-                        'cell_id': row['cell_id'],
-                        'time': row['time'],
-                        'binned_values': norm_vals
-                    })
-        normalised_binned_df = pd.DataFrame(normalized_rows)
-        return normalised_binned_df
+    def continuous_plot(self):
+        column_to_plot = f'sweep_{self.dependant_var}'
+        subset_df = self.data[[column_to_plot, 'cell_id', 'time']]
 
-    def plot(self):
         fig, ax = plt.subplots(figsize=(10, 5))
-        time_per_bin_min = (self.sweep_in_s * self.bin_size) / 60
-        padding = 0 * time_per_bin_min  # HARD CODE ADJUST
-        section_widths = {}
+        cell_counts = self.cell_df[self.cell_df['cell_id'].isin(subset_df['cell_id'])].groupby('treatment')['cell_id'].nunique().to_dict()
         legend_handles = {}
-        cell_counts = self.cell_df[self.cell_df['cell_id'].isin(self.binned_data['cell_id'])].groupby('treatment')['cell_id'].nunique().to_dict()
 
-
-        for timepoint in self.timepoints:
-            max_bins = self.binned_data[self.binned_data['time'] == timepoint]['binned_values'].apply(len).max()
-            section_widths[timepoint] = max_bins * time_per_bin_min if max_bins else 0
-
-        for cell_id, cell_data in self.binned_data.groupby('cell_id'):
-            x_offset = 0
-            prev_endpoint = None  
-
-            for idx, timepoint in enumerate(self.timepoints):
-                tp_data = cell_data[cell_data['time'] == timepoint]
-                if tp_data.empty:
+        for cell_id, cell_data in subset_df.groupby('cell_id'):
+            sweeps = {
+                row['time']: row[column_to_plot]
+                for _, row in cell_data.iterrows()
+                if isinstance(row[column_to_plot], list)
+            }
+            # --- PRE binning ---
+            pre_vals = sweeps.get('PRE', [])[-10:]
+            remainder = len(pre_vals) % self.bin_size
+            if remainder:
+                pre_vals = pre_vals[remainder:]
+            pre_bins = [
+                np.mean(pre_vals[i:i + self.bin_size])
+                for i in range(0, len(pre_vals), self.bin_size)
+            ]
+            pre_times = ['PRE'] * len(pre_bins)
+            # --- APP + WASH binning ---
+            app_vals = sweeps.get('APP', [])
+            wash_vals = sweeps.get('WASH', [])
+            aw_vals = app_vals + wash_vals
+            aw_times = ['APP'] * len(app_vals) + ['WASH'] * len(wash_vals)
+            aw_bins, aw_bin_times = [], []
+            for i in range(0, len(aw_vals), self.bin_size):
+                chunk = aw_vals[i:i + self.bin_size]
+                time_chunk = aw_times[i:i + self.bin_size]
+                if not chunk:
                     continue
+                aw_bins.append(np.mean(chunk))
+                aw_bin_times.append('APP' if 'APP' in time_chunk else 'WASH')
 
-                binned_vals = tp_data.iloc[0]['binned_values']
-                n_bins = len(binned_vals)
-                x_vals = np.arange(n_bins) * time_per_bin_min + x_offset
-                y_vals = binned_vals
+            # Combine all bins
+            binned_values = pre_bins + aw_bins
+            binned_times = pre_times + aw_bin_times
+            cell_ids = [cell_id] * len(binned_values)
+            x_vals = list(range(len(binned_values)))
+            plot_df = pd.DataFrame({
+                column_to_plot: binned_values,
+                'time': binned_times,
+                'cell_id': cell_ids, 
+                'x': x_vals
+            })
+            
+            #normalisation
+            y_label = f"{unit_dict[self.dependant_var]}"
+            if self.normalise:
+                y_label = f"{unit_dict[self.dependant_var]} as % of baseline"
+                pre_avg = np.mean(pre_bins)  # Average of PRE bins
+                plot_df[column_to_plot] = (plot_df[column_to_plot] / pre_avg) * 100  # Normalize as percentage of PRE
 
-                if timepoint in ['APP', 'WASH']:
-                    drug = self.cell_df[self.cell_df['cell_id'] == cell_id]['treatment'].iloc[0]
-                    color = color_dict.get(drug, 'k')
-                    alpha = 0.5 if timepoint == 'WASH' else 1.0
-                    label = f"{drug} (n={cell_counts.get(drug, 0)})" if timepoint == 'APP' else None
-                else:
-                    color = self.colors[timepoint]
-                    label = None
-                    alpha = 1.0
+            drug = self.cell_df[self.cell_df['cell_id'] == cell_id]['treatment'].iloc[0]
+            color_map = {
+                'PRE': 'lightgrey',
+                'APP': color_dict.get(drug, 'k'),
+                'WASH': color_dict.get(drug, 'k')
+            }
+            alpha_map = {
+                'PRE': 1.0,
+                'APP': 1.0,
+                'WASH': 0.5
+            }
+            # Assign colors and alpha values based on time condition
+            plot_df['color'] = plot_df['time'].map(color_map)
+            plot_df['alpha'] = plot_df['time'].map(alpha_map)
 
-                if label is not None and label not in legend_handles:
-                    legend_handles[label] = ax.plot([], [], color=color, alpha=alpha, label=label)[0]
-                ax.plot(x_vals, y_vals, color=color, alpha=alpha, linewidth=1)  
+            # Plotting continuous line with changing colors and alpha values
+            for i in range(1, len(plot_df)):
+                ax.plot(
+                    plot_df['x'].iloc[i-1:i+1], plot_df[column_to_plot].iloc[i-1:i+1],
+                    color=plot_df['color'].iloc[i],
+                    alpha=plot_df['alpha'].iloc[i],
+                )
 
-                # connector between last timepoint and current one
-                if prev_endpoint is not None:  
-                    connector_x = [prev_endpoint[0], x_vals[0]]  
-                    connector_y = [prev_endpoint[1], y_vals[0]]  
-                    ax.plot(connector_x, connector_y, color=color, linestyle=':', alpha=0.2, linewidth=0.5) 
+            if drug not in legend_handles:
+                legend_handles[drug] = ax.plot([], [], color=color_dict.get(drug, 'k'), label=f'{drug} (n={cell_counts.get(drug, 0)})')
 
-                prev_endpoint = (x_vals[-1], y_vals[-1])  
-                x_offset += section_widths[timepoint] + padding
-
-        cumulative_offset = 0
-        for timepoint in self.timepoints[:-1]:
-            cumulative_offset += section_widths[timepoint] + padding
-            ax.axvline(cumulative_offset, color='lightgrey', linestyle='--', linewidth=0.8)
-
-        ax.set_title(f'{self.dependant_var} ')
+        ax.legend()
+        ax.set_title(f'{self.cell_type} {self.dependant_var} Applications')
         ax.set_xlabel("Time (min)")
-        ax.set_ylabel(f"{unit_dict[self.dependant_var]} as % of baseline")
-        ax.legend(fontsize='small', loc='upper right')
+        ax.set_ylabel(y_label)
         ax.spines[['top', 'right']].set_visible(False)
         plt.tight_layout()
         plt.show()
 
+    
+       
+
+    # def process_data(self, df):
+    #     '''
+    #     Creates a df to plot with columns cell_id time data then loops rows to bin data +++++++++++ does % baselin if RMP or input R
+    #     '''
+    #     column_to_bin = f'sweep_{self.dependant_var}'
+    #     binned_rows = []
+    #     for _, row in df.iterrows():
+    #         data = row[column_to_bin]
+    #         if not isinstance(data, list) or len(data) == 0:
+    #             print(f"{row['cell_id']} for {row['time']} is empty or invalid.")
+    #             continue
+
+    #         if row['time'] == 'PRE' and len(data) < 10:
+    #             print(f"Skipping {row['cell_id']} due to insufficient PRE values ({len(data)}<10).")
+    #             continue
+    #         if row['time'] == 'PRE':
+    #             data = data[-10:]  
+
+    #         binned = [
+    #             np.mean(data[i:i + self.bin_size])
+    #             for i in range(0, len(data), self.bin_size)
+    #             if len(data[i:i + self.bin_size]) == self.bin_size
+    #         ]
+    #         binned_rows.append({
+    #             'cell_id': row['cell_id'],
+    #             'time': row['time'],
+    #             'binned_values': binned
+    #         })
+
+    #     binned_df = pd.DataFrame(binned_rows)
+
+    #     if self.dependant_var in ['RMP', 'inputR'] : #and self.normalise == True
+    #         normalized_rows = []
+    #         for cell_id, group in binned_df.groupby('cell_id'):
+    #             pre_row = group[group['time'] == 'PRE']
+    #             if pre_row.empty:
+    #                 print(f"No PRE data for {cell_id}, skipping normalization.")  
+    #                 continue
+    #             baseline_vals = pre_row.iloc[0]['binned_values']
+    #             baseline_mean = np.mean(baseline_vals) 
+    #             for _, row in group.iterrows():
+    #                 norm_vals = [(val / baseline_mean) * 100 for val in row['binned_values']]  
+    #                 normalized_rows.append({
+    #                     'cell_id': row['cell_id'],
+    #                     'time': row['time'],
+    #                     'binned_values': norm_vals
+    #                 })
+    #         return pd.DataFrame(normalized_rows)
+    #     else: 
+    #         return binned_df
+
+    # def plot(self):
+    #     fig, ax = plt.subplots(figsize=(10, 5))
+    #     time_per_bin_min = (self.sweep_in_s * self.bin_size) / 60
+    #     padding = 0 * time_per_bin_min  # HARD CODE ADJUST
+    #     section_widths = {}
+    #     legend_handles = {}
+    #     cell_counts = self.cell_df[self.cell_df['cell_id'].isin(self.binned_data['cell_id'])].groupby('treatment')['cell_id'].nunique().to_dict()
+
+
+    #     for timepoint in self.timepoints:
+    #         max_bins = self.binned_data[self.binned_data['time'] == timepoint]['binned_values'].apply(len).max()
+    #         section_widths[timepoint] = max_bins * time_per_bin_min if max_bins else 0
+
+    #     for cell_id, cell_data in self.binned_data.groupby('cell_id'):
+    #         x_offset = 0
+    #         prev_endpoint = None  
+
+    #         for idx, timepoint in enumerate(self.timepoints):
+    #             tp_data = cell_data[cell_data['time'] == timepoint]
+    #             if tp_data.empty:
+    #                 continue
+
+    #             binned_vals = tp_data.iloc[0]['binned_values']
+    #             n_bins = len(binned_vals)
+    #             x_vals = np.arange(n_bins) * time_per_bin_min + x_offset
+    #             y_vals = binned_vals
+
+    #             if timepoint in ['APP', 'WASH']:
+    #                 drug = self.cell_df[self.cell_df['cell_id'] == cell_id]['treatment'].iloc[0]
+    #                 color = color_dict.get(drug, 'k')
+    #                 alpha = 0.5 if timepoint == 'WASH' else 1.0
+    #                 label = f"{drug} (n={cell_counts.get(drug, 0)})" if timepoint == 'APP' else None
+    #             else:
+    #                 color = self.colors[timepoint]
+    #                 label = None
+    #                 alpha = 1.0
+
+    #             if label is not None and label not in legend_handles:
+    #                 legend_handles[label] = ax.plot([], [], color=color, alpha=alpha, label=label)[0]
+    #             ax.plot(x_vals, y_vals, color=color, alpha=alpha, linewidth=1)  
+
+    #             # connector between last timepoint and current one
+    #             if prev_endpoint is not None:  
+    #                 connector_x = [prev_endpoint[0], x_vals[0]]  
+    #                 connector_y = [prev_endpoint[1], y_vals[0]]  
+    #                 ax.plot(connector_x, connector_y, color=color, linestyle=':', alpha=0.2, linewidth=0.5) 
+
+    #             prev_endpoint = (x_vals[-1], y_vals[-1])  
+    #             x_offset += section_widths[timepoint] + padding
+
+    #     cumulative_offset = 0
+    #     for timepoint in self.timepoints[:-1]:
+    #         cumulative_offset += section_widths[timepoint] + padding
+    #         ax.axvline(cumulative_offset, color='lightgrey', linestyle='--', linewidth=0.8)
+
+    #     ax.set_title(f'{self.dependant_var} ')
+    #     ax.set_xlabel("Time (min)")
+    #     ax.set_ylabel(f"{unit_dict[self.dependant_var]} as % of baseline")
+    #     ax.legend(fontsize='small', loc='upper right')
+    #     ax.spines[['top', 'right']].set_visible(False)
+    #     plt.tight_layout()
+    #     plt.show()
 
        
 @dataclass
