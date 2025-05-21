@@ -8,7 +8,6 @@ from scipy.ndimage import gaussian_filter1d
 import scipy.signal as sg
 from scipy import stats
 from collections import namedtuple
-from module.utils import *
 from scipy.optimize import curve_fit
 import sys
 
