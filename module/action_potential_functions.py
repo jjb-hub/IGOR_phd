@@ -1002,6 +1002,10 @@ def ap_characteristics_extractor_main(folder_file, V_array): #Locations of peaks
         peak_decay_all : list of float — Decay speed (20–80% of height, mV/ms)
     '''
 
+    #ensure 2D_array
+    if V_array.ndim == 1:
+        V_array = V_array[:, np.newaxis]  # shape (30000,) -> (30000, 1)
+
     # itterating over sweeps
     sweep_indices = [i for i in range(V_array.shape[1])]
 

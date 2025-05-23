@@ -300,23 +300,18 @@ class EphysData (Project):
         return row
     
 
-
 @dataclass
 class st_VC(EphysData):
-    
     filename: str = "st_VC_df"
     data_type: str = 'st_VC'
     
-  
     def __post_init__(self):
         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
         """Extract Rs, Rm, Cm, tau from each voltage step in the st_VC protocol."""  #HERE TO CHECK AND WORK FOR HFD
-
         V_array, I_array, _ = self.load_data(row['folder_file'])
-
         V = V_array[:, 0]  # mV
         I = I_array[:, 0]  # pA
         dt = 1 / self.sampling_rate
@@ -343,9 +338,7 @@ class st_VC(EphysData):
         V_baseline_mode, V_step_mode = sorted_Vs[:2]
         global_delta_V = abs(V_step_mode - V_baseline_mode)
 
-        # 2. Initialize lists to collect results
         Rs_list, Rm_list, tau_list, Cm_list = [], [], [], []
-
 
         for idx in step_indices:
             start = max(0, idx + 1)
@@ -388,16 +381,16 @@ class st_VC(EphysData):
 
             # BOUNDS CHECK with debug
             if not (0 < Rs < 1e9):
-                print(f"[DEBUG] Rs out of bounds: {Rs:.2e} Ω ({Rs/1e6:.2f} MΩ) | cell: {row.cell_id} | step: {idx}")
+                print(f"Rs out of bounds: {Rs:.2e} Ω ({Rs/1e6:.2f} MΩ) | cell: {row.cell_id} | step: {idx}")
                 Rs = np.nan
             if not (1e6 < Rm < 1e9):
-                print(f"[DEBUG] Rm out of bounds: {Rm:.2e} Ω ({Rm/1e6:.2f} MΩ) | cell: {row.cell_id} | step: {idx}")
+                print(f"Rm out of bounds: {Rm:.2e} Ω ({Rm/1e6:.2f} MΩ) | cell: {row.cell_id} | step: {idx}")
                 Rm = np.nan
             if not (0 < Cm < 500e-12):
-                print(f"[DEBUG] Cm out of bounds: {Cm:.2e} F ({Cm*1e12:.2f} pF) | cell: {row.cell_id} | step: {idx}")
+                print(f"Cm out of bounds: {Cm:.2e} F ({Cm*1e12:.2f} pF) | cell: {row.cell_id} | step: {idx}")
                 Cm = np.nan
             if not (0 < tau < 1):
-                print(f"[DEBUG] tau out of bounds: {tau:.2e} s ({tau*1e3:.2f} ms) | cell: {row.cell_id} | step: {idx}")
+                print(f"tau out of bounds: {tau:.2e} s ({tau*1e3:.2f} ms) | cell: {row.cell_id} | step: {idx}")
                 tau = np.nan
 
             # # # plot to check
@@ -413,7 +406,6 @@ class st_VC(EphysData):
             # plt.title(f"{row.cell_id} step {idx}")
             # plt.show()
 
-
             Rs_list.append(Rs / 1e6)      # to MOhm
             Rm_list.append(Rm / 1e6)
             tau_list.append(tau * 1e3 if not np.isnan(tau) else np.nan)  # ms
@@ -428,7 +420,70 @@ class st_VC(EphysData):
         return row
 
 
+
+@dataclass
+class ramp_IC(EphysData):
+    filename: str = "ramp_IC_df"
+    data_type: str = 'ramp_IC'
     
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        super().__post_init__()
+    
+    def process(self, row: pd.Series) -> pd.Series:
+        """Extract rheobase (pA), voltage_threshold (mV) and AP_charecteristics of the first AP."""  #HERE TO CHECK AND WORK FOR HFD
+        V_array, I_array, _ = self.load_data(row['folder_file'])
+        dt = 1 / self.sampling_rate
+        t = np.arange(len(I_array)) * dt
+
+        peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row['folder_file'], V_array)        
+        
+        rheobase_list = []
+        threshold_list = []
+        height_list = []
+        rise_list = []
+        decay_list = []
+        fwhm_list = []
+
+        num_sweeps = V_array.shape[1]
+
+        for sweep_idx in range(num_sweeps):
+            V_sweep = V_array[:, sweep_idx]
+            I_sweep = I_array[:, sweep_idx]
+
+            # Run AP detection on this sweep only
+            (
+                peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_rise_all,
+                peak_max_dvdt_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all,
+                peak_fw_all, peak_indices_all, sweep_indices_all, peak_decay_all
+            ) =  ap_characteristics_extractor_main(row['folder_file'], V_sweep)
+
+            if peak_voltages_all is None or len(peak_voltages_all) == 0: 
+                continue  # No AP detected
+
+            firt_AP_peak_loc = peak_locs_corr_all[0]
+
+            try:
+                rheobase = I_sweep[firt_AP_peak_loc]  # pA
+            except IndexError:
+                continue  # Skip corrupted index
+
+            rheobase_list.append(rheobase)
+            threshold_list.append(v_thresholds_all[0])
+            height_list.append(peak_heights_all[0])
+            rise_list.append(peak_rise_all[0])
+            decay_list.append(peak_decay_all[0])
+            fwhm_list.append(peak_fw_all[0])
+
+        row['rheobase_pA'] = np.nanmean(rheobase_list)
+        row['v_thresh_mV'] = np.nanmean(threshold_list)
+        row['AP_height_mV'] = np.nanmean(height_list)
+        row['AP_rise_mV_ms'] = np.nanmean(rise_list)
+        row['AP_decay_mV_ms'] = np.nanmean(decay_list)
+        row['AP_width_ms'] = np.nanmean(fwhm_list)
+
+        return row
+
 
 @dataclass
 class FP(EphysData):
