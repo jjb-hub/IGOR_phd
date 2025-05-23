@@ -177,7 +177,7 @@ class DataSelection (Cachable):
 
         elif self.data_type == 'FP':
             filtered_df = self.FP_df[self.FP_df['folder_file'].isin(self.valid_files)].copy()
-            filtered_df['time'] = filtered_df['drug'].apply(lambda x: 'WASH' if x != 'PRE' else 'PRE')
+            filtered_df['time'] = filtered_df['treatment'].apply(lambda x: 'WASH' if x != 'PRE' else 'PRE')
             #columns to keep
             filtered_df = filtered_df[['cell_id', 'time', 'AP_decay_dvdt', 'AP_rise_dvdt',
                         'AP_dvdt_max', 'AP_height', 'AP_latency', 'AP_peak_voltages',
@@ -279,7 +279,7 @@ class DataSelection (Cachable):
     def folder_file_AP_df(self, cell_id, folder_file,  V_array=None, I_array=None): # add drug column with PRE APP or WASH
         '''builds AP_df for single folder_file.'''
         if V_array is None or I_array is None:
-            V_array , I_array, V_list = Project(self.project).IGOR_load(folder_file)
+            V_array , I_array, V_list = Project(self.project).load_data(folder_file)
             if I_array is None:
                 I_array = np.zeros((len(V_array), 1))
         
@@ -296,7 +296,7 @@ class DataSelection (Cachable):
                                         'I_injected', 'AP_type'])
         
         file_data_type, row_info = self.fetch_data_type(folder_file)
-        drug_used = row_info['drug'].iloc[0]
+        drug_used = row_info['treatment'].iloc[0]
 
         if file_data_type == 'APP':
             drug_in =  row_info['drug_in'].iloc[0]
@@ -305,7 +305,7 @@ class DataSelection (Cachable):
             current_injected = [I_array[loc, 0] for loc in peak_locs_corr_all]
 
         if file_data_type == 'FP':
-            drug_labels = [row_info['drug'].iloc[0] if row_info['drug'].iloc[0] == 'PRE' else 'WASH' for _ in sweep_indices_all]
+            drug_labels = [row_info['treatment'].iloc[0] if row_info['treatment'].iloc[0] == 'PRE' else 'WASH' for _ in sweep_indices_all]
             current_injected = [I_array[loc, sweep] for loc, sweep in zip(peak_locs_corr_all, sweep_indices_all)]
 
 
@@ -314,7 +314,7 @@ class DataSelection (Cachable):
         'cell_id': cell_id,
         'data_type': file_data_type,
         'cell_treatment': drug_used,
-        'drug': drug_labels,
+        'treatment': drug_labels,
         'peak_location': peak_locs_corr_all,
         'upshoot_location': upshoot_locs_all,
         'voltage_threshold': v_thresholds_all,
@@ -803,10 +803,10 @@ class Application(Figure):
             if self.valid_only == True:
                 cell_sub_df = cell_sub_df[cell_sub_df['valid'] != False]
 
-            for folder_file, cell_id, I_set, drug, drug_in, drug_out, application_order, RA_locs in cell_sub_df[['folder_file','cell_id', 'I_set', 'drug', 'drug_in', 'drug_out', 'application_order', 'RA_locs']].values:
+            for folder_file, cell_id, I_set, drug, drug_in, drug_out, application_order, RA_locs in cell_sub_df[['folder_file','cell_id', 'I_set', 'treatment', 'drug_in', 'drug_out', 'application_order', 'RA_locs']].values:
                 self.fig_filename = f"{cell_id}_application{application_order}"
                 
-                V_array , I_array, V_list = Project(self.project).IGOR_load(folder_file)
+                V_array , I_array, V_list = Project(self.project).load_data(folder_file)
                 if I_array is None:
                     I_array = np.zeros((len(V_array), 1))
 
@@ -915,7 +915,7 @@ class RA_AP_analysis(Figure):
                 
         for folder_file in agg_folder_files: #TOD add drug presence to AP_df
             #fetch raw trace
-            V_array , I_array, V_list = Project(self.project).IGOR_load(folder_file)
+            V_array , I_array, V_list = Project(self.project).load_data(folder_file)
             if I_array is None:
                 I_array = np.zeros((len(V_array), 1))
             #build AP_df for folder_file
@@ -962,7 +962,7 @@ class RA_AP_analysis(Figure):
 
         #collect traces from folder_files
         for folder_file, AP_df_folder_file in df.groupby('folder_file'):
-            V_array, I_array, _ = Project(self.project).IGOR_load(folder_file)
+            V_array, I_array, _ = Project(self.project).load_data(folder_file)
             for ap_type in AP_df_folder_file['AP_type'].unique():
                 ap_indices = AP_df_folder_file[AP_df_folder_file['AP_type'] == ap_type][["upshoot_location", "sweep"]].values
                 traces = []
@@ -1010,7 +1010,7 @@ class RA_AP_analysis(Figure):
         #collect traces
         for folder_file, AP_df_folder_file in df.groupby('folder_file'):
             # Load V_array and I_array for each folder_file
-            V_array, I_array, _ = Project(self.project).IGOR_load(folder_file)
+            V_array, I_array, _ = Project(self.project).load_data(folder_file)
 
             for ap_type in AP_df_folder_file['AP_type'].unique():
                 color = self.color_map.get(ap_type, 'gray')
@@ -1100,198 +1100,3 @@ class RA_AP_analysis(Figure):
             self.save_plot(fig, self.filename)
 
 
-
-# @dataclass #old
-# class RA_AP_analysis(Figure):
-
-#     #TODO - mean trace plots for the phase plot, add all AP_parms to the histogram analysis
-
-#     '''Plot a single APP file from cell_id or list of.'''
-#     project: str = field(kw_only = True)
-#     cell_id: str|list = field(kw_only = True, default = None) 
-#     valid_only: bool = field(kw_only=True, default=False)
-#     
-#     color_map: dict = field(default_factory=lambda: {'RA': 'red', 'somatic': 'blue'}, init=False)
-#     forwards_window: int = field(default=50, init=False)
-#     backwards_window: int = field(default=70, init=False)
-#     sampling_rate: float = field(default=2e4, init=False)
-#     voltage_max: float = field(default=60.0, init=False)
-#     voltage_min: float = field(default=-120.0, init=False)
-
-#     def __post_init__(self):
-#         # self.filename = f"{self.dependant_var}_{self.specify}" # TODO handel better 
-#         super().__post_init__()
-
-#         if self.cell_id == None:
-#             self.cell_id = self.valid_cell_ids
-
-#         self.fig = self.plot_meanAPs()
-#         self.phase_fig = self.plot_phaseplotAPs()
-#         self.hist_fig = self.plot_histogramAPs()
-
-
-#     def plot_meanAPs(self):
-#         for cell_id in self.cell_id:
-#             self.filename = f'{cell_id}_mean_AP'
-
-#             # Fetch folder_file for the specific cell_id
-#             cell_sub_df = self.APP_df[self.APP_df['cell_id'] == cell_id] # Likethis will only have APP files .... could adapt for RA hunter too
-#             if self.valid_only == True:
-#                 cell_sub_df = cell_sub_df[cell_sub_df['valid'] != False]
-
-#             for folder_file, cell_id, I_set, drug, drug_in, drug_out, application_order, RA_locs in cell_sub_df[['folder_file','cell_id', 'I_set', 'drug', 'drug_in', 'drug_out', 'application_order', 'RA_locs']].values:
-#                 self.fig_filename = f"{cell_id}_application{application_order}"
-#                 fig, ax = plt.subplots(figsize=(10, 6))
-#                 V_array , I_array, V_list = Project(self.project).IGOR_load(folder_file)
-#                 if I_array is None:
-#                     I_array = np.zeros((len(V_array), 1))
-
-
-#                 AP_df = self.folder_file_AP_df(cell_id, folder_file, V_array, I_array)
-#                 spike_arrays = {'RA': [], 'somatic': []}
-
-#                 for ap_type in AP_df['AP_type'].unique():
-#                     color = self.color_map[ap_type]
-#                     ap_indices = AP_df[AP_df['AP_type'] == ap_type][["upshoot_location", "sweep"]].values
-#                     traces = []
-#                     # Prepare spike data
-#                     for idx in range(len(ap_indices)):
-#                         upshoot_location = ap_indices[idx, 0]
-#                         sweep_idx = ap_indices[idx, 1]
-#                         lower_bound = max(0, upshoot_location - self.backwards_window)
-#                         upper_bound = upshoot_location + self.forwards_window
-#                         # spike_arrays[ap_type].append(V_array[lower_bound:upper_bound, ap_indices[idx, 1]]) #old was returning 0 when couldnt slice
-#                         if upper_bound <= V_array.shape[0]:
-#                             trace = V_array[lower_bound:upper_bound, sweep_idx]
-#                         else:
-#                             trace = V_array[lower_bound:, sweep_idx]
-#                         traces.append(trace)
-
-  
-#                     max_len = max([len(t) for t in traces], default=0)  
-#                     valid_traces = [t for t in traces if len(t) == max_len]  
-#                     #dropped AP trace count due to length shorter
-#                     if len(valid_traces) < len(traces): 
-#                         print(f"{len(traces) - len(valid_traces)} {ap_type} APs dropped due to short trace length.")
-#                     spike_arrays[ap_type] = valid_traces 
-#                     # Plot individual traces for each AP type
-#                     if spike_arrays[ap_type]:
-#                         for trace in spike_arrays[ap_type]:
-#                             time_ms = (np.arange(0, len(trace)) * 1000) / self.sampling_rate  # Convert to ms
-#                             ax.plot(time_ms, trace, color=color, alpha=0.1, linewidth=0.9)
-                            
-
-#                         # Plot mean trace for this AP type
-#                         mean_spike = np.mean(np.array(spike_arrays[ap_type]), axis=0)
-#                         ax.plot(time_ms, mean_spike, color=color, label=f'{ap_type} mean voltage (n={len(spike_arrays[ap_type])})', linewidth=1.3, alpha=1)
-#                         ax.set_ylabel('Membrane Potential (mV)')
-#                         ax.set_xlabel('Time (ms)')
-#                         ax.legend()
-#                         ax.set_title(f"{cell_id} {drug} Application{application_order}_meanAPs", fontsize = 16) # , fontsize = 25
-                
-#             plt.tight_layout()
-#             plt.show()
-#             self.save_plot(fig, f"{cell_id}_meanAPs_application{application_order}")
-#             return fig
-        
-#     def plot_phaseplotAPs(self):
-#         for cell_id in self.cell_id:
-#             self.filename = f'{cell_id}_phase_plot'
-
-#             cell_sub_df = self.APP_df[self.APP_df['cell_id'] == cell_id]
-#             if self.valid_only:
-#                 cell_sub_df = cell_sub_df[cell_sub_df['valid'] != False]
-
-#             for folder_file, cell_id, _, drug, _, _, application_order, _ in cell_sub_df[['folder_file','cell_id', 'I_set', 'drug', 'drug_in', 'drug_out', 'application_order', 'RA_locs']].values:
-#                 self.fig_filename = f"{cell_id}_application{application_order}_phase"
-#                 fig, ax = plt.subplots(figsize=(8, 6))
-
-#                 V_array , I_array, _ = Project(self.project).IGOR_load(folder_file)
-
-#                 AP_df = self.folder_file_AP_df(cell_id, folder_file, V_array, I_array)
-
-#                 for ap_type in AP_df['AP_type'].unique():
-#                     color = self.color_map.get(ap_type, 'gray')
-#                     ap_indices = AP_df[AP_df['AP_type'] == ap_type][["upshoot_location", "sweep"]].values
-#                     for idx in range(len(ap_indices)):
-#                         upshoot_location = ap_indices[idx, 0]
-#                         sweep = ap_indices[idx, 1]
-#                         v_temp = V_array[upshoot_location: upshoot_location + self.forwards_window, sweep]
-#                         if len(v_temp) < 2:  # skip if not enough points
-#                             continue
-#                         dv_temp = np.diff(v_temp)
-#                         if max(v_temp) <= self.voltage_max and min(v_temp) >= self.voltage_min:
-#                             ax.plot(v_temp[:-1], dv_temp, color=color, alpha=0.05)
-
-#                 ax.set_title(f"{cell_id} {drug} Application ({application_order})")
-#                 ax.set_xlabel("Membrane Potential (mV)")
-#                 ax.set_ylabel("dV (mV)")
-#                 legend_elements = []
-
-#                 for ap in AP_df['AP_type'].unique():
-#                     if ap in self.color_map:
-#                         count = len(AP_df[AP_df['AP_type'] == ap])
-#                         legend_elements.append(Line2D([0], [0], color=self.color_map[ap], lw=2,
-#                                                     label=f'{ap} dV vs V (n={count})'))
-
-#             ax.legend(handles=legend_elements)
-#             plt.tight_layout()
-#             plt.show()
-#             self.save_plot(fig, f"{cell_id}_application{application_order}_phase")
-#             return fig
-
-#     def plot_histogramAPs(self):
-#         for cell_id in self.cell_id:
-#             self.filename = f'{cell_id}_histogram_AP'
-
-#             cell_sub_df = self.APP_df[self.APP_df['cell_id'] == cell_id]
-#             if self.valid_only:
-#                 cell_sub_df = cell_sub_df[cell_sub_df['valid'] != False]
-
-#             for folder_file, cell_id, _, drug, _, _, application_order, _ in cell_sub_df[['folder_file','cell_id', 'I_set', 'drug', 'drug_in', 'drug_out', 'application_order', 'RA_locs']].values:
-#                 self.fig_filename = f"{cell_id}_application{application_order}_hist"
-
-#                 V_array , I_array, _ = Project(self.project).IGOR_load(folder_file)
-#                 AP_df = self.folder_file_AP_df(cell_id, folder_file, V_array, I_array)
-
-#                 fig, axs = plt.subplots(4, 2, figsize=(10, 10))
-#                 plot_labels = ['RA', 'somatic']
-
-#                 column_map = {
-#                     'voltage_threshold': ('Voltage Thresholds', 'mV'),
-#                     'peak_rise': ('AP Rise', 'V/s'),
-#                     'peak_decay': ('AP Decay', 'V/s'),
-#                     'peak_max_rise': ('AP Rise max', 'V/s'),
-#                     'height': ('AP Heights', 'mV'),
-#                     'peak_voltage': ('AP peak', 'mV'),
-#                     'width': ('AP FWHM', 'ms'),
-#                     'latency': ('Peak Latency', 'ms')
-#                 }
-
-#                 plot_columns = list(column_map.keys())
-#                 for i, col in enumerate(plot_columns):
-#                     row, col_pos = divmod(i, 2)
-#                     # Combine both RA and somatic data for binning
-#                     data_all = AP_df[col].dropna()
-#                     bins = np.histogram_bin_edges(data_all, bins=20)
-
-#                     for label in plot_labels:
-#                         color = self.color_map[label]
-#                         data = AP_df[AP_df["AP_type"] == label][col].dropna()
-#                         n_aps = len(data)
-#                         axs[row, col_pos].hist(data, bins=bins, color=color,
-#                                             label=f'{label} (n={n_aps})', alpha=0.6) #histtype='step',
-
-#                 # Labeling and titles
-#                 for i, col in enumerate(plot_columns):
-#                     row, col_pos = divmod(i, 2)
-#                     title, xlabel = column_map[col]
-#                     axs[row, col_pos].set_title(title)
-#                     axs[row, col_pos].set_xlabel(xlabel)
-#                     axs[row, col_pos].set_ylabel('AP count')
-#                     axs[row, col_pos].legend()
-
-#                 fig.tight_layout(h_pad=2.5, rect=[0, 0, 1, 0.95])
-#                 plt.suptitle(f'{folder_file}', fontsize=14)
-#                 plt.show()
-#                 self.save_plot(fig, f"{cell_id}_application{application_order}_hist")

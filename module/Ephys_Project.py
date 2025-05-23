@@ -2,8 +2,10 @@ import os
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Optional
+from pyabf import ABF 
 from module.Cachable import Cachable
 import traceback
+from scipy.optimize import curve_fit
 from tqdm import tqdm
 from IPython.display import display
 from itertools import combinations
@@ -29,6 +31,7 @@ class Project(Cachable):
     input_dir: str = field(init=False)
     output_dir: str = field(init=False)
     figure_output_dir: str = field(init=False)
+    accepted_extensions = ['.ibw', '.abf']
 
     def __post_init__(self):
         super().__init__(cache_dir=f"{ROOT}/{self.project}/cache")
@@ -36,25 +39,113 @@ class Project(Cachable):
         self.input_dir = self._checkFileSystem("input")
         self.output_dir = self._checkFileSystem("output")
         self.figure_output_dir = self._checkFileSystem("figures")
-        self.feature_df = self.load_xlsx('features')
+        self.feature_df = self.load_feature_xlsx('features')
 
-    def load_xlsx(self, filename: str):
+
+    def _get_extension(self, folder_file: str) -> str:
+        """
+        Parameteres:
+            folder_file: str - identifier of unique file e.g.  folder1/file_no_extension
+        Returns:
+            str: Either '.ibw' or '.abf'
+        Raises:
+            FileNotFoundError: If no accepted extensions are found in the folder.
+        """
+        if '/' in folder_file:
+            folder, _ = folder_file.split('/', 1)
+            base_dir = os.path.join(self.input_dir, 'PatchData', folder)
+        else:
+            base_dir = os.path.join(self.input_dir, 'PatchData')
+        if not os.path.exists(base_dir):
+            raise FileNotFoundError(f"Folder not found: {base_dir}")
+        files = os.listdir(base_dir)
+        for ext in self.accepted_extensions:
+            if any(f.endswith(ext) for f in files):
+                return ext
+        raise FileNotFoundError(f"No known file extensions {self.accepted_extensions} found in {base_dir}")
+    
+    def load_data(self, folder_file: str):
+        """
+        Parameters:
+            folder_file (str): The folder_file identifier (can include a subfolder).
+        Returns:
+            tuple: (V_array, I_array, V_list)
+        """
+        extension = self._get_extension(folder_file)
+        if extension == '.ibw':
+            return self.IGOR_load(folder_file)
+        elif extension == '.abf':
+            return self.ABF_load(folder_file)
+        else:
+            raise ValueError(f"Unsupported extension type: {extension}")
+    
+    def load_feature_xlsx(self, filename: str):
         """Loads data from cache or an Excel file."""
         if self.isCached(filename):
             return self.getCache(filename)
-        else:
-            filepath = os.path.join(self.input_dir, f"{filename}.xlsx")
-            if os.path.exists(filepath):
-                
-                if filename =='features':
-                    df = pd.read_excel(filepath, converters={'drug_in':int, 'drug_out':int}) #eventualy replace with validator of feature df
-                    df['cell_subtype'].fillna(np.nan, inplace=True)
-                else:
-                    df = pd.read_excel(filepath)
-
-                self.cache(filename, df)
-                return df
+        
+        filepath = os.path.join(self.input_dir, f"{filename}.xlsx")
+        if not os.path.exists(filepath):
             raise FileNotFoundError(f"Excel file {filename} not found in {self.input_dir}")
+
+        required_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        converters = {'drug_in': int, 'drug_out': int}
+        df = pd.read_excel(filepath, converters=converters)
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required column(s) in features.xlsx: {missing_cols}")
+
+        # if 'cell_subtype' in df.columns:
+        #     df['cell_subtype'].fillna(np.nan, inplace=True)
+
+        self.cache(filename, df)
+        return df
+
+            
+    def ABF_load(self, folder_file: str):
+        """
+        Loads data from .abf (Axon) files using pyabf.
+
+        Returns:
+            V_array: 2D numpy array (time x sweeps) of voltage
+            I_array: Currently None (or could be second channel if needed)
+            V_list: 1D flattened array (column-major sweep order)
+        """
+        
+        path = os.path.join(self.input_dir, 'PatchData', folder_file + '.abf')
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"ABF file not found: {path}")
+
+        abf = ABF(path)
+        sampling_rate_hz = abf.dataRate
+
+        # Identify voltage and current channels by unit
+        unit_map = {i: unit for i, unit in enumerate(abf.adcUnits)}
+        voltage_ch = next((i for i, unit in unit_map.items() if 'V' in unit.upper()), None)
+        current_ch = next((i for i, unit in unit_map.items() if 'A' in unit.upper()), None)
+
+        if voltage_ch is None or current_ch is None:
+            raise ValueError(f"Couldn't identify voltage/current channels from units: {abf.adcUnits}")
+
+        # Channel names (optional, for debug/info)
+        # voltage_name = abf.adcNames[voltage_ch]
+        # current_name = abf.adcNames[current_ch]
+
+        num_sweeps = abf.sweepCount
+        num_points = abf.sweepPointCount
+
+        V_array = np.zeros((num_points, num_sweeps))
+        I_array = np.zeros((num_points, num_sweeps))
+
+        for i in range(num_sweeps):
+            abf.setSweep(i, channel=voltage_ch)
+            V_array[:, i] = abf.sweepY
+            abf.setSweep(i, channel=current_ch)
+            I_array[:, i] = abf.sweepY
+
+        V_list = V_array.ravel(order='F')  # Column-major, like IGOR
+
+        return V_array, I_array, V_list
             
 
     def IGOR_load(self, folder_file):
@@ -88,14 +179,15 @@ class Project(Cachable):
         return point_list, V_array_2d
     
 
-    def inspect_IGOR_file(self, folder_file, stacked=False, n_sweeps=None):
+    def inspect_folder_file(self, folder_file, stacked=False, n_sweeps=None):
         '''
         Plots any waveform based off folder_file.
         Stacked will plot each column on top of each other, defaults to False.
         '''
-        feature_df = self.load_xlsx('features')
-        V_array , I_array, V_list = self.IGOR_load(folder_file)
+        feature_df = self.load_feature_xlsx('features')
         display(feature_df[feature_df['folder_file'] == folder_file])  # Show file info
+
+        V_array , I_array, V_list = self.load_data(folder_file)
         self.quick_line_plot(V_array, f'Voltage trace for {folder_file}', 'Voltage (mV)', n_sweeps=n_sweeps, stacked=stacked )
         try:
             self.quick_line_plot(I_array, f'Current (I) trace for {folder_file}', 'Current (pA)', n_sweeps=n_sweeps,  stacked=stacked) #TODO add if check shape hwen no I 
@@ -144,22 +236,19 @@ class EphysData (Project):
     data_type: str = None #defined by child class
     filename: str = None # defined by child class
 
-
     def __post_init__(self):
         super().__post_init__()
         if  self.isCached(self.filename): 
             self.df = self.getCache(self.filename)
         else:
             self.df = self.generate()
-        
-
    
     def generate(self):
         ''' generic generator for dfs'''
         df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns] 
 
-        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
-        # df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
+        # df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
+        df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
         df = df[self.initial_columns + additional_columns]
         # cache(self.project, self.filename, df)
@@ -211,6 +300,134 @@ class EphysData (Project):
         return row
     
 
+
+@dataclass
+class st_VC(EphysData):
+    
+    filename: str = "st_VC_df"
+    data_type: str = 'st_VC'
+    
+  
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        super().__post_init__()
+    
+    def process(self, row: pd.Series) -> pd.Series:
+        """Extract Rs, Rm, Cm, tau from each voltage step in the st_VC protocol."""  #HERE TO CHECK AND WORK FOR HFD
+
+        V_array, I_array, _ = self.load_data(row['folder_file'])
+
+        V = V_array[:, 0]  # mV
+        I = I_array[:, 0]  # pA
+        dt = 1 / self.sampling_rate
+        t = np.arange(len(I)) * dt
+
+        # Detect voltage steps 
+        dV = np.diff(V)
+        step_indices = np.where(np.abs(dV) > 0.5)[0]  # threshold in mV
+        if len(step_indices) < 1:
+            raise ValueError("No voltage steps detected.")
+
+        #  time between steps to define analysis window
+        step_durations = np.diff(step_indices) * dt
+        avg_step_duration = np.median(step_durations)
+        window_post = int(min(0.02, 0.5 * avg_step_duration) / dt)
+        window_pre = int(min(0.005, 0.2 * avg_step_duration) / dt)
+        steady_window = int(0.01 / dt)
+
+        # voltage step size 
+        unique_Vs, counts = np.unique(np.round(V, 1), return_counts=True)
+        if len(unique_Vs) < 2:
+            raise ValueError("Not enough voltage levels to define delta_V.")
+        sorted_Vs = unique_Vs[np.argsort(-counts)]
+        V_baseline_mode, V_step_mode = sorted_Vs[:2]
+        global_delta_V = abs(V_step_mode - V_baseline_mode)
+
+        # 2. Initialize lists to collect results
+        Rs_list, Rm_list, tau_list, Cm_list = [], [], [], []
+
+
+        for idx in step_indices:
+            start = max(0, idx + 1)
+            end = min(len(t), idx + 1 + window_post)
+            baseline = max(0, idx - window_pre)
+            baseline_I = np.mean(I[baseline:start])
+
+            if end - start < 5:
+                continue  # too short to analyze
+
+            local_delta_V = V[start] - V[baseline] #less accurate than global assuming global is consistent
+            if np.abs(local_delta_V) < 1e-3:
+                continue  # ignore tiny steps
+
+            I_step = I[start:end]
+            t_step = t[start:end] - t[start]
+
+            # get dI and steady state I
+            I_peak = np.max(I_step) if local_delta_V > 0 else np.min(I_step)
+            I_deflection = abs(I_peak - baseline_I)
+            I_steady = np.mean(I_step[-steady_window:])
+
+            try:
+                Rs = global_delta_V * 1e-3 / (I_deflection * 1e-12)
+                Rm = global_delta_V * 1e-3 / (abs(I_steady - baseline_I) * 1e-12)
+            except ZeroDivisionError:
+                continue
+
+            # Tau: exponential decay fit
+            def exp_decay(t, A, tau, C):
+                return A * np.exp(-t / tau) + C
+
+            try:
+                popt, _ = curve_fit(exp_decay, t_step, I_step, p0=[I_deflection, 0.01, I_steady])
+                tau = popt[1]
+            except Exception:
+                tau = np.nan
+
+            Cm = tau / Rm if Rm != 0 else np.nan
+
+            # BOUNDS CHECK with debug
+            if not (0 < Rs < 1e9):
+                print(f"[DEBUG] Rs out of bounds: {Rs:.2e} Ω ({Rs/1e6:.2f} MΩ) | cell: {row.cell_id} | step: {idx}")
+                Rs = np.nan
+            if not (1e6 < Rm < 1e9):
+                print(f"[DEBUG] Rm out of bounds: {Rm:.2e} Ω ({Rm/1e6:.2f} MΩ) | cell: {row.cell_id} | step: {idx}")
+                Rm = np.nan
+            if not (0 < Cm < 500e-12):
+                print(f"[DEBUG] Cm out of bounds: {Cm:.2e} F ({Cm*1e12:.2f} pF) | cell: {row.cell_id} | step: {idx}")
+                Cm = np.nan
+            if not (0 < tau < 1):
+                print(f"[DEBUG] tau out of bounds: {tau:.2e} s ({tau*1e3:.2f} ms) | cell: {row.cell_id} | step: {idx}")
+                tau = np.nan
+
+            # # # plot to check
+            # plt.figure()
+            # plt.plot(t_step * 1e3, I_step, label="I_step")
+            # if not np.isnan(tau):
+            #     plt.plot(t_step * 1e3, exp_decay(t_step, *popt), 'r--', label=f"fit τ = {popt[1]*1e3:.2f} ms")
+            # plt.axhline(I_peak, color='purple', linestyle=':', label=f"I_peak (amp = {I_deflection:.1f} pA)")
+            # plt.axhline(I_steady, color='green', linestyle='--', label="I_steady")
+            # plt.xlabel("Time (ms)")
+            # plt.ylabel("Current (pA)")
+            # plt.legend()
+            # plt.title(f"{row.cell_id} step {idx}")
+            # plt.show()
+
+
+            Rs_list.append(Rs / 1e6)      # to MOhm
+            Rm_list.append(Rm / 1e6)
+            tau_list.append(tau * 1e3 if not np.isnan(tau) else np.nan)  # ms
+            Cm_list.append(Cm * 1e12 if not np.isnan(Cm) else np.nan)    # pF
+
+        # Final averaged values
+        row['Rs_MOhm'] = np.nanmean(Rs_list)
+        row['Rm_MOhm'] = np.nanmean(Rm_list)
+        row['tau_ms'] = np.nanmean(tau_list)
+        row['Cm_pF'] = np.nanmean(Cm_list)
+
+        return row
+
+
     
 
 @dataclass
@@ -221,12 +438,12 @@ class FP(EphysData):
     
   
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'treatment', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
         """Processing logic specific to FP data type. Could also handle FP_APP data if sufficient to analise."""
-        V_array , I_array, V_list = self.IGOR_load(row['folder_file'])
+        V_array , I_array, V_list = self.load_data(row['folder_file'])
 
         row["max_firing"] = calculate_max_firing(V_array)
         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row['folder_file'], V_array)        
@@ -278,13 +495,13 @@ class APP(EphysData):
     data_type: str = 'APP'
 
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'drug', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'treatment', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
         """Generate APP_df from scratch, 
         Processing logic specific to APP data type."""
-        V_array , I_array, V_list = self.IGOR_load(row['folder_file'])
+        V_array , I_array, V_list = self.load_data(row['folder_file'])
 
         
         if I_array is not None and (I_array[:, 0] != 0).any():
@@ -309,7 +526,7 @@ class APP(EphysData):
         #fetch FP data for this cell and use the average threshold to define the RA 
         FP_df = self.getCache("FP_df")
         try:
-            FP_cell_id_PRE = FP_df[(FP_df['cell_id'] == row['cell_id']) & (FP_df['drug'] == 'PRE')]
+            FP_cell_id_PRE = FP_df[(FP_df['cell_id'] == row['cell_id']) & (FP_df['treatment'] == 'PRE')]
             cell_threshold = (FP_cell_id_PRE['voltage_threshold'].apply(lambda x: sum(x) / len(x) if isinstance(x, list) else x)).mean()
         except:
             cell_threshold = -45 #so when you -20 is 65 for cells without FP
@@ -421,11 +638,11 @@ class Hunter(EphysData):
     data_type: str = 'Hunter'
 
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'drug', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
-        V_array , I_array, V_list = self.IGOR_load(row['folder_file'])
+        V_array , I_array, V_list = self.load_data(row['folder_file'])
 
 
         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row.folder_file, V_array)
@@ -456,7 +673,7 @@ class Ephys(EphysData):
     
     def __post_init__(self):
         
-        self.FP_df = FP(self.project).df
+        self.FP_df = FP(self.project).df #for data_type class in project so this is for PSYCH_ephy
         self.APP_df = APP(self.project).df
         # self.hunter_df = Hunter(self.project).df some issue with 
         super().__post_init__()
@@ -467,7 +684,7 @@ class Ephys(EphysData):
         Builds cell_df with each row a cell_id, access_change reported where possible and valid data is marked True in 'data_type' column i.e. "FP".
         """
         df = self.feature_df.copy()
-        df['treatment'] = df.apply(lambda row: row['drug'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
+        df['treatment'] = df.apply(lambda row: row['treatment'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
 
         def check_unique(series, cell_id):
             unique_values = series.dropna().unique()
@@ -497,8 +714,8 @@ class Ephys(EphysData):
             cell_id = group.name
             #FIRING PROPERTY 
             cell_fp_df = self.FP_df[self.FP_df['cell_id'] == cell_id]
-            pre_values = cell_fp_df[cell_fp_df['drug'] == 'PRE'][['R_series', 'folder_file']]
-            non_pre_values = cell_fp_df[cell_fp_df['drug'] != 'PRE'][['R_series', 'folder_file']]
+            pre_values = cell_fp_df[cell_fp_df['treatment'] == 'PRE'][['R_series', 'folder_file']]
+            non_pre_values = cell_fp_df[cell_fp_df['treatment'] != 'PRE'][['R_series', 'folder_file']]
             
             # Extract R_series and folder_file
             pre_series = pre_values['R_series'].dropna().values
@@ -544,8 +761,8 @@ class Ephys(EphysData):
                     'max_firing', 'rheobased_threshold', 'sag', 'tau_rc', 'voltage_threshold', 'AP_decay_dvdt'
                 ]
                 
-                pre_df = cell_fp_df[cell_fp_df['drug'] == 'PRE'].copy()
-                non_pre_df = cell_fp_df[cell_fp_df['drug'] != 'PRE'].copy()
+                pre_df = cell_fp_df[cell_fp_df['treatment'] == 'PRE'].copy()
+                non_pre_df = cell_fp_df[cell_fp_df['treatment'] != 'PRE'].copy()
                 
                 # Only keep rows that match the selected best R_series
                 pre_df = pre_df[pre_df['R_series'].isin(best_pre_pair)]

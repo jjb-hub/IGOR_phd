@@ -60,6 +60,7 @@ prompt-toolkit==3.0.38
 psutil==5.9.4
 ptyprocess==0.7.0
 pure-eval==0.2.2
+pyabf==2.3.8
 pycparser==2.21
 pydyf==0.6.0
 Pygments==2.15.0
