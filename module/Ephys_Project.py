@@ -12,7 +12,8 @@ from itertools import combinations
 import igor2 as igor
 import numpy as np
 import matplotlib.pyplot as plt
-from module.action_potential_functions import calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, tau_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator
+from scipy.signal import find_peaks
+from module.action_potential_functions import calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator, spike_remover_nan, peak_finder
 
 tqdm.pandas()
 
@@ -420,7 +421,6 @@ class st_VC(EphysData):
         return row
 
 
-
 @dataclass
 class ramp_IC(EphysData):
     filename: str = "ramp_IC_df"
@@ -486,6 +486,108 @@ class ramp_IC(EphysData):
 
 
 @dataclass
+class IV_VC(EphysData):
+    filename: str = "IV_VC_df"
+    data_type: str = 'IV_VC'
+    
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        super().__post_init__()
+    
+    def process(self, row: pd.Series) -> pd.Series:
+        """Extract steady-state current (I_steady) for each voltage step (V_inj).""" 
+        V_array, I_array, _ = self.load_data(row['folder_file'])
+        dt = 1 / self.sampling_rate
+        t = np.arange(len(I_array)) * dt
+
+        n_sweeps = V_array.shape[1]
+        I_steady_list = []
+        V_inj_list = []
+
+        for sweep in range(n_sweeps):
+            V = V_array[:, sweep]
+            I = I_array[:, sweep]
+
+            #detect step start and finish of V step using dvdt
+            dV = np.gradient(V)
+            thresh = np.std(dV) * 3
+            step_start_candidates = np.where(np.abs(dV) > thresh)[0] 
+
+            if len(step_start_candidates) < 2:
+                continue  # skip if no clear step
+            start = step_start_candidates[0]
+            end = step_start_candidates[-1] 
+            step_len = end-start
+            steady_start = int(start + 0.75 * step_len)
+
+            V_steady = np.mean(V[steady_start:end])
+            I_clean_step = spike_remover_nan(I[steady_start:end], threshold_sd=0.5) # remove APs / spikes
+            I_steady = np.nanmean(I_clean_step)
+
+            V_inj_list.append(V_steady)
+            I_steady_list.append(I_steady)
+
+        row['V_inj'] = V_inj_list
+        row['I_steady'] = I_steady_list
+        return row
+
+
+@dataclass
+class spont_IC(EphysData):    #BUILDING 
+    filename: str = "spont_IC_df"
+    data_type: str = 'spont_IC'
+    amplitude_threshold: float = 0.9 # mV
+    rise_time_range: tuple = (0.5e-3, 5e-3) # 0.5 - 5 ms
+    decay_time_range: tuple = (2e-3, 20e-3) # 2 - 20 ms
+    
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        super().__post_init__()
+    
+    def process(self, row: pd.Series) -> pd.Series:
+        """
+        Extract AP, sEPSP and sIPSP frequency.
+        Designed for a gap free recording. 
+        """  
+        V_array, I_array, _ = self.load_data(row['folder_file'])
+        dt = 1 / self.sampling_rate
+        t = np.arange(len(I_array)) * dt
+
+        # Baseline correction
+        baseline = np.median(V_array)
+        trace = (V_array - baseline).flatten()
+
+        #  EPSPs
+        peaks, rise_times, amplitudes, frequency = peak_finder(
+            trace,
+            height=self.amplitude_threshold,
+            smoothing_kernel = 10,
+            prominence=(self.amplitude_threshold / 2, None), 
+            rise_time_range =  (0.2e-3, 10e-3),
+            width=None, #(self.decay_time_range[0] / dt, self.decay_time_range[1] / dt),
+            dt=dt,
+            distance=None, #int(self.rise_time_range[0] / dt),
+            polarity='positive'  # avoid clustering
+        )  
+
+       # PLOT TO CHECK 
+        # plt.figure(figsize=(12, 4))
+        # plt.plot(trace, label='Voltage trace', color='black', linewidth=0.5)
+        # plt.plot(peaks, trace[peaks], 'r.', label='sEPSPs', markersize=10)
+        # plt.xlabel('Time (samples)')
+        # plt.ylabel('Voltage (mV)')
+        # plt.title('Detected sEPSPs')
+        # plt.legend()
+        # plt.tight_layout()
+        # plt.show()
+
+        row['sEPSP_frequency_Hz'] = frequency
+        row['sEPSP_rise_times'] = rise_times
+        row['sEPSP_amplitudes'] = amplitudes
+        return row
+
+
+@dataclass
 class FP(EphysData):
     
     filename: str = "FP_df"
@@ -521,7 +623,6 @@ class FP(EphysData):
         row["AP_latency"] = peak_latencies_all[:10]
         row["AP_dvdt_max"] = peak_max_dvdt_all[:10]
 
-        row["tau_rc"] = tau_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
         row["sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
 
          #fetch FP data for this cell and use the average threshold to define the RA 

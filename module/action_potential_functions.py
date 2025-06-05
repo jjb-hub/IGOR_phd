@@ -25,7 +25,41 @@ from scipy.stats import linregress
 # from module.plotters import plot_ap_window
 
 from scipy.signal import find_peaks
-import numpy as np
+
+
+# GENERIC HANDELING 
+
+
+def spike_remover_nan(array, threshold_sd=2):
+    """
+    Identifies spikes (> threshold_sd * std from the mean of entire array) and replaces them with np.nan.
+    
+    Parameters:
+        array (np.ndarray): 1D or 2D array of same condition (not ideal for large steps)
+        threshold_sd (float): Number of standard deviations to define a spike.
+
+    Returns:
+        np.ndarray: Array with spikes replaced by np.nan (same shape).
+    """
+    array_cleaned = array.copy()
+
+    if array.ndim == 1:
+        mean = np.nanmean(array_cleaned)
+        std = np.nanstd(array_cleaned)
+        spike_mask = np.abs(array_cleaned - mean) > threshold_sd * std
+        array_cleaned[spike_mask] = np.nan
+
+    elif array.ndim == 2:
+        for col in range(array.shape[1]):
+            mean = np.nanmean(array_cleaned[:, col])
+            std = np.nanstd(array_cleaned[:, col])
+            spike_mask = np.abs(array_cleaned[:, col] - mean) > threshold_sd * std
+            array_cleaned[spike_mask, col] = np.nan
+
+    else:
+        raise ValueError("Input array must be 1D or 2D.")
+
+    return array_cleaned
 
 
 def plot_ap_window(folder_file, v_array, peak_location, upshoot_location, threshold_voltage, latency, rise_dvdt, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms):
@@ -260,167 +294,16 @@ def calculate_max_firing(voltage_array, input_sampling_rate=2e4):
     return np.nanmean(sampling_rate / np.diff(peak_locs)) 
 
 
-########## TAU and SAG
-from scipy.optimize import curve_fit
-
-def exponential_decay(x, tau, baseline):
-    """Exponential decay function for curve fitting."""
-    return baseline * (1 - np.exp(-x / tau))
-
-def plot_tau(folder_file, time, normalized_voltage, popt, fit_start, fit_end):
-    """
-    Plots the normalized voltage trace and the fitted exponential decay curve, including the fitting window.
-    Parameters:
-    - time (array-like): Time array corresponding to the voltage trace.
-    - normalized_voltage (array-like): Normalized voltage trace.
-    - popt (array-like): Optimized parameters from curve fitting.
-    - fit_start (float): Start time of the fitting window in seconds.
-    - fit_end (float): End time of the fitting window in seconds.
-    """
-    tau_ms, baseline = popt
-    plt.figure(figsize=(12, 6))
-    plt.plot(time * 1000, normalized_voltage, label='Data', color='b')  # time in milliseconds
-    plt.plot(time * 1000, exponential_decay(time, *popt), 'r-', label=f'Fit, tau={tau_ms:.2f} ms', linewidth=2)
-    
-    # Add vertical lines for the fitting window
-    plt.axvline(fit_start * 1000, color='g', linestyle='--', label='Fit start')
-    plt.axvline(fit_end * 1000, color='y', linestyle='--', label='Fit end')
-    
-    # Optionally, add a shaded area for the fitting window
-    plt.axvspan(fit_start * 1000, fit_end * 1000, color='grey', alpha=0.2, label='Fitting Window')
-
-    plt.xlabel('Time (ms)')
-    plt.ylabel('Normalized Voltage (mV)')
-    plt.title(f'{folder_file} Tau fitting with tau = {tau_ms:.2f} ms')
-    plt.legend()
-    plt.show()
-
-def tau_analyser(folder_file, V_array, I_array, step_current_values, ap_counts, sampling_rate=2e4, avg_window=0.5):
-    """
-    Estimates the membrane time constant (tau) and additional parameters for a neuron from voltage traces during step current injections.
-    """
-    voltage_array, current_array = normalise_array_length(V_array, I_array, columns_match=True)
-
-    # Ensure the number of sweeps in V_array and I_array matches the length of ap_counts
-    num_sweeps = voltage_array.shape[1]
-    if num_sweeps != len(ap_counts):
-        print("Error: Number of sweeps in V_array/I_array does not match length of ap_counts.")
-        return [np.nan, np.nan, np.nan, np.nan]
-    # Remove trailing zeros from the end of the ap_counts list
-    while ap_counts and ap_counts[-1] == 0:
-        ap_counts.pop()
-
-    threshold_index = len(ap_counts) // 2 # threshold index for the first 50% of the ap_counts list
-
-    # Find the index of the last sweep with zero APs within the first 50% of the list
-    last_zero_AP_sweep_index = None
-    for i in range(threshold_index):
-        if ap_counts[i] == 0:
-            last_zero_AP_sweep_index = i
-
-    # If no such index is found, or it's the very first sweep, we cannot calculate tau
-    if last_zero_AP_sweep_index is None:
-        print(f'No suitable sweep found for tau calculation within the first 50% of the sweeps for file {folder_file}.')
-        return [np.nan, np.nan, np.nan, np.nan]
-    
-    if last_zero_AP_sweep_index >= voltage_array.shape[1] or last_zero_AP_sweep_index<=0:
-        print(f'Unable to calculate tau.')
-        print(f"first_AP_sweep_index ({last_zero_AP_sweep_index}) is 0 or larger than the number of columns in voltage_array ({voltage_array.shape[1]}).")
-        print(f"ap_count: {ap_counts[last_zero_AP_sweep_index]}")
-        return [np.nan, np.nan, np.nan, np.nan]
-    else:
-        # Extract the relevant voltage trace and corresponding current trace
-        voltage_trace = voltage_array[:, last_zero_AP_sweep_index]
-        current_trace = current_array[:, last_zero_AP_sweep_index]
-        step_current = step_current_values[last_zero_AP_sweep_index]
-
-    # Calculate RMP as the mean voltage before current injection
-    zero_current_indices = current_trace == 0
-    if not zero_current_indices.any():
-        print(' No zero current segment found in the trace, unable to measure RMP.')
-        RMP=np.nan
-    RMP = np.mean(voltage_trace[zero_current_indices])
-
-    # Find where the current changes
-    changes = np.where(np.diff(current_trace) != 0)[0]
-
-    # Assuming there is only one step current applied, the start and end indices
-    # would be right before and after the changes
-    if len(changes) == 2:
-        start_index = changes[0] + 1  # The index after the first change
-        end_index = changes[1]  # The index before the second change
-    else:
-        # print(f'Unexpected number of steps in the current trace: {len(changes)}.')
-        return [np.nan, np.nan, np.nan, RMP]
-
-    # Use only the portion of the voltage trace where the current is applied
-    voltage_during_step = voltage_trace[start_index:end_index+1]
-
-    # Normalize the voltage by subtracting the initial value (align to 0)
-    normalized_voltage = voltage_during_step - voltage_trace[start_index] 
-
-    # Time array for fitting, in seconds
-    time = np.arange(len(normalized_voltage)) / sampling_rate
-
-    # Define a fitting window to capture the transient response
-    fit_start = 0.001  # Start fitting 2 ms after the current step, for example
-    fit_end = 0.080  # End fitting 50 ms into the step, before the voltage stabilizes
-
-    # Create a boolean mask to select the fitting window
-    fit_mask = (time >= fit_start) & (time <= fit_end)
-
-    # Apply the mask to time and voltage arrays
-    time_fit = time[fit_mask]
-    normalized_voltage_fit = normalized_voltage[fit_mask]
-
-    # Calculate the steady state voltage during the current step
-    steady_state_voltage, hyper, first_current_point, last_current_point = steady_state_value(voltage_trace, current_trace, step_current, avg_window)
-    
-    # Set initial guess values for the curve fitting
-    initial_tau_guess = 0.02  # Initial guess for tau
-    initial_baseline_guess = RMP  # Or use the steady-state value from the end of the step
-
-    # Fit the exponential decay model to the normalized voltage trace
-    try:
-        popt, _ = curve_fit(exponential_decay, time_fit, normalized_voltage_fit, p0=[initial_tau_guess, initial_baseline_guess])
-        tau_ms = popt[0] * 1000  # Convert tau from seconds to milliseconds
-        fitted_baseline = popt[1]  # This is the fitted baseline value
-    except RuntimeError as e:
-        # Curve fitting failed, return NaNs
-        print("Curve fitting error:", e)
-        return [np.nan, np.nan, np.nan, RMP]
-
-    if not 2<= tau_ms <=180: #HARD CODE # 10 - 110 idealy but not optimised #TODO
-        print(f"Tau calculated at {tau_ms} ms is outside the the physiolgoical range 10-110ms, plotting fit.")
-        return np.nan
-        # plot_tau(folder_file, time, normalized_voltage, popt, fit_start=fit_start, fit_end=fit_end)
-
-    return [tau_ms, steady_state_voltage, step_current, RMP]
+#SAG LOGIC
 
 
-
-def plot_sag(folder_file, voltage_trace, time_trace, RMP, steady_state_voltage, min_sag_voltage, sag_ratio):
-    """
-    Plot the sag with the minimum sag voltage and sag ratio annotated.
-    """
-    plt.figure(figsize=(12, 6))
-    plt.plot(time_trace, voltage_trace, label='Voltage Trace', color='blue')
-    plt.axhline(y=min_sag_voltage, color='red', linestyle='--', label='Min Sag Voltage')
-    plt.axhline(y=steady_state_voltage, color='green', linestyle='--', label='Steady State Voltage')
-    plt.axhline(y=RMP, color='orange', linestyle='--', label='RMP')
-    plt.title(f"{folder_file} Sag Analysis (Sag Ratio: {sag_ratio:.2f})")
-    plt.xlabel('Time (s)')
-    plt.ylabel('Voltage (mV)')
-    plt.legend()
-    plt.show()
-
-def sag_current_analyser(folder_file, voltage_array, current_array, step_current_values, ap_counts, avg_window=0.5, visualise=False):
+def sag_current_analyser(folder_file, V_array, I_array, step_current_values, ap_counts, avg_window=0.5, visualise=False):
     """
     Function to calculate and plot the sag current from voltage and current traces under the first hyperpolarizing current step without action potentials.
     
     Parameters:
-    - voltage_array (2D array): 2D array containing voltage recordings for different current steps.
-    - current_array (2D array): 2D array containing current recordings for different current steps.
+    - V_array (2D array): 2D array containing voltage recordings for different current steps.
+    - I_array (2D array): 2D array containing current recordings for different current steps.
     - step_current_values (list): List of injected current values for each sweep.
     - ap_counts (list): List of action potential counts for each sweep.
     - avg_window (float): Fraction of the step current duration used for averaging.
@@ -430,8 +313,8 @@ def sag_current_analyser(folder_file, voltage_array, current_array, step_current
     """
     for sweep_index, ap_count in enumerate(ap_counts):
         if ap_count == 0 and step_current_values[sweep_index] < 0:  # Check for no APs and negative current
-            V_sweep = voltage_array[:, sweep_index]
-            I_sweep = current_array[:, sweep_index]
+            V_sweep = V_array[:, sweep_index]
+            I_sweep = I_array[:, sweep_index]
             step_current = step_current_values[sweep_index]
 
             # Calculate steady state value using the steady_state_value function
@@ -459,6 +342,22 @@ def sag_current_analyser(folder_file, voltage_array, current_array, step_current
         
     # print("No sweep found with negative current injecttion and without action potentials, unable to calculate sag.")
     return [np.nan, np.nan, np.nan, np.nan]
+
+
+def plot_sag(folder_file, voltage_trace, time_trace, RMP, steady_state_voltage, min_sag_voltage, sag_ratio):
+    """
+    Plot the sag with the minimum sag voltage and sag ratio annotated.
+    """
+    plt.figure(figsize=(12, 6))
+    plt.plot(time_trace, voltage_trace, label='Voltage Trace', color='blue')
+    plt.axhline(y=min_sag_voltage, color='red', linestyle='--', label='Min Sag Voltage')
+    plt.axhline(y=steady_state_voltage, color='green', linestyle='--', label='Steady State Voltage')
+    plt.axhline(y=RMP, color='orange', linestyle='--', label='RMP')
+    plt.title(f"{folder_file} Sag Analysis (Sag Ratio: {sag_ratio:.2f})")
+    plt.xlabel('Time (s)')
+    plt.ylabel('Voltage (mV)')
+    plt.legend()
+    plt.show()
 
 
 ########## ACTION POTENTIAL
@@ -506,6 +405,101 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 
 
 ########## ACTION POTENTIAL RETROAXONAL / ANTIDROMIC
+
+import numpy as np
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import find_peaks
+
+
+def peak_finder(
+    voltage_trace: np.ndarray,
+    smoothing_kernel: int = 5,
+    height: float = None,
+    prominence: tuple = None,
+    distance: int = None,
+    width: float = None,
+    polarity: str = 'positive',  # 'positive' or 'negative'
+    rise_time_range: tuple = (0.2e-3, 10e-3),  # (min, max) in seconds default 0.2-10 ms
+    dt: float = 1e-4,  # Sampling interval in seconds default is for 10kHz
+    backward_window_s: float = 0.025, #window from beack backwards to find upshoot default 25 ms
+    correction_window_s: int = 0.001  # to refine peak/upshoot location from smoothed trace to raw default 1ms
+    ):
+    """
+    Detect EPSP/IPSP peaks in voltage_trace, refine peak positions on raw trace,
+    calculate rise times for all peaks, and optionally filter by rise time.
+
+    Returns:
+    - peaks: np.ndarray of peak indices in raw trace after refinement and optional filtering
+    - rise_times: list of rise times (seconds) corresponding to returned peaks
+    - amplitudes: np.ndarray of absolute peak amplitudes
+    - frequency: float, peak count / total recording time (Hz)
+    """
+    
+    if voltage_trace.ndim == 2:     # ensure 1D array
+        voltage_trace = voltage_trace.flatten(order='F')
+
+    signal = -voltage_trace if polarity == 'negative' else voltage_trace.copy()     # invert if negative
+    v_smooth = gaussian_filter1d(signal, smoothing_kernel)
+    peak_locs, _ = find_peaks(v_smooth, height=height, prominence=prominence, distance=distance, width=width)
+
+    correction_window = int(correction_window_s / dt)
+    backward_window = int(backward_window_s / dt)
+
+    rise_times = []
+    amplitudes = []
+
+    for peak in peak_locs:
+
+        start_idx = max(0, peak - backward_window)
+        end_idx = min(len(signal), peak+10)
+        segment = signal[start_idx:end_idx]
+        smooth_segment = v_smooth[start_idx:end_idx]
+        
+        # Derivative-based upshoot detection on smoothed segment
+        v_derivative = calculate_derivative(smooth_segment, 1/dt)
+        v_derivative_binary = np.heaviside(v_derivative, 0)  # 1 = increasing, 0 = flat or decreasing
+        transition_points = np.diff(v_derivative_binary)
+
+        # last upward transition before peak 
+        upshoot_candidates = np.where(transition_points > 0)[0]
+        if len(upshoot_candidates) > 0:
+            upshoot_idx = upshoot_candidates[-1]            
+        else:
+            print(f"No clear upshoot detected, skipping event {peak}.")
+            continue
+        
+        # get raw values
+        peak_val = signal[peak]
+        baseline = np.median(segment[:upshoot_idx]) # median of raw trace before upshoot
+        amp = peak_val - baseline
+
+        # Calculate 20% and 80% rise targets
+        target_low = baseline + 0.2 * amp
+        target_high = baseline + 0.8 * amp
+
+        low_idx = high_idx = None
+        for i, val in enumerate(segment):
+            if low_idx is None and val >= target_low:
+                low_idx = i
+            if high_idx is None and val >= target_high:
+                high_idx = i
+                break
+
+        if low_idx is not None and high_idx is not None:
+            rise_time = (high_idx - low_idx) * dt
+            if rise_time_range is None or (rise_time_range[0] <= rise_time <= rise_time_range[1]):
+                rise_times.append(rise_time)
+                amplitudes.append(amp)
+
+        rise_times.append(rise_time)
+        amplitudes.append(amp)
+
+    total_time = len(voltage_trace) * dt
+    frequency = len(peak_locs) / total_time if total_time > 0 else 0
+    return peak_locs, rise_times, amplitudes, frequency
+
+
+
 
 def calculate_derivative(voltage_array, sampling_rate):
     """
@@ -979,7 +973,7 @@ def old_calculate_ap_slope_and_max_dvdt(V_array, upshoot_index, latency, samplin
 
     return slope, max_dvdt, max_dvdt_index
 
-def ap_characteristics_extractor_main(folder_file, V_array): #Locations of peaks (in terms of indices within each sweep) #add rise_speed
+def ap_characteristics_extractor_main(folder_file, V_array): 
     '''
     Extracts action potential (AP) features from multiple voltage sweeps.
 
@@ -993,7 +987,7 @@ def ap_characteristics_extractor_main(folder_file, V_array): #Locations of peaks
         v_thresholds_all : list of float — Voltage thresholds (mV)
         peak_rise_all : list of float — Rise speed (20–80% of height, mV/ms)
         peak_max_dvdt_all : list of float — Max dV/dt during upstroke (mV/ms)
-        peak_locs_corr_all : list of int — Index of AP peaks
+        peak_locs_corr_all : list of int — Index of AP peaks (indices within sweep) 
         upshoot_locs_all : list of int — Index of AP thresholds
         peak_heights_all : list of float — AP height (mV)
         peak_fw_all : list of float — AP width (ms)
@@ -1048,15 +1042,6 @@ def ap_characteristics_extractor_main(folder_file, V_array): #Locations of peaks
 
 
 ########################      RA DETECTION FUNCTION(S)  ####################
- 
-# NOT CALLED IN expendFeatureDF() !! 
-
-        # TODO build optional prams getter from folder_file id would need to add filename input
-    # filename_no_extension = filename.split(".")[0]
-    # if isCached(filename_no_extension, 'expanded_df'):
-    #     getCache(filename_no_extension, 'expanded_df')
-    # else:
-    #     getCache(filename_no_extension, 'feature_df')
 
 
 def build_AP_DF(folder_file, V_array, I_array):
@@ -1482,7 +1467,7 @@ def plot_FI_curve_and_fit(folder_file, x, y, slope, intercept):
 
     # return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
 
-def replace_nan_with_mean(array):
+def replace_nan_with_mean(array): #OLD 26_5_25
         '''
         Replaces nan values in an array with the mean of the column (for 2D arrays)
         or with the mean of the array (for 1D arrays).
@@ -1500,7 +1485,7 @@ def replace_nan_with_mean(array):
         return array
 
 
-def spike_remover(array):
+def spike_remover(array): #old 26_5_25 THIS ASSUMES THAT THE MEAN OF THE entire sweep is a good thing to replace the data with :/
     '''
     removes points >2SD from the mean of any column in array
     input: V_array (1d / 2d)
@@ -1533,6 +1518,13 @@ def spike_remover(array):
         
     array_cleaned = replace_nan_with_mean(array_cleaned)
     return array_cleaned  
+
+
+
+
+
+
+
 
 def APP_splitter(V_array_or_list, drug_in, drug_out):
     '''
@@ -1568,12 +1560,13 @@ def mean_RMP_APP_calculator(V_array, drug_in, drug_out, I_array=None):
             lists of mean RMP for each sweep in PRE APP or WASH
     
     '''
-    V_array_cleaned  = spike_remover(V_array) #NOT WORKING JJB210427/t8
+    # V_array_cleaned  = spike_remover(V_array) #NOT WORKING JJB210427/t8 # OLD 26_5_25 changed to nan not average
+    V_array_cleaned  = spike_remover_nan(V_array)
 
     if I_array is None or (I_array == 0).all() :
         # print(" No I injected or no I data, taking RMP as all.")
         # list of means of every column
-        mean_RMP_sweep_list  = list(np.mean(V_array_cleaned  , axis = 0))
+        mean_RMP_sweep_list  = list(np.nanmean(V_array_cleaned  , axis = 0))
         
     else: # I step in I_array
         # print('I step detected, averaging V when no I injected for each sweep.')
@@ -1605,7 +1598,8 @@ def mean_inputR_APP_calculator(V_array, I_array, drug_in, drug_out):
             continue
 
         V_sweep, I_sweep =normalise_array_length(V_sweep, I_sweep)
-        V_cleaned  = spike_remover(V_sweep) 
+        # V_cleaned  = spike_remover(V_sweep) #oOLD 26_5_25 assigns mean  of trace 
+        V_cleaned  = spike_remover_nan(V_sweep)
 
         #flatten sweeps
         V_cleaned = V_cleaned.flatten()
