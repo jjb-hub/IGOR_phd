@@ -13,8 +13,9 @@ import igor2 as igor
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
-from module.action_potential_functions import calculate_max_firing, ap_characteristics_extractor_main, extract_FI_slope_and_rheobased_threshold, extract_FI_x_y, sag_current_analyser, mean_inputR_APP_calculator, mean_RMP_APP_calculator, spike_remover_nan, peak_finder
-
+from module.action_potential_functions import calculate_max_firing, sweep_mean_RMP_calculator, sweep_mean_inputR_calculator, ap_characteristics_extractor_main, extract_FI_x_y, sag_current_analyser, mean_RMP_APP_calculator, spike_remover_nan, peak_finder,correct_I_offset, denoise_steps, FI_slope_and_rheobase
+from scipy.stats import ttest_ind
+from module.Stats import Stats
 tqdm.pandas()
 
 # Root directory for projects
@@ -95,6 +96,13 @@ class Project(Cachable):
         missing_cols = [col for col in required_columns if col not in df.columns]
         if missing_cols:
             raise ValueError(f"Missing required column(s) in features.xlsx: {missing_cols}")
+
+        for col in df.columns: # detect 1/0 True/False columns as boolian
+            unique_vals = df[col].dropna().unique()
+            if set(unique_vals).issubset({0, 1}):
+                # Only convert non-null values to boolean
+                df[col] = df[col].where(df[col].isna(), df[col].astype(bool))
+                print(f"[INFO] Column '{col}' inferred as boolean (True/False).")
 
         # if 'cell_subtype' in df.columns:
         #     df['cell_subtype'].fillna(np.nan, inplace=True)
@@ -219,7 +227,7 @@ class Project(Cachable):
             plt.plot(continuous_plot)  # Plot continuous
         
         plt.title(plottitle)
-        plt.xlabel('Time in ms')
+        plt.xlabel('Time (no samples)')
         plt.ylabel(y_label)
         plt.show()
 
@@ -248,8 +256,8 @@ class EphysData (Project):
         ''' generic generator for dfs'''
         df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns] 
 
-        # df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
-        df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
+        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
+        # df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
         df = df[self.initial_columns + additional_columns]
         # cache(self.project, self.filename, df)
@@ -307,7 +315,7 @@ class st_VC(EphysData):
     data_type: str = 'st_VC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -427,7 +435,7 @@ class ramp_IC(EphysData):
     data_type: str = 'ramp_IC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -491,7 +499,7 @@ class IV_VC(EphysData):
     data_type: str = 'IV_VC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -533,7 +541,7 @@ class IV_VC(EphysData):
 
 
 @dataclass
-class spont_IC(EphysData):    #BUILDING 
+class spont_IC(EphysData):    #TO DO BUILD EXCLUSION - traces with high vairability of baseline and remove APs
     filename: str = "spont_IC_df"
     data_type: str = 'spont_IC'
     amplitude_threshold: float = 0.9 # mV
@@ -541,7 +549,7 @@ class spont_IC(EphysData):    #BUILDING
     decay_time_range: tuple = (2e-3, 20e-3) # 2 - 20 ms
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -570,22 +578,106 @@ class spont_IC(EphysData):    #BUILDING
             polarity='positive'  # avoid clustering
         )  
 
-       # PLOT TO CHECK 
-        # plt.figure(figsize=(12, 4))
-        # plt.plot(trace, label='Voltage trace', color='black', linewidth=0.5)
-        # plt.plot(peaks, trace[peaks], 'r.', label='sEPSPs', markersize=10)
-        # plt.xlabel('Time (samples)')
-        # plt.ylabel('Voltage (mV)')
-        # plt.title('Detected sEPSPs')
-        # plt.legend()
-        # plt.tight_layout()
-        # plt.show()
+        # PLOT TO CHECK 
+        plt.figure(figsize=(12, 4))
+        plt.plot(trace, label='Voltage trace', color='black', linewidth=0.5)
+        plt.plot(peaks, trace[peaks], 'r.', label='sEPSPs', markersize=10)
+        plt.xlabel('Time (samples)')
+        plt.ylabel('Voltage (mV)')
+        plt.title(f"Detected sEPSPs in {row['folder_file']}")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
 
         row['sEPSP_frequency_Hz'] = frequency
         row['sEPSP_rise_times'] = rise_times
         row['sEPSP_amplitudes'] = amplitudes
         return row
 
+
+
+@dataclass
+class IF_IC(EphysData):    
+    filename: str = "IF_IC_df"
+    data_type: str = 'IF_IC'
+
+    
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
+        super().__post_init__()
+    
+    def process(self, row: pd.Series) -> pd.Series:
+        """
+        Designed for a step protocol of a single step per sweep. 
+        Return:
+            I_step: list of I steps in unit of given I_array
+            f_Hz: list of frequency of APs on I step in Hz 
+        
+        """  
+        V_array, I_array, _ = self.load_data(row['folder_file'])
+        dt = 1 / self.sampling_rate
+        t = np.arange(len(I_array)) * dt
+
+        # HARDCODE - ONLY REQUIRED FOR HFD I data pCLAMP data with holding attached to steps
+        I_array_offset, offset = correct_I_offset(I_array, row['folder_file']) 
+        I_array_adj_clean = denoise_steps(I_array_offset)
+        I_steps , AP_frequencies_Hz, V_rest , off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
+        FI_slope, rheobase_threshold, valid_APs = FI_slope_and_rheobase(row['folder_file'], I_steps, AP_frequencies_Hz)
+
+        row['valid_APs'] = valid_APs
+        row['I_steps'] = I_steps
+        row['AP_frequencies_Hz'] = AP_frequencies_Hz
+        row['FI_slope']=FI_slope
+        row['FI_rheobase'] = rheobase_threshold
+        row['V_rest'] = V_rest
+        row['possible_holding_I'] = offset
+        row['off_step_peak_locs']=off_step_peak_locs
+        return row
+
+
+
+@dataclass
+class IV_IC(EphysData):    
+    filename: str = "IV_IC_df"
+    data_type: str = 'IV_IC'
+
+    
+    def __post_init__(self):
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+        super().__post_init__()
+    
+    def process(self, row: pd.Series) -> pd.Series:
+        """
+        Designed for a hyperpolarising step protocol of a single step per sweep. 
+        Return:
+            sag: ratio of sag current (* 100 => %)
+            V_steady: steady state V during I step
+            I_injected: I injection of step
+            RMP:  restimg membrane potential (off step - check for holding current)
+        
+        """  
+        V_array, I_array, _ = self.load_data(row['folder_file'])
+        dt = 1 / self.sampling_rate
+        t = np.arange(len(I_array)) * dt
+
+        # HARDCODE - ONLY REQUIRED FOR HFD I data noisy with holding I (sometimes)
+        I_array_offset, offset = correct_I_offset(I_array, row['folder_file']) 
+        I_array_adj_clean = denoise_steps(I_array_offset)
+
+        step_current_values, AP_frequencies_Hz, V_rest_FI, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
+        if any(x < 0 for x in step_current_values):
+            sag_ratio, asym_current, step_current, V_rest_sag =sag_current_analyser(row['folder_file'], V_array, I_array_adj_clean, step_current_values, AP_frequencies_Hz)
+        else:
+            print (f"No negative I steps for {row['folder_file']}, unable to calculate sag")
+            sag_ratio, asym_current, step_current, V_rest_sag = np.nan, np.nan, np.nan, np.nan
+
+        row['sag']=sag_ratio
+        row['step_V_steady']=asym_current
+        row['I_injected']=step_current
+        row['RMP']= V_rest_sag
+        row['possible_holding_I']=offset
+
+        return row
 
 @dataclass
 class FP(EphysData):
@@ -608,12 +700,13 @@ class FP(EphysData):
         if len(peak_voltages_all)==0: #returns is no APs are detected
             return row
         
-        step_current_values, ap_counts, V_rest, off_step_peak_locs, ap_frequencies_Hz = extract_FI_x_y(row['folder_file'], V_array, I_array, peak_locs_corr_all, sweep_indices_all)
-        FI_slope, rheobase_threshold = extract_FI_slope_and_rheobased_threshold(row['folder_file'], step_current_values, ap_counts)
+        step_current_values, AP_frequencies_Hz, V_rest, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array, self.sampling_rate)
+        FI_slope, rheobase_threshold, FP_valid = FI_slope_and_rheobase(row['folder_file'], step_current_values, AP_frequencies_Hz)
 
+        row["sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, step_current_values, AP_frequencies_Hz)
         row["rheobased_threshold"] = rheobase_threshold
         row["FI_slope"] = FI_slope
-
+        row["RMP"]=V_rest
         row['AP_peak_voltages'] = peak_voltages_all[:10]
         row["voltage_threshold"] = v_thresholds_all[:10]
         row["AP_height"] = peak_heights_all[:10]
@@ -623,7 +716,7 @@ class FP(EphysData):
         row["AP_latency"] = peak_latencies_all[:10]
         row["AP_dvdt_max"] = peak_max_dvdt_all[:10]
 
-        row["sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, step_current_values, ap_counts)
+        
 
          #fetch FP data for this cell and use the average threshold to define the RA 
         try:
@@ -660,24 +753,62 @@ class APP(EphysData):
         V_array , I_array, V_list = self.load_data(row['folder_file'])
 
         
+
+
         if I_array is not None and (I_array[:, 0] != 0).any():
-            input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
-            row['inputR_PRE'] = input_R_PRE
-            row['inputR_APP'] = input_R_APP
-            row['inputR_WASH'] = input_R_WASH
+            row['sweep_inputR']=sweep_mean_inputR_calculator(V_array, I_array)
+            # input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
+            # row['inputR_PRE'] = input_R_PRE
+            # row['inputR_APP'] = input_R_APP
+            # row['inputR_WASH'] = input_R_WASH
             pass_I_array = I_array
         else:
-            row['inputR_PRE'] = []
-            row['inputR_APP'] = []
-            row['inputR_WASH'] = []
+            row['sweep_inputR']= np.nan
+            # row['inputR_PRE'] = []
+            # row['inputR_APP'] = []
+            # row['inputR_WASH'] = []
             pass_I_array = None
 
-        mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array) #mean per sweep
-        row['RMP_PRE'] = mean_RMP_PRE
-        row['RMP_APP'] = mean_RMP_APP
-        row['RMP_WASH'] = mean_RMP_WASH
+
+        #TODO REMOVE AFTER CHECHING USE #UPDATE HIST
+        # mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = mean_RMP_APP_calculator(V_array, row.drug_in, row.drug_out, I_array=pass_I_array) #mean per sweep
+        # row['RMP_PRE'] = mean_RMP_PRE
+        # row['RMP_APP'] = mean_RMP_APP
+        # row['RMP_WASH'] = mean_RMP_WASH
+
+        row['sweep_RMP']=sweep_mean_RMP_calculator(V_array, I_array=pass_I_array)
 
         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row.folder_file, V_array)
+
+        
+
+        
+        # sweep_AP_count
+        if len(v_thresholds_all)>0:
+            if all (x > row.drug_in for x in sweep_indices_all):
+                row['induced_APs'] = True
+            APs_per_sweep = np.zeros(V_array.shape[1], dtype=int)
+            unique, counts = np.unique(sweep_indices_all, return_counts=True)
+            APs_per_sweep[unique] = counts
+            row['sweep_AP_count']=APs_per_sweep 
+
+        # # DEFINE RESPONSIVE CELL 
+        #     APs_per_sweep_PRE = APs_per_sweep[:row.drug_in]
+        #     APs_per_sweep_POST = APs_per_sweep[row.drug_in:]
+        #     result = Stats(p_thresh=0.05, diff_thresh=0).welchs_t_test(APs_per_sweep_PRE, APs_per_sweep_POST, labels=('increase', 'decrease'))
+        #     row['AP_response'] = result['response']
+        #     row['AP_diff'] = result['mean_diff'] #APs /sweep
+        #     row['AP_pval'] = result['p_val']
+        
+        else:
+            row['sweep_AP_count']=np.zeros(V_array.shape[1], dtype=int)
+            
+        # # RMP 
+        # mean_RMP_POST = np.concatenate([mean_RMP_APP, mean_RMP_WASH])
+        # result = Stats(p_thresh=0.05, diff_thresh=3.0).welchs_t_test(mean_RMP_PRE, mean_RMP_POST, labels=('depol', 'hyperpol')) #HARD CODE 5mV diff considered relevant
+        # row['RMP_response'] = result['response']
+        # row['RMP_diff'] = result['mean_diff']
+        # row['RMP_pval'] = result['p_val']
 
         #fetch FP data for this cell and use the average threshold to define the RA 
         FP_df = self.getCache("FP_df")
@@ -691,31 +822,43 @@ class APP(EphysData):
 
         if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['RA'] = True
-            row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-            row['RA_sweep_locs'] = [sweep_indices_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+            row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if RA_condition(peak_voltage, threshold)]
+            row['RA_sweep_locs'] = [sweep_indices_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if RA_condition(peak_voltage, threshold)]
+
+            
             row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
-            row['RAcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and RA_condition(peak_voltage, threshold)])
-            row['RAcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and RA_condition(peak_voltage, threshold)])
-            row['RAcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and RA_condition(peak_voltage, threshold)])
+
+            # row['RAcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and RA_condition(peak_voltage, threshold)])
+            # row['RAcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and RA_condition(peak_voltage, threshold)])
+            # row['RAcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and RA_condition(peak_voltage, threshold)])
+            
+            # sweep_RA_count
+            RA_sweep_locs = row['RA_sweep_locs']
+            RA_per_sweep = np.zeros(V_array.shape[1], dtype=int)
+            unique, counts = np.unique(RA_sweep_locs, return_counts=True)
+            RA_per_sweep[unique] = counts
+            row['sweep_RA_count'] = RA_per_sweep
+
         else:
             row['RA_locs'] = []
-            row['RAcount_PRE'] = 0
-            row['RAcount_APP'] = 0
-            row['RAcount_WASH'] = 0
+            # row['RAcount_PRE'] = 0
+            # row['RAcount_APP'] = 0
+            # row['RAcount_WASH'] = 0
+            row['sweep_RA_count'] = np.zeros(V_array.shape[1], dtype=int)
 
         row['AP_locs'] = peak_locs_corr_all
         row['AP_sweep_locs'] = sweep_indices_all
         row['peak_voltages_all'] = peak_voltages_all
 
-        if len(peak_locs_corr_all) > 0:
-            row['APcount_PRE'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index < row['drug_in']])
-            row['APcount_APP'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if row['drug_out'] >= sweep_index >= row['drug_in']])
-            row['APcount_WASH'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index > row['drug_out']])
-        else:
-            row['AP_locs'] = []
-            row['APcount_PRE'] = 0
-            row['APcount_APP'] = 0
-            row['APcount_WASH'] = 0
+        # if len(peak_locs_corr_all) > 0:
+        #     row['APcount_PRE'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index < row['drug_in']])
+        #     row['APcount_APP'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if row['drug_out'] >= sweep_index >= row['drug_in']])
+        #     row['APcount_WASH'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index > row['drug_out']])
+        # else:
+        #     row['AP_locs'] = []
+        #     row['APcount_PRE'] = 0
+        #     row['APcount_APP'] = 0
+        #     row['APcount_WASH'] = 0
 
         # GENERIC functions
         def check_variability(values, Vairability_threshold=0.30): 
@@ -770,7 +913,8 @@ class APP(EphysData):
             return True  
         
         # APP FILE INVALIDATORS 
-        if check_variability([row['RMP_PRE']],Vairability_threshold=0.3)  == False: #assigns True if < vairability threshold
+        baseline = row['sweep_RMP'][1:int(row.get('drug_in', 0))]
+        if check_variability(baseline,Vairability_threshold=0.3)  == False: #assigns True if < vairability threshold
             row['valid'] = False 
 
         if len(peak_voltages_all)>0: # if APs 
@@ -782,7 +926,7 @@ class APP(EphysData):
             if ap_burst_valid == False:
                 row['valid'] = False
 
-        rmp_valid = unidirectional_trend([np.mean(mean_RMP_PRE), np.mean(mean_RMP_APP), np.mean(mean_RMP_WASH)], threshold=20) #assigns True if 
+        rmp_valid = unidirectional_trend(row['sweep_RMP'], threshold=20) #assigns True if 
         if  rmp_valid == False:
             row['valid'] = False
 
@@ -851,7 +995,7 @@ class Ephys(EphysData):
             else:
                 raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
 
-        def apply_check_unique(group):
+        def apply_check_unique(group): # single value per cell_id
             cell_id = group.name
             I_set_values = group.loc[(group['data_type'] == 'APP') & (group['replication_no'] == 1) & (group['application_order'] == 1), 'I_set' ].unique()
             I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
@@ -859,7 +1003,9 @@ class Ephys(EphysData):
             aggregated_data = group.agg({
                 'treatment': lambda series: check_unique(series, cell_id),
                 'cell_type': lambda series: check_unique(series, cell_id),
-                'cell_subtype': lambda series: check_unique(series, cell_id)
+                'cell_subtype': lambda series: check_unique(series, cell_id), 
+                'axon_presence':lambda series: check_unique(series, cell_id),
+                'axon_um':lambda series: check_unique(series, cell_id),
             })
             return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
 
@@ -914,7 +1060,7 @@ class Ephys(EphysData):
             if len(pre_folder_files) > 2 or len(non_pre_folder_files) > 2:
                 FP_feature_cols = [
                     'AP_peak_voltages', 'AP_rise_dvdt', 'AP_width', 'FI_slope',
-                    'max_firing', 'rheobased_threshold', 'sag', 'tau_rc', 'voltage_threshold', 'AP_decay_dvdt'
+                    'max_firing', 'rheobased_threshold', 'sag',  'voltage_threshold', 'AP_decay_dvdt'
                 ]
                 
                 pre_df = cell_fp_df[cell_fp_df['treatment'] == 'PRE'].copy()
@@ -954,6 +1100,12 @@ class Ephys(EphysData):
         valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
         cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
 
+        # # Response of cell # MOVE TO agg df only?
+        # ap_response_dict = filtered_app_df.set_index('cell_id')['AP_response'].to_dict() 
+        # rmp_response_dict = filtered_app_df.set_index('cell_id')['RMP_response'].to_dict()
+        # cell_df['firing'] = cell_df['cell_id'].map(ap_response_dict)
+        # cell_df['RMP'] = cell_df['cell_id'].map(rmp_response_dict)
+
         # Check RA status in FP_df and APP_df
         fp_ra_df = self.FP_df[self.FP_df['RA'] == True][['cell_id', 'folder_file', 'RA_per_min']] #FP and APP dataframes where RA is True
         app_ra_df = self.APP_df[self.APP_df['RA'] == True][['cell_id', 'folder_file', 'RA_per_min']]
@@ -966,7 +1118,6 @@ class Ephys(EphysData):
         cell_df['RA'] = cell_df['cell_id'].isin(ra_folder_files)
         cell_df['RA_folder_file'] = cell_df['cell_id'].map(ra_folder_files)
         cell_df['RA_per_min'] = cell_df['cell_id'].map(ra_avg_per_min)
-
 
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)

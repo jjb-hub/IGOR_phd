@@ -61,72 +61,164 @@ def spike_remover_nan(array, threshold_sd=2):
 
     return array_cleaned
 
-
-def plot_ap_window(folder_file, v_array, peak_location, upshoot_location, threshold_voltage, latency, rise_dvdt, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms):
+def plot_ap_window(
+    folder_file,
+    v_array,
+    peak_location,
+    upshoot_location,
+    input_sampling_rate,
+    voltage_threshold=None,
+    latency=None,
+    rise_dvdt=None,
+    max_dvdt=None,
+    max_dvdt_location=None
+):
     """
-    Plot the action potential (AP) window centered around the upshoot location, including the slope and the point of maximum derivative (dV/dt).
-    
-    Inputs:
-        v_array (numpy.ndarray): The array containing voltage data for a single sweep.
-        upshoot_location (int): The index in v_array corresponding to the AP upshoot.
-        threshold_voltage (float): The voltage value at the upshoot.
-        latency (float): Half of the latency period for the AP in milliseconds.
-        rise_dvdt (float): The average slope of rising phase of the AP from 20-80% of the AP_height.
-        max_dvdt (float): The maximum derivative (dV/dt) within the window.
-        max_dvdt_location (int): The index in v_array where max dV/dt occurs.
-        input_sampling_rate (float): The sampling rate at which the data was recorded (in Hz).
-        sec_to_ms (float): Conversion factor from seconds to milliseconds.
+    Plot the action potential (AP) window around the upshoot and peak.
+
+    Required:
+        folder_file (str): Identifier for the trace (used in title).
+        v_array (np.ndarray): Voltage trace.
+        peak_location (int): Index of AP peak.
+        upshoot_location (int): Index of AP upshoot.
+        input_sampling_rate (float): Sampling rate in Hz.
+
+    Optional:
+        threshold_voltage (float): Voltage at upshoot.
+        latency (float): Half-latency of the AP (in ms).
+        rise_dvdt (float): Average slope between 20–80% AP height (mV/ms).
+        max_dvdt (float): Max dV/dt value (mV/ms).
+        max_dvdt_location (int): Index of max dV/dt.
     """
-    # Define the window around the upshoot location
-    window_size_samples = int(latency * (input_sampling_rate / 1000))
-    window_start = max(0, upshoot_location - window_size_samples)
-    window_end = min(len(v_array), peak_location + window_size_samples)
-    
-    # Calculate 3/4 latency in samples
-    ten_percent_latency_samples = int((latency * 1/10) * (input_sampling_rate / 1000))
-    ten_percent_latency_time = upshoot_location / input_sampling_rate * sec_to_ms + (latency * 1/10)
-    ninty_percent_latency_samples = int((latency * 9/10) * (input_sampling_rate / 1000))
-    ninty_percent_latency_time = upshoot_location / input_sampling_rate * sec_to_ms + (latency * 9/10)
+    time_points = np.arange(len(v_array)) / input_sampling_rate * 1000
 
+    # Window definition
+    window_half = int(latency * (input_sampling_rate / 1000)) if latency else int(10 * (input_sampling_rate / 1000))
+    window_start = max(0, upshoot_location - window_half)
+    window_end = min(len(v_array), peak_location + window_half)
 
-    # Create time points for the entire sweep
-    time_points = np.arange(len(v_array)) / input_sampling_rate * sec_to_ms
+    v_window = v_array[window_start:window_end]
     window_time_points = time_points[window_start:window_end]
 
-    # Extracting the window of interest for plotting
-    v_window = v_array[window_start:window_end]
-    
-    # Create the figure and axis
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(window_time_points, v_window, label='Raw Voltage Trace', color='blue')
 
-    # Upshoot
-    ax.axvline(time_points[upshoot_location], color='red', linestyle='--', label='Upshoot', linewidth=2)
+    ax.axvline(time_points[upshoot_location], color='red', linestyle=':', label='Upshoot', linewidth=2)
+    ax.axvline(time_points[peak_location], color='orange', linestyle='-', label='AP Peak', linewidth=2)
 
-    # Peak location
-    ax.axvline(time_points[peak_location], color='orange', linestyle='--', label='AP Peak', linewidth=2)
+    #Optional voltage threshold 
+    if voltage_threshold is not None:
+        plt.axhline(voltage_threshold, color='red', linestyle=':', label=f"threshold in mV: {voltage_threshold}", linewidth=2)
 
-    # Plotting the slope as a line
-    slope_line_x = [ten_percent_latency_time, ninty_percent_latency_time]
-    slope_line_y = [threshold_voltage, threshold_voltage + rise_dvdt * latency]
-    ax.plot(slope_line_x, slope_line_y, label='Slope', color='green', linewidth=2)
+    # Optional slope line
+    if rise_dvdt is not None:
+        # Calculate AP height from raw voltage trace
+        ap_height = v_array[peak_location] - v_array[upshoot_location]
+        V_80 = v_array[peak_location] - 0.2 * ap_height
+        V_20 = v_array[peak_location] - 0.8 * ap_height
 
-    # Indicating the max dV/dt point
-    ax.axvline(time_points[max_dvdt_location], color='purple', linestyle='--', label=f'Max dV/dt: {max_dvdt:.2f} mV/ms', linewidth=2)
-    
-    # Annotating max dV/dt value
-    ax.annotate(f'{max_dvdt:.2f} mV/ms', xy=(time_points[max_dvdt_location], max_dvdt), xytext=(10, 3),
-                textcoords='offset points', arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=.5'))
+        # Extract voltage and time for the rise segment
+        v_rise_segment = v_array[upshoot_location:peak_location]
+        t_rise_segment = (np.arange(upshoot_location, peak_location) / input_sampling_rate) * 1000  # ms
 
-    # Setting up the plot
+        # Mask voltages between V_20 and V_80
+        rise_mask = (v_rise_segment >= V_20) & (v_rise_segment <= V_80)
+        v_20_80 = v_rise_segment[rise_mask]
+        t_20_80 = t_rise_segment[rise_mask]
+
+        if len(t_20_80) > 1:
+            t_start, t_end = t_20_80[0], t_20_80[-1]
+            V_start = v_20_80[0]
+            V_end = V_start + rise_dvdt * (t_end - t_start)
+
+            ax.plot([t_start, t_end], [V_start, V_end],
+                    label=f'rising dv/dt: {rise_dvdt:.2f} mV/ms', color='green', linewidth=2)
+
+    # Optional max dV/dt marker
+    if max_dvdt is not None and max_dvdt_location is not None:
+        # Only plot if max_dvdt_location is within the plotted window
+        if window_start <= max_dvdt_location < window_end:
+            ax.axvline(time_points[max_dvdt_location], color='limegreen', linestyle=':',
+                       label=f'Max dV/dt: {max_dvdt:.2f} mV/ms', linewidth=2)
+            ax.annotate(f'{max_dvdt:.2f} mV/ms',
+                        xy=(time_points[max_dvdt_location], max_dvdt),
+                        xytext=(10, 3),
+                        textcoords='offset points',
+                        arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=.5'))
+            
     ax.set_xlabel('Time (ms)')
     ax.set_ylabel('Voltage (mV)')
     ax.set_title(f'AP Characteristics {folder_file}')
     ax.legend()
     ax.grid(True)
-
-    # Display the plot
     plt.show()
+
+# OLD 17 June 2025 change to optional 
+# def plot_ap_window(folder_file, v_array, peak_location, upshoot_location, threshold_voltage, latency, rise_dvdt, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms):
+#     """
+#     Plot the action potential (AP) window centered around the upshoot location, including the slope and the point of maximum derivative (dV/dt).
+    
+#     Inputs:
+#         v_array (numpy.ndarray): The array containing voltage data for a single sweep.
+#         upshoot_location (int): The index in v_array corresponding to the AP upshoot.
+#         threshold_voltage (float): The voltage value at the upshoot.
+#         latency (float): Half of the latency period for the AP in milliseconds.
+#         rise_dvdt (float): The average slope of rising phase of the AP from 20-80% of the AP_height.
+#         max_dvdt (float): The maximum derivative (dV/dt) within the window.
+#         max_dvdt_location (int): The index in v_array where max dV/dt occurs.
+#         input_sampling_rate (float): The sampling rate at which the data was recorded (in Hz).
+#         sec_to_ms (float): Conversion factor from seconds to milliseconds.
+#     """
+#     # Define the window around the upshoot location
+#     window_size_samples = int(latency * (input_sampling_rate / 1000))
+#     window_start = max(0, upshoot_location - window_size_samples)
+#     window_end = min(len(v_array), peak_location + window_size_samples)
+    
+#     # Calculate 3/4 latency in samples
+#     ten_percent_latency_samples = int((latency * 1/10) * (input_sampling_rate / 1000))
+#     ten_percent_latency_time = upshoot_location / input_sampling_rate * sec_to_ms + (latency * 1/10)
+#     ninty_percent_latency_samples = int((latency * 9/10) * (input_sampling_rate / 1000))
+#     ninty_percent_latency_time = upshoot_location / input_sampling_rate * sec_to_ms + (latency * 9/10)
+
+
+#     # Create time points for the entire sweep
+#     time_points = np.arange(len(v_array)) / input_sampling_rate * sec_to_ms
+#     window_time_points = time_points[window_start:window_end]
+
+#     # Extracting the window of interest for plotting
+#     v_window = v_array[window_start:window_end]
+    
+#     # Create the figure and axis
+#     fig, ax = plt.subplots(figsize=(10, 6))
+#     ax.plot(window_time_points, v_window, label='Raw Voltage Trace', color='blue')
+
+#     # Upshoot
+#     ax.axvline(time_points[upshoot_location], color='red', linestyle='--', label='Upshoot', linewidth=2)
+
+#     # Peak location
+#     ax.axvline(time_points[peak_location], color='orange', linestyle='--', label='AP Peak', linewidth=2)
+
+#     # Plotting the slope as a line
+#     slope_line_x = [ten_percent_latency_time, ninty_percent_latency_time]
+#     slope_line_y = [threshold_voltage, threshold_voltage + rise_dvdt * latency]
+#     ax.plot(slope_line_x, slope_line_y, label='Slope', color='green', linewidth=2)
+
+#     # Indicating the max dV/dt point
+#     ax.axvline(time_points[max_dvdt_location], color='purple', linestyle='--', label=f'Max dV/dt: {max_dvdt:.2f} mV/ms', linewidth=2)
+    
+#     # Annotating max dV/dt value
+#     ax.annotate(f'{max_dvdt:.2f} mV/ms', xy=(time_points[max_dvdt_location], max_dvdt), xytext=(10, 3),
+#                 textcoords='offset points', arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=.5'))
+
+#     # Setting up the plot
+#     ax.set_xlabel('Time (ms)')
+#     ax.set_ylabel('Voltage (mV)')
+#     ax.set_title(f'AP Characteristics {folder_file}')
+#     ax.legend()
+#     ax.grid(True)
+
+#     # Display the plot
+#     plt.show()
 
 
 ########## BASE
@@ -258,7 +350,8 @@ def steady_state_value(V_sweep, I_sweep, step_current_val=None, avg_window=0.5):
     current_points = np.where(I_sweep == (np.min(I_sweep) if hyper else np.max(I_sweep)))[0]
     
     # Check if there are no current points found
-    if len(current_points) == 0:
+    if len(current_points) <= 1:
+        print(f"No I step detected.")
         return np.nan, hyper, None, None
 
     # Calculate the first and last points of the current injection
@@ -297,7 +390,7 @@ def calculate_max_firing(voltage_array, input_sampling_rate=2e4):
 #SAG LOGIC
 
 
-def sag_current_analyser(folder_file, V_array, I_array, step_current_values, ap_counts, avg_window=0.5, visualise=False):
+def sag_current_analyser(folder_file, V_array, I_array, step_current_values, AP_frequency_Hz, avg_window=0.5, visualise=False):
     """
     Function to calculate and plot the sag current from voltage and current traces under the first hyperpolarizing current step without action potentials.
     
@@ -305,20 +398,20 @@ def sag_current_analyser(folder_file, V_array, I_array, step_current_values, ap_
     - V_array (2D array): 2D array containing voltage recordings for different current steps.
     - I_array (2D array): 2D array containing current recordings for different current steps.
     - step_current_values (list): List of injected current values for each sweep.
-    - ap_counts (list): List of action potential counts for each sweep.
+    - AP_frequency_Hz (list): List of action potential frequency Hz for each sweep.
     - avg_window (float): Fraction of the step current duration used for averaging.
     
     Returns:
-    - List containing [sag ratio, steady state with I, I step (pA), RMP].
+    - List containing [sag ratio, step_V_steady, I_step, RMP].
     """
-    for sweep_index, ap_count in enumerate(ap_counts):
-        if ap_count == 0 and step_current_values[sweep_index] < 0:  # Check for no APs and negative current
+    for sweep_index, ap_frequency in enumerate(AP_frequency_Hz):
+        if ap_frequency == 0 and step_current_values[sweep_index] < 0:  # Check for no APs and negative current
             V_sweep = V_array[:, sweep_index]
             I_sweep = I_array[:, sweep_index]
             step_current = step_current_values[sweep_index]
 
             # Calculate steady state value using the steady_state_value function
-            asym_current, hyper, first_current_point, last_current_point = steady_state_value(V_sweep, I_sweep, step_current, avg_window)
+            step_V_steady, hyper, first_current_point, last_current_point = steady_state_value(V_sweep, I_sweep, step_current, avg_window)
             
             # Calculate RMP before current injection
             RMP = np.mean(V_sweep[:first_current_point])
@@ -329,16 +422,14 @@ def sag_current_analyser(folder_file, V_array, I_array, step_current_values, ap_
             min_sag_voltage = np.mean(sorted_voltages[:num_points])  # Average them to get a robust minimum
         
             # Calculate sag ratio
-            sag_ratio = (asym_current - min_sag_voltage) / (RMP - min_sag_voltage)
+            sag_ratio = (step_V_steady - min_sag_voltage) / (RMP - min_sag_voltage)
 
             if  0<= sag_ratio <=0.45: #HARD CODE
-                return [sag_ratio, asym_current, step_current, RMP]
+                return [sag_ratio, step_V_steady, step_current, RMP]
             else:
                 print (f"Sag calculated {sag_ratio} is outside physiological bound 0% to 45%.")
                 return np.nan
-                # plot_sag(folder_file, V_sweep[first_current_point:last_current_point], np.arange(first_current_point, last_current_point) / 1000, RMP, asym_current, min_sag_voltage, sag_ratio)
-
-            
+                # plot_sag(folder_file, V_sweep[first_current_point:last_current_point], np.arange(first_current_point, last_current_point) / 1000, RMP, step_V_steady, min_sag_voltage, sag_ratio)
         
     # print("No sweep found with negative current injecttion and without action potentials, unable to calculate sag.")
     return [np.nan, np.nan, np.nan, np.nan]
@@ -406,10 +497,6 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 
 ########## ACTION POTENTIAL RETROAXONAL / ANTIDROMIC
 
-import numpy as np
-from scipy.ndimage import gaussian_filter1d
-from scipy.signal import find_peaks
-
 
 def peak_finder(
     voltage_trace: np.ndarray,
@@ -456,7 +543,7 @@ def peak_finder(
         smooth_segment = v_smooth[start_idx:end_idx]
         
         # Derivative-based upshoot detection on smoothed segment
-        v_derivative = calculate_derivative(smooth_segment, 1/dt)
+        v_derivative = np.diff(smooth_segment) * (1 / dt)
         v_derivative_binary = np.heaviside(v_derivative, 0)  # 1 = increasing, 0 = flat or decreasing
         transition_points = np.diff(v_derivative_binary)
 
@@ -501,56 +588,41 @@ def peak_finder(
 
 
 
-def calculate_derivative(voltage_array, sampling_rate):
-    """
-    Calculates the derivative of the voltage array with respect to time.
-    
-    Parameters:
-    - voltage_array (1D numpy array): The array containing voltage data.
-    - sampling_rate (float): The sampling rate of the data.
-    
-    Returns:
-    - derivative (1D numpy array): The derivative of the voltage data.
-    """
-    dt = 1 / sampling_rate
-    derivative = np.diff(voltage_array) / dt
-    return derivative
 
 
-
-def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index,  input_sampling_rate = 2e4 ,  ap_backwards_window = 50 , input_pre_ap_baseline_forwards_window = 50):
+def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index,  sampling_rate = 2e4 ,  input_backwards_window = 6 , input_ap_forwards_window = 1, input_smoothing_kernel=10):
     '''
     Extracts detailed characteristics of action potentials (APs) from voltage data within a specified sweep.
 
     Input:
         df_V_arr (2d array): A pandas DataFrame containing voltage data from electrophysiological recordings. cols == sweeps
         sweep_index (int): The index of the sweep in the DataFrame from which AP characteristics are to be extracted.
-
-                input_sampling_rate (float, optional): The sampling rate of the data in Hz. Defaults to 20000 Hz.
-                input_smoothing_kernel (float, optional): The size of the smoothing kernel to apply to the voltage data. Defaults to 1.5.
-                input_plot_window (int, optional): The window size for plotting the data. Defaults to 500.
-                input_slide_window (int, optional): The sliding window size for analyzing APs. Defaults to 200.
-                input_gradient_order (int, optional): The order of the gradient used in derivative calculation. Defaults to 1.
-                input_backwards_window (int, optional): The window size used for searching backward from a peak to find the AP upshoot. Defaults to 100.
-                input_ap_fwhm_window (int, optional): The window size for calculating the full width at half maximum (FWHM) of APs. Defaults to 100.
-                input_pre_ap_baseline_forwards_window (int, optional): The window size for determining the baseline before an AP upshoot. Defaults to 50.
-                input_significance_factor (float, optional): A factor used to determine the significance of AP characteristics. Defaults to 8.
+        sampling_rate (float, optional): The sampling rate of the data in Hz. Defaults to 20000 Hz.
+        input_smoothing_kernel (float, optional): The size of the smoothing kernel to apply to the voltage data. Defaults to 10.
+        input_backwards_window (int, optional): The window size used for searching backward from a peak to find the AP upshoot. Defaults to 100.
+        input_ap_forwards_window (int, optional): The window size in ms to correct peak location after smoothing. Defaults to 3ms.
 
     Returns:
-        peak_locs_corr (list): Corrected locations of AP peaks.
-        upshoot_locs (list): Locations of AP thresholds, where the voltage trace begins to rise steeply.
-        v_thresholds (list): Voltage values at each AP upshoot (mV).
-        peak_heights (list): Differences in voltage between each AP's peak and its threshold (mV).
-        peak_latencies (list): Time delays between the AP threshold and its peak (ms).
-        peak_slope (list): Rate of change of the membrane potential at the AP upshoot location (mV/ms).
-        peak_fw (list): Full width at half maximum (FWHM) of each AP, if <0 set as peak_latency (ms).
+        AP_peak_voltages (list): 
+        valid_AP_locations (list): AP peak locations in sweep (of psysilogically validated APs).
+        AP_upshoot_locations_lis (list): Locations of AP upshoots in sweep.
+        AP_voltage_thresholds_list (list): Voltage values at each AP upshoot (mV).
+        AP_heights_list (list): Differences in voltage between each AP's peak and its threshold (mV).
+        AP_latencies_list (list): Time between the AP upshoot and peak (ms).
+        AP_rise_dvdt_list (list): Slope of rising phase (mv/ms) - 2/10 to 8/10 of AP height. 
+        AP_fwhm_list (list): Full width at half maximum (FWHM) of each AP, if <0 set as peak_latency (ms).
+        AP_max_dvdt_list (list): max dv/dt - from 5ms before upshoot to peak (mv/ms).
+        AP_decay_dvdt_list (list): Slope of decay phase (mv/ms) - 2/10 to 8/10 of AP height. 
+
     '''    
-    pre_ap_baseline_forwards_window = input_pre_ap_baseline_forwards_window 
-    sampling_rate    = input_sampling_rate
+    ap_backwards_window = int((input_backwards_window / 1000) * sampling_rate)
+    ap_forwards_window = int((input_ap_forwards_window / 1000) * sampling_rate)
+
     sec_to_ms        = 1e3 
     min_ap_peak_voltage =  -10 # peak voltage cutoff -10mV HARD CODE 
     ap_width_min = 0.1 # ms
     ap_width_max = 4 # ms
+    smoothing_kernel = input_smoothing_kernel
 
     # initialise output lists
     AP_peak_voltages              = []            #  voltage at peak of AP
@@ -567,22 +639,34 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
 
 
     V_array = df_V_arr[:,sweep_index] #slice V_array to sweep
-    v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(V_array) #get smoothed peak_locs
+    v_smooth, peak_locs , peak_info , num_peaks  = ap_finder(V_array, smoothing_kernel=smoothing_kernel) #get smoothed peak_locs
 
 
     if len(peak_locs) == 0 :
         # print("No peaks found in sweep.")
         return  [] ,   [] ,  []  , [] ,  [] ,  [] , [] , [], [], []
     
-    # PEAK LOCATIONS 
-    for peak_idx in range(len(peak_locs)) : 
-        while peak_locs[peak_idx]  < ap_backwards_window: # peak_idx at begining of trace 
-            ap_backwards_window = int(ap_backwards_window - 10) # set backward window -10 looping until is < peak_locs[peak_idx]
-        
-        v_max  = np.max(V_array[peak_locs[peak_idx] - ap_backwards_window : peak_locs[peak_idx] + pre_ap_baseline_forwards_window]) 
-        peak_locs_shift = ap_backwards_window - np.where(V_array[peak_locs[peak_idx] - ap_backwards_window: peak_locs[peak_idx] + pre_ap_baseline_forwards_window] == v_max)[0][0]
-        AP_locations_list += [ peak_locs[peak_idx] - peak_locs_shift ]  
+    # PEAK LOCATION correction from smoothed trace
+    for peak_idx in range(len(peak_locs)):
+
+        start_idx = max(0, peak_locs[peak_idx] - ap_backwards_window)  # ensure window does not start before index 0
+        end_idx = peak_locs[peak_idx] + ap_forwards_window  # end index extends forward from peak
+        window = V_array[start_idx:end_idx]  # voltage slice around peak
+        v_max = np.max(window)  # max voltage in the slice
+        peak_locs_shift = (peak_locs[peak_idx] - start_idx) - np.where(window == v_max)[0][0]  # shift from estimated peak to true peak
+        AP_locations_list += [peak_locs[peak_idx] - peak_locs_shift]  # corrected peak location appended
+
+
+    # OLD 17 JUn 2025 REDEFINED GLOBAL ap_backwards_window
+    # for peak_idx in range(len(peak_locs)) : 
+    #     while peak_locs[peak_idx]  < ap_backwards_window: # peak_idx at begining of trace 
+    #         ap_backwards_window = int(ap_backwards_window - 10) # set backward window -10 looping until is < peak_locs[peak_idx]   
+    #     v_max  = np.max(V_array[peak_locs[peak_idx] - ap_backwards_window : peak_locs[peak_idx] + ap_forwards_window]) 
+    #     peak_locs_shift = ap_backwards_window - np.where(V_array[peak_locs[peak_idx] - ap_backwards_window: peak_locs[peak_idx] + ap_forwards_window] == v_max)[0][0]
+    #     AP_locations_list += [ peak_locs[peak_idx] - peak_locs_shift ]  
     
+
+
     #FILTER ON PEAK VOLTAGE > min_ap_peak_voltage
     ls = list(np.where(V_array[AP_locations_list] >= min_ap_peak_voltage)[0])
     AP_locations_list  = [AP_locations_list[ls_ ] for ls_ in ls ] # list of accurate AP peak locations
@@ -594,7 +678,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
 
     # REDEFINE WINDOW ap_backwards_window if inter_spike_interval  < ap_backwards_window
     if len(AP_locations_list) >= 2 : 
-        ap_backwards_window = int(min(ap_backwards_window ,  np.mean(np.diff(AP_locations_list))))
+        ap_backwards_window = int(min(ap_backwards_window ,  np.min(np.diff(AP_locations_list))))
 
     ########## LOOPING PEAKS  ##########
     for peak_location in AP_locations_list:
@@ -618,13 +702,25 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
             peak_free_v_temp = V_array[peak_location - peak_free_ap_backwards_window: peak_location ] #peak free trace with upshoot and peak
 
         # UPSHOOT LOCATION
-        v_derivative = calculate_derivative (v_temp, sampling_rate) #relic for plotting
         v_derivative_temp = np.heaviside( -np.diff(v_temp)+ np.exp(1), 0 ) #create binary derviitive (0 = negatice derivative = V decreasing / 1  = positive derivitive = voltage increasing) 
         x_                = np.diff(v_derivative_temp) #dv/dt in AP window
         upshoot_loc_array = np.where(x_  <  0)[0]   # indices where the second derivative is -ive (x_)  indicating a negative change in derivitive .˙. 
 
-        if len(upshoot_loc_array) == 0 : # occures most for depolarisation block spiking can remove 15 spikes ie JJB230207/t25 also all spiked for SAD241218/t52
-            # print(f"No upshoot found via derivitive {folder_file} sweep {sweep_index}, analising next peak.") #unhealthy spikes 
+        if len(upshoot_loc_array) == 0 : # occures most for depolarisation block or unhealthy spikes
+            
+            # FORCE FIND (ogten too late on slope)
+            # dvdt = np.diff(v_temp) * sampling_rate / 1000
+            # second_dvdt = -np.diff(dvdt) 
+            # upshoot_candidates = np.where(dvdt > 5.5)[0] # first point > 5 mV/ms (max dvdt used also but I dont like)
+            # min_2nd_dvdt_index = np.argmin(second_dvdt)
+            # if len(upshoot_candidates) > 0:
+            #     upshoot_location = upshoot_candidates[np.argmin(np.abs(upshoot_candidates - min_2nd_dvdt_index))]
+            # else:
+            #     upshoot_location = min_2nd_dvdt_index + 1
+            # print(f"New AP detection implimented.")
+
+
+            # print(f"No upshoot found via derivitive {folder_file} sweep {sweep_index}, analising next peak.") 
             continue
 
         if len(upshoot_loc_array) == 1 : 
@@ -640,6 +736,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
                         ap_backwards_window = peak_free_ap_backwards_window #redefine backwards window
                         if len(peak_free_upshoot_loc_array) ==0 :
                             print ('fuk - upshoot detection gone wrong manualy inspect')
+                            continue
                         upshoot_loc_in_window_bin  = peak_free_upshoot_loc_array[0]
                         upshoot_loc_array = peak_free_upshoot_loc_array
 
@@ -648,11 +745,18 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
 
         time_diff_ms = (peak_location - upshoot_location) / sampling_rate * 1000  # Convert to ms
         peaks_on_slope, _ = find_peaks(V_array[upshoot_location:peak_location])
-        if time_diff_ms < 0.2 or time_diff_ms > 5.0 or abs(V_array[upshoot_location]-V_array[peak_location]) < 30: # catch for JJB230713/t8 but has wierd behaviour
-            # print(f"POOR UPSHOOT DETECTION: sweep {sweep_index}  peak index {peak_location}, analising next peak.")
+        
+        if time_diff_ms < 0.2 or time_diff_ms > 5.0: #physiological range 0.2-5ms upshoot to peak
+            # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, sampling_rate)
+            # print(f"{folder_file}: UPSHOOT to PEAK time exclusion {time_diff_ms} ms, sweep {sweep_index}  peak index {peak_location}, analising next peak.")
             continue
-        if len(peaks_on_slope)>0:
-            # print(f"PEAKS ON AP SLOPE: sweep {sweep_index}  peak index {peak_location}, analising next peak.")
+        if abs(V_array[upshoot_location]-V_array[peak_location]) < 20: #physiological range 20mV upshoot to peak and 20mV height
+            # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, sampling_rate)
+            # print(f"{folder_file}: UPSHOOT to PEAK height exclusion {abs(V_array[upshoot_location]-V_array[peak_location])} mV, sweep {sweep_index}  peak index {peak_location}, analising next peak.")
+            continue
+        if len(peaks_on_slope)>0: #was using 1 for HFD need 0 for Psych
+            # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, sampling_rate)
+            # print(f"PEAKS ON AP SLOPE {folder_file}: sweep {sweep_index}  peak index {peak_location}, analising next peak.")
             continue
 
         # VOLTAGE THRESHOLD
@@ -664,8 +768,8 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         # SLOPE 
         decay_dvdt, rise_dvdt, max_dvdt, max_dvdt_location = calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, peak_location, voltage_threshold, AP_latency, sampling_rate)
         if rise_dvdt <= 0 or max_dvdt <= 0:
-            # print("Slope/derivative of AP is negative, setting to nan.")
-            # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, rise_dvdt, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
+            print("Slope/derivative of AP is negative, setting to nan.")
+            plot_ap_window(folder_file, V_array,peak_location, upshoot_location, sampling_rate, voltage_threshold=voltage_threshold, latency=AP_latency, rise_dvdt=rise_dvdt, max_dvdt=max_dvdt, max_dvdt_location=max_dvdt_location)
             rise_dvdt, max_dvdt, max_dvdt_location  = np.nan , np.nan, np.nan
         if decay_dvdt >= 0:
             decay_dvdt = np.nan
@@ -683,7 +787,6 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
                 decay_dvdt, rise_dvdt, max_dvdt, max_dvdt_index = calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, peak_location, voltage_threshold, AP_latency, sampling_rate)
                 if rise_dvdt <= 0 or max_dvdt <= 0:
                     # print(f"Action potential average slope or max dv/dt is negative with new upshoot, setting to nan (sweep: {sweep_index}).")
-                    # plot_ap_window(folder_file, V_array,peak_location, upshoot_location, voltage_threshold, AP_latency, rise_dvdt, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms)
                     rise_dvdt, max_dvdt, max_dvdt_location  = np.nan , np.nan, np.nan
                 if decay_dvdt >= 0:
                     decay_dvdt = np.nan
@@ -881,14 +984,33 @@ def calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, peak_location, vo
 
     # rising phase
     V_array_rise = V_array[upshoot_location:peak_location]
+    
     rise_20_80_mask = (V_array_rise <= V_80) & (V_array_rise >= V_20)
     V_rise_20_80 = V_array_rise[rise_20_80_mask]
     t_rise_20_80 = np.arange(len(V_rise_20_80)) / sampling_rate * 1000  # ms
-    rise_dvdt, _, _, _, _ = linregress(t_rise_20_80, V_rise_20_80) #slope of linear fit
+
+    # Rising phase check
+    if len(t_rise_20_80) > 1 and np.ptp(V_rise_20_80) > 1e-3:
+        rise_dvdt, intercept, r_value, p_value, std_err = linregress(t_rise_20_80, V_rise_20_80)
+    else:
+        # print(f"AP too fast, <2 points between 20-80% rising: rise_dvdt set to np.nan")
+        rise_dvdt = np.nan
+
     # max dvdt between upshoot and peak 
     derivative_rise = np.gradient(V_array_rise)
     max_dvdt_index = np.argmax(derivative_rise) + upshoot_location
     max_dvdt = derivative_rise[max_dvdt_index - upshoot_location] * sampling_rate / 1000  # convert to mV/ms
+
+    # #Debug Plot 
+    # plt.figure()
+    # plt.plot(t_rise_20_80, V_rise_20_80, 'ko', label='20–80% Rise Phase')
+    # plt.plot(t_rise_20_80, rise_dvdt * t_rise_20_80 + intercept, 'r-', label=f'Fit: {rise_dvdt:.2f} mV/ms')
+    # plt.xlabel("Time (ms)")
+    # plt.ylabel("Voltage (mV)")
+    # plt.title("Linear Fit of 20–80% Rise Phase")
+    # plt.legend()
+    # plt.grid(True)
+    # plt.show()
 
     #decay phase 
     AP_latency_in_samples = int(AP_latency * sampling_rate / 1000)  # Convert latency in ms to samples in V array
@@ -916,62 +1038,83 @@ def calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, peak_location, vo
     within_20_80_mask_decay = (V_array_decay <= V_80_decay) & (V_array_decay >= V_20_decay)
     V_20_80_decay = V_array_decay[within_20_80_mask_decay]
     t_array_20_80_decay = np.arange(len(V_20_80_decay)) / sampling_rate * 1000  # ms
-    decay_dvdt, _, _, _, _ = linregress(t_array_20_80_decay, V_20_80_decay)
+
+    # Decay phase check
+    if len(t_array_20_80_decay) > 1 and np.ptp(V_20_80_decay) > 1e-3:
+        decay_dvdt, intercept, r_value, p_value, std_err = linregress(t_array_20_80_decay, V_20_80_decay)
+    else:
+        # print(f"AP too fast, <2 points between 20-80% decay: decay_dvdt set to np.nan")
+        decay_dvdt = np.nan
+
+
+
+    # # #Debug Plot
+    # plt.figure()
+    # plt.plot(t_array_20_80_decay, V_20_80_decay, 'bo', label='20–80% Decay Phase')
+    # plt.plot(t_array_20_80_decay,
+    #          decay_dvdt * t_array_20_80_decay + V_20_80_decay[0],  # line anchored to first point
+    #          'g-', label=f'Fit: {decay_dvdt:.2f} mV/ms')
+    # plt.xlabel("Time (ms)")
+    # plt.ylabel("Voltage (mV)")
+    # plt.title("Linear Fit of 20–80% Decay Phase")
+    # plt.legend()
+    # plt.grid(True)
+    # plt.show()
 
     return decay_dvdt, rise_dvdt, max_dvdt, max_dvdt_index
 
 
-def old_calculate_ap_slope_and_max_dvdt(V_array, upshoot_index, latency, sampling_rate): #24/4/25
-    """
-    Calculate both the linear fit slope and maximum dV/dt of the action potential (AP) 
-    and return the index of max dV/dt.
+# def old_calculate_ap_slope_and_max_dvdt(V_array, upshoot_index, latency, sampling_rate): #24/4/25
+#     """
+#     Calculate both the linear fit slope and maximum dV/dt of the action potential (AP) 
+#     and return the index of max dV/dt.
 
-    Parameters:
-    V_array (numpy.ndarray): The array containing voltage data for a single sweep.
-    upshoot_index (int): The index in V_array corresponding to the AP upshoot.
-    latency (float): The latency of the AP in milliseconds.
-    sampling_rate (float): The sampling rate at which the data was recorded (in Hz).
+#     Parameters:
+#     V_array (numpy.ndarray): The array containing voltage data for a single sweep.
+#     upshoot_index (int): The index in V_array corresponding to the AP upshoot.
+#     latency (float): The latency of the AP in milliseconds.
+#     sampling_rate (float): The sampling rate at which the data was recorded (in Hz).
 
-    Returns:
-    tuple: 
-        - slope (float): The slope from the linear fit between 1/10 to 9/10 AP latency (in mV/ms).
-        - max_dvdt (float): The maximum rate of voltage change (dV/dt) in that window (in mV/ms).
-        - max_dvdt_index (int): The index in V_array where the max dV/dt occurs.
-    """
-    # Adjust the start and end index for calculating the slope
-    latency_samples = int(latency * sampling_rate / 1000)
-    start_slope_index = upshoot_index + int(latency_samples * 2/10)
-    end_slope_index = upshoot_index + int(latency_samples * 8/10)
+#     Returns:
+#     tuple: 
+#         - slope (float): The slope from the linear fit between 1/10 to 9/10 AP latency (in mV/ms).
+#         - max_dvdt (float): The maximum rate of voltage change (dV/dt) in that window (in mV/ms).
+#         - max_dvdt_index (int): The index in V_array where the max dV/dt occurs.
+#     """
+#     # Adjust the start and end index for calculating the slope
+#     latency_samples = int(latency * sampling_rate / 1000)
+#     start_slope_index = upshoot_index + int(latency_samples * 2/10)
+#     end_slope_index = upshoot_index + int(latency_samples * 8/10)
 
-    # Adjust the window for calculating max_dvdt to start 1ms before the upshoot
-    pre_upshoot_samples = int(1 * sampling_rate / 1000)  # Convert 5ms to samples
-    start_dvdt_index = max(0, upshoot_index - pre_upshoot_samples)
-    end_dvdt_index = upshoot_index + latency_samples  # Extend to the full latency period
+#     # Adjust the window for calculating max_dvdt to start 1ms before the upshoot
+#     pre_upshoot_samples = int(1 * sampling_rate / 1000)  # Convert 5ms to samples
+#     start_dvdt_index = max(0, upshoot_index - pre_upshoot_samples)
+#     end_dvdt_index = upshoot_index + latency_samples  # Extend to the full latency period
     
-    # Calculate derivative over the adjusted window
-    derivative_window = np.gradient(V_array[start_dvdt_index:end_dvdt_index])
-    max_dvdt_index = np.argmax(derivative_window) + start_dvdt_index
-    max_dvdt = derivative_window[max_dvdt_index - start_dvdt_index] * sampling_rate / 1000  # convert to mV/ms
+#     # Calculate derivative over the adjusted window
+#     derivative_window = np.gradient(V_array[start_dvdt_index:end_dvdt_index])
+#     max_dvdt_index = np.argmax(derivative_window) + start_dvdt_index
+#     max_dvdt = derivative_window[max_dvdt_index - start_dvdt_index] * sampling_rate / 1000  # convert to mV/ms
 
     
-    # Time array for linear regression, in milliseconds 
-    time_array = np.arange(start_slope_index, end_slope_index) / sampling_rate * 1000
+#     # Time array for linear regression, in milliseconds 
+#     time_array = np.arange(start_slope_index, end_slope_index) / sampling_rate * 1000
 
-    if len(time_array) < 3:
-        # Adjust time_array to include the max_dvdt_index and its nearest points
-        nearest_points = [max(0, max_dvdt_index - 1), max_dvdt_index, min(len(V_array) - 1, max_dvdt_index + 1)]
-        time_array = np.array(nearest_points) / sampling_rate * 1000
-        V_array_for_slope = V_array[nearest_points]
-        # Correct the time_array to start from the first point's time
-        time_array -= time_array[0]
-        # print("Insufficient points for full linear regression. Using points surrounding max dv/dt for slope calculation.")
-    else:
-        V_array_for_slope = V_array[start_slope_index:end_slope_index]
+#     if len(time_array) < 3:
+#         # Adjust time_array to include the max_dvdt_index and its nearest points
+#         nearest_points = [max(0, max_dvdt_index - 1), max_dvdt_index, min(len(V_array) - 1, max_dvdt_index + 1)]
+#         time_array = np.array(nearest_points) / sampling_rate * 1000
+#         V_array_for_slope = V_array[nearest_points]
+#         # Correct the time_array to start from the first point's time
+#         time_array -= time_array[0]
+#         # print("Insufficient points for full linear regression. Using points surrounding max dv/dt for slope calculation.")
+#     else:
+#         V_array_for_slope = V_array[start_slope_index:end_slope_index]
 
-    # Perform linear regression
-    slope, intercept, _, _, _ = linregress(time_array, V_array_for_slope)
+#     # Perform linear regression
+#     slope, intercept, _, _, _ = linregress(time_array, V_array_for_slope)
 
-    return slope, max_dvdt, max_dvdt_index
+#     return slope, max_dvdt, max_dvdt_index
 
 def ap_characteristics_extractor_main(folder_file, V_array): 
     '''
@@ -1019,7 +1162,7 @@ def ap_characteristics_extractor_main(folder_file, V_array):
     
     for sweep_index in sweep_indices: 
 
-        peak_voltages_, peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_rise_dvdt_ , peak_fw_,  peak_max_dvdt_, peak_decay_dvdt_  =  ap_characteristics_extractor_subroutine_derivative(folder_file, V_array, sweep_index)
+        peak_voltages_, peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_rise_dvdt_ , peak_fw_,  peak_max_dvdt_, peak_decay_dvdt_  =  ap_characteristics_extractor_subroutine_derivative(folder_file, V_array, sweep_index, input_backwards_window=10) #HFD was 10 but its too much 
 
         if peak_locs_corr_  == [] : # if any list is empty 
             # print(f"No APs in sweep number {sweep_index+1}, index {sweep_index}.")
@@ -1223,7 +1366,7 @@ def plot_APs_off_step(folder_file, V_array, I_array, peak_locs_corr_all, sweep_i
         print(f"No APs detected off the current step in sweep {sweep_to_plot}.")
 
 
-def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all):
+def extract_FI_x_y(folder_file, V_array, I_array, sampeling_rate):
     '''
     Extracts data for Frequency-Current (FI) relationship from voltage (V_array) and current (I_array) recordings.
 
@@ -1240,143 +1383,310 @@ def extract_FI_x_y(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indi
     '''
     V_array_adj, I_array_adj = normalise_array_length(V_array, I_array, columns_match=True)
 
-    ap_counts_per_sweep = [] #on step
-    step_current_values = [] 
+    I_steps = [] 
+    AP_frequencies_Hz = []
     V_rest_values = []
-    off_step_peak_locs = []
-    ap_frequencies_Hz = []
+    off_step_peak_locs = [] # off step
+
 
     for sweep in range(I_array_adj.shape[1]):
-        current_sweep = I_array_adj[:, sweep]
-        voltage_sweep = V_array_adj[:, sweep]
+        I_sweep = I_array_adj[:, sweep]
+        V_sweep = V_array_adj[:, sweep]
 
-        # Get the sweep-specific peak locations and corresponding sweep indices
-        sweep_peak_locs = [peak_locs_corr_all[i] for i, sweep_index in enumerate(sweep_indices_all) if sweep_index == sweep]
+        peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(folder_file, V_sweep)        
 
-        # Identifying the current injection step in sweep
-        non_zero_indices = np.where(current_sweep != 0)[0]
+        # index I_step
+        non_zero_indices = np.where(I_sweep != 0)[0]
         if len(non_zero_indices) == 0:
-            #check validity of 0pA current injection
-            previous_current = I_array_adj[:, sweep-1]
-            previous_non_zero_indices = np.where(previous_current != 0)[0]
-            previous_current_step = previous_current[previous_non_zero_indices[0]]
-            next_current = I_array_adj[:, sweep+1]
-            next_current_step = next_current[previous_non_zero_indices[0]]
-            if previous_current_step+ next_current_step==0 or sweep == 0: #if previous and next step == or first sweep 0nA I injection is valid
-                step_current_values.append(0)
-                ap_counts_per_sweep.append(len(sweep_peak_locs))
-                V_rest_values.append(np.mean(voltage_sweep))  
-                continue
-            else:
-                print ('Error in current steps, missing step value that should not be 0.')
-                return step_current_values, ap_counts_per_sweep,  V_rest 
-                
-        first_non_zero_index = non_zero_indices[0]
-        last_non_zero_index = non_zero_indices[-1]
-        
-        # Count of APs within the current injection step of this sweep
-        ap_on_step = len([peak_loc for peak_loc in sweep_peak_locs if first_non_zero_index <= peak_loc <= last_non_zero_index])
-        ap_counts_per_sweep.append(ap_on_step)
-        # firing frequency in Hz (recorded at 20kHz)
-        setep_in_seconds = len(non_zero_indices)*0.00005 
+            I_step = 0
+            next_I_sweep = I_array_adj[:, sweep-1]
+            non_zero_indices = np.where(next_I_sweep != 0)[0]
+            V_rest_indices = np.where(next_I_sweep == 0)[0]
+            if len(non_zero_indices) == 0:
+                print(f"No step detected in {folder_file}, unable to calculate FI properties.")
+                return np.nan, np.nan, np.nan, np.nan
+        else:
+            I_step = I_sweep[non_zero_indices[0]+1]
+            V_rest_indices = np.where(I_sweep == 0)[0]
+        I_steps.append(int(I_step))
+
+        # f_Hz
+        ap_on_step = len([peak_loc for peak_loc in peak_locs_corr_all if non_zero_indices[0] <= peak_loc <= non_zero_indices[-1]])        
+        setep_in_seconds = len(non_zero_indices)/sampeling_rate
         ap_frequency_Hz = ap_on_step/setep_in_seconds
-        ap_frequencies_Hz.append(ap_frequency_Hz)
+        AP_frequencies_Hz.append(ap_frequency_Hz)
 
-        # Calculating the resting membrane potential
-        V_rest_indices = np.where(current_sweep == 0)[0]
+        # V_rest_step
         if len(V_rest_indices) > 0:
-            V_rest_values.append(np.mean(voltage_sweep[V_rest_indices]))
+            APnan_sweep = spike_remover_nan(V_sweep[V_rest_indices], threshold_sd=2)
+            V_rest_values.append(np.nanmean(APnan_sweep))
 
-        # Calculating the step current value
-        first_non_zero_current = current_sweep[first_non_zero_index]
-        step_current_values.append(first_non_zero_current)
 
         # Check for spikes off the current step
-        ap_off_step = [peak for peak in sweep_peak_locs if peak < (first_non_zero_index) or peak > (last_non_zero_index+10)] # 10ms buffer added after step
+        ap_off_step = [peak for peak in peak_locs_corr_all if peak < (non_zero_indices[0]) or peak > (non_zero_indices[-1]+10)] # 10ms buffer added after step
         if ap_off_step:
-            # print(f"APs detected off current step at {np.mean(voltage_sweep[V_rest_indices]):.2f}mV in sweep {sweep+1}. ") #TODO 
+            # print(f"APs detected off current step at {np.mean(V_sweep[V_rest_indices]):.2f}mV in sweep {sweep+1}. ") #TODO 
             # plot_APs_off_step(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all, sweep_to_plot=sweep)
             off_step_peak_locs.extend(ap_off_step)
             
 
     V_rest = np.nanmean(V_rest_values) if len(V_rest_values) > 0 else np.nan
 
-    return step_current_values, ap_counts_per_sweep,  V_rest , off_step_peak_locs, ap_frequencies_Hz
+    return I_steps , AP_frequencies_Hz, V_rest , off_step_peak_locs
+
+
+def correct_I_offset(I_array_adj, folder_file, threshold_pA=1.0):
+    """
+    Corrects for baseline offset in I_array_adj by subtracting the mean
+    of the flattest sweep, if the offset exceeds a given threshold.
+    """
+    flattest_idx = np.argmin([np.std(I_array_adj[:, i]) for i in range(I_array_adj.shape[1])])
+    offset = np.mean(I_array_adj[:, flattest_idx])
+
+    if abs(offset) > threshold_pA:
+        # print(f"I_array for {folder_file} is offset by {offset:.2f} pA, correcting.")
+        I_array_adj = I_array_adj - offset
+    else:
+        offset = 0
+
+    return I_array_adj, offset
+
+def denoise_steps(I_array_adj):
+    """
+    Replaces each sweep's segments (pre-step, on-step, post-step) with median-based integers.
+    Assumes offset has already been corrected.
+    """
+    n_time, n_sweeps = I_array_adj.shape
+    denoised = np.zeros_like(I_array_adj)
+
+    for i in range(n_sweeps):
+        trace = I_array_adj[:, i]
+        d = np.diff(trace)
+        threshold = np.max(np.abs(d)) * 0.3
+        step_idx = np.where(np.abs(d) > threshold)[0]
+
+        # Default to full sweep if no step detected
+        if len(step_idx) >= 2:
+            start = step_idx[0] + 1
+            end = step_idx[-1] + 1
+        else:
+            start, end = n_time, n_time
+
+        # # Use rounded medians - too noisy I get 182 instead of 180 for instance
+        # denoised[:start, i] = int(round(np.median(trace[:start])))
+        # denoised[start:end, i] = int(round(np.median(trace[start:end])))
+        # denoised[end:, i] = int(round(np.median(trace[end:])))
+        
+        # Use rounded medians to nearest 5
+        denoised[:start, i] = int(5 * round(np.median(trace[:start]) / 5))
+        denoised[start:end, i] = int(5 * round(np.median(trace[start:end]) / 5))
+        denoised[end:, i] = int(5 * round(np.median(trace[end:]) / 5))
+
+    return denoised
+
+
+# def correct_current_offset_and_denoise(I_array_adj, folder_file, threshold_pA=1.0):
+#     """
+#     Denoises and baseline-corrects I_array_adj.
+#     Replaces each sweep's segments (pre-step, on-step, post-step) with rounded mean.
+#     """
+#     n_time, n_sweeps = I_array_adj.shape
+#     denoised = np.zeros_like(I_array_adj)
+    
+
+#     for i in range(n_sweeps):
+#         trace = I_array_adj[:, i]
+#         d = np.diff(trace)
+#         threshold = np.max(np.abs(d)) * 0.3
+#         step_idx = np.where(np.abs(d) > threshold)[0]
+
+#         # Default to full sweep if no step detected
+#         start, end = (step_idx[0]+1, step_idx[-1]+1) if len(step_idx) >= 2 else (n_time, n_time)
+
+#         denoised[:start, i] = int(np.median(trace[:start]))
+#         denoised[start:end, i] = int(np.median(trace[start:end]))
+#         denoised[end:, i] = int(np.median(trace[end:]))
+
+#     flattest_idx = np.argmin([np.std(denoised[:, i]) for i in range(n_sweeps)])
+#     offset = np.mean(denoised[:, flattest_idx])
+
+#     if abs(offset) > threshold_pA:
+#         print(f"I_array for {folder_file} is offset by {offset:.2f} pA, correcting. Verify if holding I used.")
+#         denoised -= offset
+#     else:
+#         offset = 0
+
+#     return denoised, offset
 
 
 
-def extract_FI_slope_and_rheobased_threshold(folder_file, x, y):
-    '''
-    Calculation of the FI slope and rheobase threshold, linear fir of first 3 non zero points, checking for fit quality and bounds between last_I_without_APs and first_I_with_APs. 
-    If criteria not met will recalculate with 2 points, if fit is adiquite and rheobase is not, will calculate 1/2 way between steps. 
-
+def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 2):
+    """
+    Calculate FI slope and rheobase threshold based on the first APs.
+    
     Parameters:
-        folder_file (string): unique file identifier.
-        x (numpy.ndarray): 1D array representing the current input (usually in pA).
-        y (numpy.ndarray): 1D array representing the number of action potentials per sweep.
-
+        folder_file (str): Unique identifier.
+        x (np.ndarray): Current injection (pA).
+        y (np.ndarray): Firing rate (Hz).
+    
     Returns:
-        FI_slope (float): The slope of the FI curve, calculated using a linear fit.
-        rheobase_threshold (float): The calculated rheobase threshold in pA, determined as the x-intercept of the linear fit / 1/2 way between I steps without and with APs.
-    '''
-    # Identifying indices of nonzero elements (AP count)
-    list_of_non_zero = [i for i, element in enumerate(y) if element != 0]
+        tuple: (FI_slope, rheobase_threshold, valid_FP=True ) or (np.nan, np.nan, False) if failed.
+    """
 
+    def valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I, min_fit_quality=0.2):
+        """
+        Evaluates whether a linear fit is valid based on normalized residuals and rheobase bounds.
+
+        Parameters:
+            slope (float): Slope of the linear fit.
+            intercept (float): Intercept of the linear fit.
+            x_fit (np.ndarray): x values used for fit.
+            y_fit (np.ndarray): y values used for fit.
+            var_y (float): Variance of y_fit.
+            last_I (float): Last current step without action potentials.
+            first_I (float): First current step with action potentials.
+            min_fit_quality (float, default=0.2):  Normalized residual.
+            min_consecutive (float, default-2): number of consecutive sweeps required to start slope calculation.
+
+        Returns:
+            is_valid (bool): True if fit passes quality check and rheobase falls between
+                the last step without APs and the first step with APs.
+            rheo (float): Estimated rheobase (x-intercept of the fit).
+            fit_quality (float): Normalized residuals of the fit.
+        """
+        residuals = np.sum((np.polyval([slope, intercept], x_fit) - y_fit) ** 2)
+        fit_quality = residuals / var_y if var_y else np.inf
+        rheo = -intercept / slope if slope != 0 else np.nan
+        if not np.isfinite(rheo):
+            return False, rheo, fit_quality
+        return (fit_quality <= min_fit_quality and last_I <= rheo < first_I), rheo, fit_quality
+
+    # Find the first occurrence of spiking
+    list_of_non_zero = np.flatnonzero(y)
     if len(list_of_non_zero) == 0:
         print(f'NO APs DETECTED: {folder_file} check FP data or AP health.')
-        return np.nan, np.nan 
+        return np.nan, np.nan, False
 
-    last_I_without_APs = x[list_of_non_zero[0]-1] # bug SAD241218/t52 IndexError: list index out of range 
-    first_I_with_APs = x[list_of_non_zero[0]]
-    min_fit_quality = 0.2
+    # Find first sustained APs (ignore single AP outliers)
+    for i in range(len(list_of_non_zero) - min_consecutive + 1):
+        if np.all(np.diff(list_of_non_zero[i:i + min_consecutive]) == 1):
+            first_idx = list_of_non_zero[i]
+            break
+    else:
+        print(f"No consecutive APs detected: {folder_file}")
+        return np.nan, np.nan, False
+
+    if first_idx == 0:
+        print(f'Cannot determine last I without APs for: {folder_file}')
+        return np.nan, np.nan, False
+
+    last_I = x[first_idx - 1]
+    first_I = x[first_idx]
 
 
-    for points_to_use in [4, 3, 2]:  # Try with 4 points first, then with 3, 2 if needed #started with 3 before 8/4/24
-        # Check if there are enough points for a reliable linear fit
-        if len(list_of_non_zero) < points_to_use:
-            # print("Not enough data points for a reliable fit.")
-            return np.nan, np.nan
+    for points in [4, 3, 2]:
+        if len(list_of_non_zero) < points:
+            return np.nan, np.nan, False
 
-        # Preparing data for linear fit first 3 I steps with APs
-        x_fit = np.array(x[list_of_non_zero[0]:list_of_non_zero[0] + points_to_use])
-        y_fit = np.array(y[list_of_non_zero[0]:list_of_non_zero[0] + points_to_use])
+        x_fit = x[first_idx:first_idx + points]
+        y_fit = y[first_idx:first_idx + points]
 
-        #CHECK VALIDTY
         if not (np.all(np.isfinite(x_fit)) and np.all(np.isfinite(y_fit))):
             print(f"Non-finite values detected in {folder_file}. Skipping fit.")
-            return np.nan, np.nan
+            return np.nan, np.nan, False
 
-        y_variance = np.var(y_fit)
-        if y_variance == 0 or np.isnan(y_variance):
-            # print(f"Zero or NaN variance in {folder_file}. Skipping fit.")  #usualy unhealthy cells
-            return np.nan, np.nan  
-         
-        # Performing linear fit
+        var_y = np.var(y_fit)
+        if var_y == 0 or np.isnan(var_y):
+            return np.nan, np.nan, False
+
         slope, intercept = np.polyfit(x_fit, y_fit, 1)
+        is_good_fit, rheo, _ = valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I)
+        # plot_FI_curve_and_fit(folder_file, x, y, slope, intercept) 
 
-        # Calculating quality of fit
-        residuals = np.sum((np.polyval([slope, intercept], x_fit) - y_fit) ** 2)
+        if is_good_fit:
+            return slope, rheo, True
+
+    # Last chance: valid fit but rheobase is out of bounds (assume threshold between steps)
+    is_still_good, _, fit_quality = valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I)
+    if is_still_good or last_I > (-intercept / slope):
+        return slope, last_I, True
+
+    print(f"Unable to calculate FI slope or rheobase threshold with sufficient quality fit.")
+    return np.nan, np.nan, False
+
+
+# def extract_FI_slope_and_rheobased_threshold(folder_file, x, y): #updated above old as of 11/6/25 OLD CODE
+#     '''
+#     Calculation of the FI slope and rheobase threshold, linear fir of first 3 non zero points, checking for fit quality and bounds between last_I_without_APs and first_I_with_APs. 
+#     If criteria not met will recalculate with 2 points, if fit is adiquite and rheobase is not, will calculate 1/2 way between steps. 
+
+#     Parameters:
+#         folder_file (string): unique file identifier.
+#         x (numpy.ndarray): 1D array representing the current input (usually in pA).
+#         y (numpy.ndarray): 1D array representing frequency (usualy Hz) action potentials per sweep.
+
+#     Returns:
+#         FI_slope (float): The slope of the FI curve, calculated using a linear fit.
+#         rheobase_threshold (float): The calculated rheobase threshold in pA, determined as the x-intercept of the linear fit / 1/2 way between I steps without and with APs.
+#     '''
+#     # Identifying indices of nonzero elements (AP count)
+#     list_of_non_zero = [i for i, element in enumerate(y) if element != 0]
+
+#     if len(list_of_non_zero) == 0:
+#         print(f'NO APs DETECTED: {folder_file} check FP data or AP health.')
+#         return np.nan, np.nan 
+
+#     last_I_without_APs = x[list_of_non_zero[0]-1] # bug SAD241218/t52 IndexError: list index out of range 
+#     first_I_with_APs = x[list_of_non_zero[0]]
+#     min_fit_quality = 0.2
+
+
+#     for points_to_use in [4, 3, 2]:  # Try with 4 points first, then with 3, 2 if needed #started with 3 before 8/4/24
+#         # Check if there are enough points for a reliable linear fit
+#         if len(list_of_non_zero) < points_to_use:
+#             # print("Not enough data points for a reliable fit.")
+#             return np.nan, np.nan
+
+#         # Preparing data for linear fit first 3 I steps with APs
+#         x_fit = np.array(x[list_of_non_zero[0]:list_of_non_zero[0] + points_to_use])
+#         y_fit = np.array(y[list_of_non_zero[0]:list_of_non_zero[0] + points_to_use])
+
+#         #CHECK VALIDTY
+#         if not (np.all(np.isfinite(x_fit)) and np.all(np.isfinite(y_fit))):
+#             print(f"Non-finite values detected in {folder_file}. Skipping fit.")
+#             return np.nan, np.nan
+
+#         y_variance = np.var(y_fit)
+#         if y_variance == 0 or np.isnan(y_variance):
+#             # print(f"Zero or NaN variance in {folder_file}. Skipping fit.")  #usualy unhealthy cells
+#             return np.nan, np.nan  
+         
+#         # Performing linear fit
+#         slope, intercept = np.polyfit(x_fit, y_fit, 1)
+
+#         # Calculating quality of fit
+#         residuals = np.sum((np.polyval([slope, intercept], x_fit) - y_fit) ** 2)
         
-        # Calculating rheobase threshold
-        rheobase_threshold = -intercept / slope
-        if np.isnan(rheobase_threshold) or np.isinf(rheobase_threshold):
-            print(f"Invalid rheobase threshold for {folder_file}.")
-            rheobase_threshold = np.nan 
+#         # Calculating rheobase threshold
+#         rheobase_threshold = -intercept / slope
+#         if np.isnan(rheobase_threshold) or np.isinf(rheobase_threshold):
+#             print(f"Invalid rheobase threshold for {folder_file}.")
+#             rheobase_threshold = np.nan 
 
-        # Checking fit quality and physiological bounds
-        if residuals / np.var(y_fit) <= min_fit_quality and last_I_without_APs <= rheobase_threshold < first_I_with_APs: #lower bound allows for - values 
-            # print (f" SAVING Fit : {(residuals / np.var(y_fit)):.2f} , Slope : {slope:.2f}  , Rheobase(pA): {rheobase_threshold:.2f}, Steps: {last_I_without_APs} < pA < {first_I_with_APs}")
-            return slope, rheobase_threshold
-        # else:
-            # print(f"File {folder_file} trying with {points_to_use-1} points due to poor fit ({(residuals / np.var(y_fit)):.2f}) or out-of-bounds rheobase {rheobase_threshold:.2f}pA, Steps: {last_I_without_APs} < pA < {first_I_with_APs}.")
-            # plot_FI_curve_and_fit(folder_file, x, y, slope, intercept)  
+#         # Checking fit quality and physiological bounds
+#         if residuals / np.var(y_fit) <= min_fit_quality and last_I_without_APs <= rheobase_threshold < first_I_with_APs: #lower bound allows for - values 
+#             # print (f" SAVING Fit : {(residuals / np.var(y_fit)):.2f} , Slope : {slope:.2f}  , Rheobase(pA): {rheobase_threshold:.2f}, Steps: {last_I_without_APs} < pA < {first_I_with_APs}")
+#             return slope, rheobase_threshold
+#         # else:
+#             # print(f"File {folder_file} trying with {points_to_use-1} points due to poor fit ({(residuals / np.var(y_fit)):.2f}) or out-of-bounds rheobase {rheobase_threshold:.2f}pA, Steps: {last_I_without_APs} < pA < {first_I_with_APs}.")
+#             # plot_FI_curve_and_fit(folder_file, x, y, slope, intercept)  
 
-    if residuals / np.var(y_fit) <= min_fit_quality and last_I_without_APs > rheobase_threshold:
-        # print (f" SAVING Fit : {(residuals / np.var(y_fit)):.2f} , Slope : {slope:.2f} , Rheobase(pA): {last_I_without_APs}")
-        return slope, last_I_without_APs
-    else:
-        print(f"Unable to calculate FI slope / rheobase threshold with sufficient quality fit." )
-        return np.nan, np.nan
+#     if residuals / np.var(y_fit) <= min_fit_quality and last_I_without_APs > rheobase_threshold:
+#         # print (f" SAVING Fit : {(residuals / np.var(y_fit)):.2f} , Slope : {slope:.2f} , Rheobase(pA): {last_I_without_APs}")
+#         return slope, last_I_without_APs
+#     else:
+#         print(f"Unable to calculate FI slope / rheobase threshold with sufficient quality fit." )
+#         return np.nan, np.nan
 
 def plot_FI_curve_and_fit(folder_file, x, y, slope, intercept):
     """
@@ -1579,51 +1889,118 @@ def mean_RMP_APP_calculator(V_array, drug_in, drug_out, I_array=None):
     mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = APP_splitter(mean_RMP_sweep_list, drug_in, drug_out)
     return mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH
 
-def mean_inputR_APP_calculator(V_array, I_array, drug_in, drug_out):
+def sweep_mean_RMP_calculator(V_array, I_array=None):
     '''
-    input:      V_array, I_array (2D array of df shape)
-                drug_in  :  integer , sweep number when drug was applied (included in APP)
-                drug_out :  integer , sweep number when drug was washed out (included in WASH)
+    inputs: V_array (2D array of voltage)
+            I_array (2D array of current)
 
-    returns :   input_R_PRE, input_R_APP, input_R_WASH in MOhms
-                input R for each sweep = current injected / change in V in a list/array 
+    return: list of mean RMP for each sweep 
+    
+    '''
+    # V_array_cleaned  = spike_remover(V_array) #NOT WORKING JJB210427/t8 # OLD 26_5_25 changed to nan not average
+    V_array_cleaned  = spike_remover_nan(V_array)
+
+    if I_array is None or (I_array == 0).all() :
+        # print(" No I injected or no I data, taking RMP as all.")
+        # list of means of every column
+        mean_RMP_sweep_list  = list(np.nanmean(V_array_cleaned  , axis = 0))
+        
+    else: # I step in I_array
+        # print('I step detected, averaging V when no I injected for each sweep.')
+        I_array_adj, V_array_adj = I_array_to_match_V (V_array, I_array)
+        zero_current_mask = (I_array_adj == 0) #boolian mask where I == 0
+        V_masked = np.where(zero_current_mask, V_array_adj, np.nan) # V where I -- 0
+        mean_RMP_sweep_list = np.nanmean(V_masked, axis=0).tolist()
+    return mean_RMP_sweep_list
+
+# def mean_inputR_APP_calculator(V_array, I_array):
+#     '''
+#     input:      V_array, I_array (2D array of df shape)
+#                 drug_in  :  integer , sweep number when drug was applied (included in APP)
+#                 drug_out :  integer , sweep number when drug was washed out (included in WASH)
+
+#     returns :   input_R_PRE, input_R_APP, input_R_WASH in MOhms
+#                 input R for each sweep = current injected / change in V in a list/array 
+#     '''
+#     I_sweep = getI_array_sweep(I_array)
+#     input_R_ohms_V_array = []
+    
+#     for index, V_sweep in enumerate(V_array.T):  # Transpose V_array to iterate over columns/sweeps
+        
+#         if index < 2: #skip first 3 sweeps as often holding I was being set or cell was not stabelised
+#             input_R_ohms_V_array.append(np.nan) #preserve sweeps for APP_splitter
+#             continue
+
+#         V_sweep, I_sweep =normalise_array_length(V_sweep, I_sweep)
+#         # V_cleaned  = spike_remover(V_sweep) #oOLD 26_5_25 assigns mean  of trace 
+#         V_cleaned  = spike_remover_nan(V_sweep)
+
+#         #flatten sweeps
+#         V_cleaned = V_cleaned.flatten()
+#         I_sweep = I_sweep.flatten()
+
+#         #fetch delta_V
+#         steady_state , hyper  , first_current_point, last_current_point= steady_state_value(V_sweep, I_sweep)  #with I injection
+#         rmp = np.nanmean(V_cleaned[I_sweep == 0]) #without I injection 
+#         delta_V_mV = abs(steady_state - rmp) #change in mV
+#         #fetch I injected 
+#         delta_I_pA = abs(np.unique(I_sweep[I_sweep != 0])[0])
+#         # fectch sweep input R (ohm)
+#         delta_I_A = delta_I_pA * 1e-12  #  picoamperes to amperes
+#         delta_V_V = delta_V_mV * 1e-3  # millivolts to volts
+
+#         sweep_input_R_ohms = (delta_V_V / delta_I_A) 
+#         input_R_ohms_V_array.append(sweep_input_R_ohms)
+#         sweep_input_R_MOhms = sweep_input_R_ohms / 1e6  # Convert Ohms to Megaohms
+
+#     input_R_PRE, input_R_APP, input_R_WASH =APP_splitter(input_R_ohms_V_array, drug_in, drug_out)
+
+#     return input_R_PRE, input_R_APP, input_R_WASH 
+
+def sweep_mean_inputR_calculator(V_array, I_array):
+    '''
+    input:      V_array 2D array of voltage
+                I_array 2D array current to match voltage 
+
+    returns :   list: mean input R for each sweep = current injected / change in V 
     '''
     I_sweep = getI_array_sweep(I_array)
     input_R_ohms_V_array = []
     
     for index, V_sweep in enumerate(V_array.T):  # Transpose V_array to iterate over columns/sweeps
         
-        if index < 2: #skip first 3 sweeps as often holding I was being set or cell was not stabelised
-            input_R_ohms_V_array.append(np.nan) #preserve sweeps for APP_splitter
+        if index < 1:  # skip first sweep (or first 2 if you change <1 to <2)
+            input_R_ohms_V_array.append(np.nan)
             continue
 
-        V_sweep, I_sweep =normalise_array_length(V_sweep, I_sweep)
-        # V_cleaned  = spike_remover(V_sweep) #oOLD 26_5_25 assigns mean  of trace 
-        V_cleaned  = spike_remover_nan(V_sweep)
+        V_sweep, I_sweep = normalise_array_length(V_sweep, I_sweep)
+        V_cleaned = spike_remover_nan(V_sweep)
 
-        #flatten sweeps
         V_cleaned = V_cleaned.flatten()
         I_sweep = I_sweep.flatten()
 
-        #fetch delta_V
-        steady_state , hyper  , first_current_point, last_current_point= steady_state_value(V_sweep, I_sweep)  #with I injection
-        rmp = np.nanmean(V_cleaned[I_sweep == 0]) #without I injection 
-        delta_V_mV = abs(steady_state - rmp) #change in mV
-        #fetch I injected 
-        delta_I_pA = abs(np.unique(I_sweep[I_sweep != 0])[0])
-        # fectch sweep input R (ohm)
-        delta_I_A = delta_I_pA * 1e-12  #  picoamperes to amperes
-        delta_V_V = delta_V_mV * 1e-3  # millivolts to volts
+        try:
+            # fetch delta_V
+            steady_state, hyper, first_current_point, last_current_point = steady_state_value(V_sweep, I_sweep)
+            rmp = np.nanmean(V_cleaned[I_sweep == 0])
+            delta_V_mV = abs(steady_state - rmp)
 
-        sweep_input_R_ohms = (delta_V_V / delta_I_A) 
-        input_R_ohms_V_array.append(sweep_input_R_ohms)
-        sweep_input_R_MOhms = sweep_input_R_ohms / 1e6  # Convert Ohms to Megaohms
+            # fetch I injected
+            delta_I_pA = abs(np.unique(I_sweep[I_sweep != 0])[0])
+            delta_I_A = delta_I_pA * 1e-12  # convert pA to A
+            delta_V_V = delta_V_mV * 1e-3  # convert mV to V
 
-    input_R_PRE, input_R_APP, input_R_WASH =APP_splitter(input_R_ohms_V_array, drug_in, drug_out)
+            sweep_input_R_ohms = delta_V_V / delta_I_A
+            input_R_ohms_V_array.append(sweep_input_R_ohms)
 
-    return input_R_PRE, input_R_APP, input_R_WASH 
+        except Exception as e:
+            print(f"Sweep {index} skipped due to error: {e}")
+            input_R_ohms_V_array.append(np.nan)
 
+    # Convert all to MΩ
+    input_R_MOhms_array = [r / 1e6 if r is not np.nan else np.nan for r in input_R_ohms_V_array]
 
+    return input_R_MOhms_array
 
 def normalise_array_length(V_array, I_array, columns_match=False, verbose=True): #2/5/25 changed
     """

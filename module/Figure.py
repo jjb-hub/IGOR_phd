@@ -21,6 +21,7 @@ from collections import defaultdict
 from module.action_potential_functions import ap_characteristics_extractor_main, normalise_array_length #should become ActionPotential class
 from sklearn.cluster import KMeans
 from matplotlib.lines import Line2D
+from module.Stats import Stats
 
 
 # Root directory for projects #HACKY SHIT should have a project or filesystem class to prevent dupicate code
@@ -115,64 +116,121 @@ class DataSelection (Cachable):
         valid_files = [item for sublist in valid_files for item in sublist] if isinstance(valid_files[0], list) else valid_files
 
         return valid_files, valid_cell_ids
-
+    
     def get_filtered_data(self):
         """
-        Fetches the data_type _df and filters it and returns restructured aggergate df for stats and plotting (one row for each cell_id and time).
+        Fetches the data_type _df, filters and restructures it.
+        Returns an aggregated df for stats and plotting (one row per cell_id and time).
         """
-        # valid_files, valid_cell_ids = self.get_valid_folder_files()
-        
         if self.data_type == 'APP':
-            filtered_df = self.APP_df[self.APP_df['folder_file'].isin(self.valid_files)]
-            #column names {dependant_vairable}_{time}
+            filtered_df = self.APP_df[self.APP_df['folder_file'].isin(self.valid_files)].copy()
             timepoints = ['PRE', 'APP', 'WASH']
-            columns = {
-            'RMP': 'RMP',
-            'inputR': 'inputR',
-            'RAcount': 'RA_count',
-            'APcount': 'AP_count' }
+            sweep_vars = ['AP_count', 'RA_count', 'RMP']#, 'inputR']
             reshaped_data = []
 
             for timepoint in timepoints:
-                time_specific_columns = {f'{var}_{timepoint}': name for var, name in columns.items() if f'{var}_{timepoint}' in filtered_df.columns}
-                
-                existing_columns = [col for col in time_specific_columns.keys() if col in filtered_df.columns]
-                current_data = filtered_df[['cell_id'] + existing_columns].copy()
+                current_data = pd.DataFrame()
+                current_data['cell_id'] = filtered_df['cell_id']
+                current_data['folder_file'] = filtered_df['folder_file']
                 current_data['time'] = timepoint
-                current_data.rename(columns=time_specific_columns, inplace=True)
-                # aggregate mean data
-                for col in ['RMP', 'inputR']:
-                    if col in current_data.columns:
-                        current_data[f'sweep_{col}'] = current_data[col]
-                        current_data[col] = current_data[col].apply(lambda x: np.nanmean(x) if isinstance(x, list) and len(x) > 0 else (np.nan if isinstance(x, list) else x))
-                # APs per sweep for each timepoint (returns a zero-padded list)
-                for sweep_col in ['AP_sweep_locs', 'RA_sweep_locs']:
-                    if sweep_col in filtered_df.columns:
-                        base = sweep_col.split('_')[0]  # 'AP' or 'RA'
-                        colname = f'sweep_{base}_count'
-                        current_data[colname] = filtered_df.apply(
-                            lambda row: [
-                                (
-                                    row[sweep_col].count(s)
-                                    if (
-                                        isinstance(row[sweep_col], list) and
-                                        (
-                                            (timepoint == 'PRE' and s < row.get('drug_in', float('inf'))) or
-                                            (timepoint == 'APP' and row.get('drug_in', -1) <= s < row.get('drug_out', float('inf'))) or
-                                            (timepoint == 'WASH' and s >= row.get('drug_out', float('inf')))
-                                        )
-                                    ) else 0
-                                )
-                                for s in range(len(row.get(f'RMP_{timepoint}', [])))
-                            ],
-                            axis=1
-                        )
+
+                for base in sweep_vars:
+                    sweep_col = f'sweep_{base}'
+                    if sweep_col not in filtered_df.columns:
+                        continue
+
+                    # Filter out invalid types (not list/array)
+                    mask_invalid = filtered_df[sweep_col].apply(lambda x: not isinstance(x, (list, np.ndarray)))
+                    dropped_cells = filtered_df.loc[mask_invalid, 'cell_id'].unique()
+                    if len(dropped_cells) > 0:
+                        print(f"Dropping cells with invalid {sweep_col}: {dropped_cells}")
+                    valid_df = filtered_df.loc[~mask_invalid].copy()
+
+                    # Align to time window
+                    def extract_time_segment(row):
+                        sweep_data = row[sweep_col]
+                        if timepoint == 'PRE':
+                            return sweep_data[:int(row.get('drug_in', 0))]
+                        elif timepoint == 'APP':
+                            return sweep_data[int(row.get('drug_in', 0)):int(row.get('drug_out', len(sweep_data)))]
+                        elif timepoint == 'WASH':
+                            return sweep_data[int(row.get('drug_out', len(sweep_data))):]
+                        return []
+
+                    # Apply extraction + mean aggregation
+                    extracted = valid_df.apply(extract_time_segment, axis=1)
+                    current_data[sweep_col] = extracted
+                    current_data[base] = extracted.apply(lambda x: np.nanmean(x) if isinstance(x, (list, np.ndarray)) and len(x) > 0 else np.nan)
 
                 reshaped_data.append(current_data)
+
             agg_APP_df = pd.concat(reshaped_data, ignore_index=True)
             agg_APP_df = self.add_cell_mapping(agg_APP_df)
-
             return agg_APP_df
+
+    # def get_filtered_data(self):
+    #     """
+    #     Fetches the data_type _df and filters it and returns restructured aggergate df for stats and plotting (one row for each cell_id and time).
+    #     """
+    #     # valid_files, valid_cell_ids = self.get_valid_folder_files()
+        
+    #     if self.data_type == 'APP':
+    #         filtered_df = self.APP_df[self.APP_df['folder_file'].isin(self.valid_files)]
+    #         #column names {dependant_vairable}_{time}
+    #         timepoints = ['PRE', 'APP', 'WASH']
+    #         columns = {
+    #         'RMP': 'RMP',
+    #         'inputR': 'inputR',
+    #         'RAcount': 'RA_count', #should becopme redundant? no need for hist plEASE MODIFY HIST
+    #         'APcount': 'AP_count', #
+    #         'sweep_AP_count': 'sweep_AP_count',
+    #         # 'sweep_RA_count': 'sweep_RA_count', 
+    #         }
+    #         reshaped_data = []
+
+    #         for timepoint in timepoints:
+    #             # time_specific_columns = {f'{var}_{timepoint}': name for var, name in columns.items() if f'{var}_{timepoint}' in filtered_df.columns}
+                
+    #             # existing_columns = [col for col in time_specific_columns.keys() if col in filtered_df.columns]
+    #             # current_data = filtered_df[['cell_id'] + existing_columns].copy()
+    #             # current_data['time'] = timepoint
+    #             # current_data.rename(columns=time_specific_columns, inplace=True)
+    #             # # aggregate mean data
+    #             # for col in ['RMP', 'inputR']:
+    #             #     if col in current_data.columns:
+    #             #         current_data[f'sweep_{col}'] = current_data[col]
+    #             #         current_data[col] = current_data[col].apply(lambda x: np.nanmean(x) if isinstance(x, list) and len(x) > 0 else (np.nan if isinstance(x, list) else x))
+                
+
+
+    #             for base in ['AP_count', 'RA_count', 'RMP', 'inputR']: 
+    #                 count_col = f'sweep_{base}'
+    #                 if count_col in filtered_df.columns:
+
+    #                     # Drop rows where count_col is NaN or not list/array-like, print dropped cell_ids. #TEMP TO DO ENSURE ALL LISTS OF 0 not np.nan if no APs
+    #                     mask_invalid = filtered_df[count_col].apply(lambda x: not isinstance(x, (list, np.ndarray)))
+    #                     dropped_cells = filtered_df.loc[mask_invalid, 'cell_id'].unique()
+    #                     if len(dropped_cells) > 0:
+    #                         print(f"Dropping cells with invalid {count_col}: {dropped_cells}")
+
+    #                     filtered_df = filtered_df.loc[~mask_invalid].copy()
+
+    #                     current_data[count_col] = filtered_df.apply(
+    #                         lambda row: (
+    #                             row[count_col][:int(row.get('drug_in', 0))] if timepoint == 'PRE' else
+    #                             row[count_col][int(row.get('drug_in', 0)):int(row.get('drug_out', len(row[count_col])))] if timepoint == 'APP' else
+    #                             row[count_col][int(row.get('drug_out', len(row[count_col]))):]
+    #                         ),
+    #                         axis=1
+    #                     )
+                                
+
+    #             reshaped_data.append(current_data)
+                
+    #         agg_APP_df = pd.concat(reshaped_data, ignore_index=True)
+    #         agg_APP_df = self.add_cell_mapping(agg_APP_df)
+
+    #         return agg_APP_df
         
 
         elif self.data_type == 'FP':
@@ -182,10 +240,10 @@ class DataSelection (Cachable):
             filtered_df = filtered_df[['cell_id', 'time', 'AP_decay_dvdt', 'AP_rise_dvdt',
                         'AP_dvdt_max', 'AP_height', 'AP_latency', 'AP_peak_voltages',
                         'AP_width', 'FI_slope', 'max_firing', 
-                        'rheobased_threshold', 'sag', 'tau_rc', 'voltage_threshold']]
+                        'rheobased_threshold', 'sag', 'voltage_threshold']]
             #aggregate 
             for col in ['AP_dvdt_max', 'AP_height', 'AP_latency', 'AP_peak_voltages',
-                        'AP_decay_dvdt', 'AP_rise_dvdt', 'AP_width', 'sag', 'tau_rc', 'voltage_threshold']:
+                        'AP_decay_dvdt', 'AP_rise_dvdt', 'AP_width', 'sag', 'voltage_threshold']:
                 filtered_df[col] = filtered_df[col].apply(lambda x: np.mean(x) if isinstance(x, list) else x)
             agg_FP_df = filtered_df.groupby(['cell_id', 'time']).agg({
             'AP_dvdt_max': 'mean',
@@ -199,7 +257,6 @@ class DataSelection (Cachable):
             'max_firing': 'mean',
             'rheobased_threshold': 'mean',
             'sag': 'mean',
-            'tau_rc': 'mean',
             'voltage_threshold': 'mean'
             }).reset_index()
             agg_FP_df = self.add_cell_mapping(agg_FP_df)
@@ -276,7 +333,7 @@ class DataSelection (Cachable):
             return 'Unknown', None
 
         
-    def folder_file_AP_df(self, cell_id, folder_file,  V_array=None, I_array=None): # add drug column with PRE APP or WASH
+    def folder_file_AP_df(self, cell_id, folder_file,  V_array=None, I_array=None): 
         '''builds AP_df for single folder_file.'''
         if V_array is None or I_array is None:
             V_array , I_array, V_list = Project(self.project).load_data(folder_file)
@@ -383,8 +440,59 @@ class Figure(DataSelection):
     
     def check_valid_dependant_var(self):
             if self.dependant_var not in self.agg_df.columns:
-                dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'I_set']]
+                dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'I_set']]#HARD CODE
                 raise ValueError(f"Invalid dependant variable: {self.dependant_var}. Valid dv's : {dvs}")
+            
+    def get_pre_post_sweep_windows(self,
+        df: pd.DataFrame,
+        dependant_var: str,
+        pre_sweep_window: int | None = None,
+        post_sweep_window: int | None = None,
+        verbose: bool = True
+        ):
+        '''Determine pre and post sweep windows and filter df to ensure each cell has sufficient sweeps.'''
+        filtered_df = df.copy()
+
+        # --- PRE ---
+        if pre_sweep_window is None:
+            pre_sweep_window = filtered_df.loc[filtered_df['time'] == 'PRE', dependant_var].map(len).min()
+            if verbose:
+                print(f"pre_sweep_window set to {pre_sweep_window}")
+        else:
+            pre_mask = ~((filtered_df['time'] == 'PRE') & 
+                        (filtered_df[dependant_var].map(len) < pre_sweep_window))
+            dropped_pre = filtered_df.loc[~pre_mask & (filtered_df['time'] == 'PRE'), 'cell_id'].unique()
+            if len(dropped_pre) > 0 and verbose:
+                print(f"Dropping {len(dropped_pre)} cells due to insufficient PRE sweeps (<{pre_sweep_window}): {list(dropped_pre)}")
+            filtered_df = filtered_df[pre_mask]
+
+        # --- POST ---
+        if post_sweep_window is None:
+            def _combined_len(df):
+                app_len = df.loc[df['time'] == 'APP', dependant_var].map(len).values
+                wash_len = df.loc[df['time'] == 'WASH', dependant_var].map(len).values
+                total = (app_len[0] if len(app_len) else 0) + (wash_len[0] if len(wash_len) else 0)
+                return total
+
+            grouped = filtered_df.groupby('cell_id')
+            post_lengths = grouped.apply(_combined_len)
+            post_sweep_window = post_lengths.min()
+            if verbose:
+                print(f"post_sweep_window set to {post_sweep_window}")
+        else:
+            def _sufficient_post(row):
+                if row['time'] not in ('APP', 'WASH'):
+                    return True
+                return len(row[dependant_var]) >= post_sweep_window
+
+            post_mask = filtered_df.apply(_sufficient_post, axis=1)
+            dropped_post = filtered_df.loc[~post_mask & (filtered_df['time'].isin(['APP', 'WASH'])), 'cell_id'].unique()
+            if len(dropped_post) > 0 and verbose:
+                print(f"Dropping {len(dropped_post)} cells due to insufficient POST sweeps (<{post_sweep_window}): {list(dropped_post)}")
+            filtered_df = filtered_df[post_mask]
+
+        return filtered_df, pre_sweep_window, post_sweep_window
+
     
     def save_plot(self, fig, filename: str, formats=('png', 'svg')):
         """
@@ -407,6 +515,154 @@ class Figure(DataSelection):
 
 
 
+@dataclass
+class ApplicationResponse(Figure):
+    filename: str = None
+    response_var: str = field(kw_only=True)
+    n_minimum: float = field(kw_only = True, default = 3)
+    pre_sweep_window: int = None # window before and after drug_in
+    post_sweep_window: int = None 
+    diff_thresh: int = field(kw_only = True, default = 0) # ie 3mV difference required to consider it a response 
+    labels: list = field(kw_only=True, default_factory=lambda: ['increase', 'decrease'])
+    dependant_var: str = field(init=False)  # will be set in __post_init__
+    p_thresh: float = field(kw_only = True, default = 0.05)
+
+    def __post_init__(self):
+        self.dependant_var = f"sweep_{self.response_var}"
+        self.filename = f"{self.dependant_var}_{self.cell_type}_{self.treatment}_response"
+        
+        super().__post_init__()
+        self.check_valid_dependant_var()
+        self.data = self.filter_n_minimum(self.agg_df)
+        self.response_df = self.get_responses()
+        self.fig = self.plot_pie()
+    
+    def get_responses(self):
+
+        self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=self.dependant_var, pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
+        
+        
+        # # DEFINE SWEEP PRE POST WINDOWS
+        # if getattr(self, 'pre_sweep_window', None) is None:
+        #     pre_sweep_window = self.data.loc[self.data['time'] == 'PRE', self.dependant_var].map(len).min()
+        #     print(f"pre_sweep_window set to {pre_sweep_window}.")
+        # else:
+        #     pre_sweep_window = self.pre_sweep_window
+        #     pre_mask = ~((self.data['time'] == 'PRE') & 
+        #                 (self.data[self.dependant_var].map(len) < pre_sweep_window))
+        #     dropped_pre_cells = self.data.loc[
+        #         (self.data['time'] == 'PRE') & (~pre_mask), 'cell_id'
+        #     ].unique()
+        #     if len(dropped_pre_cells) > 0:
+        #         print(f"Dropping {len(dropped_pre_cells)} cells due to insufficient PRE sweeps (<{pre_sweep_window}): {list(dropped_pre_cells)}")
+        #     self.data = self.data[pre_mask]
+
+        
+        # # Handle post_sweep_window
+        # if getattr(self, 'post_sweep_window', None) is None:
+            
+        #     def _combined_len(df): # Get min length of combined APP + WASH sweeps for each cell
+        #         app_len = df.loc[df['time'] == 'APP', self.dependant_var].map(len).values
+        #         wash_len = df.loc[df['time'] == 'WASH', self.dependant_var].map(len).values
+        #         total = 0 # Sum lengths or 0 if empty
+        #         if len(app_len) > 0:
+        #             total += app_len[0]
+        #         if len(wash_len) > 0:
+        #             total += wash_len[0]
+        #         return total
+
+        #     grouped = self.data.groupby('cell_id')
+        #     post_lengths = grouped.apply(_combined_len)
+        #     post_sweep_window = post_lengths.min()
+        #     print(f"post_sweep_window set to {post_sweep_window}.")
+        # else:
+        #     post_sweep_window = self.post_sweep_window
+            
+        #     def _sufficient_post(row):
+        #         if row['time'] not in ('APP', 'WASH'):
+        #             return True  # don't filter non-post rows
+        #         return len(row[self.dependant_var]) >= post_sweep_window
+
+        #     post_mask = self.data.apply(_sufficient_post, axis=1)
+        #     dropped_post_cells = self.data.loc[
+        #         ~post_mask & (self.data['time'].isin(['APP', 'WASH'])),
+        #         'cell_id'
+        #     ].unique()
+        #     if len(dropped_post_cells) > 0:
+        #         print(f"Dropping {len(dropped_post_cells)} cells due to insufficient POST sweeps (<{post_sweep_window}): {list(dropped_post_cells)}")
+        #     self.data = self.data[post_mask]  
+
+        # def _get_sweeps(df, time_label):
+        #     row = df[df['time'] == time_label]
+        #     return row[self.dependant_var].values[0] if not row.empty else []
+        
+
+        result_rows = []
+        for cell_id, sub_df in self.data.groupby('cell_id'):
+            pre = sub_df[sub_df['time'] == 'PRE'][self.dependant_var].values[0][-pre_sweep_window:]
+            post = sub_df[sub_df['time'] == 'APP'][self.dependant_var].values[0][:post_sweep_window]
+            # pre = _get_sweeps(sub_df, 'PRE')[-pre_sweep_window:]
+            # post = _get_sweeps(sub_df, 'APP')[:post_sweep_window]
+
+            if len(post) < post_sweep_window:
+                post = np.concatenate([post, sub_df[sub_df['time'] == 'WASH'][self.dependant_var].values[0][:post_sweep_window - len(post)]])
+                # post = np.concatenate([post, _get_sweeps(sub_df, 'WASH')[:post_sweep_window - len(post)]])
+
+
+            if len(pre) == 0 or len(post) == 0:
+                print(f"Skipping cell {cell_id} due to empty PRE or POST sweeps.")
+                continue
+
+
+            result = Stats(p_thresh=self.p_thresh, diff_thresh=self.diff_thresh).welchs_t_test(pre, post, labels=self.labels)
+
+            result_rows.append({
+                'cell_id': cell_id,
+                'PRE_sweeps': pre,
+                'POST_sweeps': post,
+                'response':result['response'],
+                'delta':result['mean_diff'], #APs/sweep or mV or mOhm,
+                'p_val': result['p_val']
+                })
+
+        return pd.DataFrame(result_rows)
+
+    def plot_pie(self):
+        total_n = len(self.response_df)
+        counts = self.response_df['response'].fillna('no response').value_counts()
+        default_colors = ['salmon', 'deepskyblue']
+        colors = {'no response': 'whitesmoke'}
+        for label, color in zip(self.labels, default_colors):
+            colors[label] = color
+
+        pie_colors = [colors.get(label, 'gray') for label in counts.index]
+
+        def format_autopct(pct):
+            count = int(round(pct * total_n / 100.0))
+            return f'{pct:.1f}%\n({count}/{total_n})'
+        
+        # Print cell IDs by response label
+        for label in self.labels:
+            matching_cells = self.response_df[self.response_df['response'].fillna('no response') == label]['cell_id'].tolist()
+            print(f"{label} cells ({len(matching_cells)}): {matching_cells}")
+        
+        # Plot pie chart
+        fig, ax = plt.subplots(figsize=(6, 6))
+        counts.plot.pie(
+            autopct=format_autopct,
+            startangle=90,
+            ylabel='',
+            textprops={'fontsize': 12},
+            colors=pie_colors,
+            ax=ax
+        )
+
+        ax.set_title(f"{self.response_var} response to {self.treatment} in {self.cell_type}\n(n={total_n})", fontsize=14)
+        plt.tight_layout()
+        plt.show()
+        self.save_plot(fig, self.filename)
+        
+
 
 @dataclass
 class Histogram(Figure):
@@ -414,12 +670,15 @@ class Histogram(Figure):
     dependant_var: str = field(kw_only=True)
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id
     n_minimum: float = field(kw_only = True, default = 3)
+    pre_sweep_window: int = None # window before and after drug_in
+    post_sweep_window: int = None 
 
     def __post_init__(self):
         self.filename = f"{self.dependant_var}_{self.specify}" 
         super().__post_init__()
         self.check_valid_dependant_var()
         self.data = self.filter_n_minimum(self.agg_df)
+        self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=self.dependant_var, pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
         self.stats = self.generate_statistics()
         self.order = [t for t in color_dict.keys() if t in self.data['treatment'].unique()]
         self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()]
