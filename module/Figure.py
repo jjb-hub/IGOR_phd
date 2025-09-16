@@ -80,7 +80,9 @@ class DataSelection (Cachable):
         
         if self.data_type in ["FP", "APP"]: #TODO file validator inbuild fo project_type = application only needs to be cleaned
             valid_df = self.cell_df[self.cell_df[f'{self.data_type}_valid'].notna()] 
-        
+        else:
+            valid_df = self.cell_df
+            
         def validate_attribute(attribute, column_name):
             if attribute is not None:
                 valid_values = valid_df[column_name].unique()
@@ -105,7 +107,7 @@ class DataSelection (Cachable):
             raise ValueError(f"{valid_column} column does not exist in cell_df.")
         
         filtered_cell_df = self.cell_df.copy()
-        
+
         #apply filters if set
         if self.cell_type is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['cell_type'].isin([self.cell_type] if isinstance(self.cell_type, str) else self.cell_type)]
@@ -993,7 +995,8 @@ class Histogram(Figure):
         super().__post_init__()
         self.check_valid_dependant_var()
         self.data = self.filter_n_minimum(self.agg_df)
-        self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=self.dependant_var, pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
+        if self.data_type == "APP":
+            self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=self.dependant_var, pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
         self.stats = self.generate_statistics()
         self.order = [t for t in color_dict.keys() if t in self.data['treatment'].unique()]
         self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()]
