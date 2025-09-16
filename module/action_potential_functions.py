@@ -590,7 +590,7 @@ def peak_finder(
 
 
 
-def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index,  sampling_rate = 2e4 ,  input_backwards_window = 6 , input_ap_forwards_window = 1, input_smoothing_kernel=10):
+def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sweep_index,  sampling_rate = 2e4 ,  input_backwards_window = 6 , input_ap_forwards_window = 10, input_smoothing_kernel=10, force_upshoot_detection = False):
     '''
     Extracts detailed characteristics of action potentials (APs) from voltage data within a specified sweep.
 
@@ -599,7 +599,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         sweep_index (int): The index of the sweep in the DataFrame from which AP characteristics are to be extracted.
         sampling_rate (float, optional): The sampling rate of the data in Hz. Defaults to 20000 Hz.
         input_smoothing_kernel (float, optional): The size of the smoothing kernel to apply to the voltage data. Defaults to 10.
-        input_backwards_window (int, optional): The window size used for searching backward from a peak to find the AP upshoot. Defaults to 100.
+        input_backwards_window (int, optional): The window size used for searching backward from a peak to find the AP upshoot. Defaults to 100ms.
         input_ap_forwards_window (int, optional): The window size in ms to correct peak location after smoothing. Defaults to 3ms.
 
     Returns:
@@ -623,6 +623,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
     ap_width_min = 0.1 # ms
     ap_width_max = 4 # ms
     smoothing_kernel = input_smoothing_kernel
+    smoothing_correction_window = int(0.001 * sampling_rate) #1ms to correct peak location from smoothed to raw trace
 
     # initialise output lists
     AP_peak_voltages              = []            #  voltage at peak of AP
@@ -649,12 +650,23 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
     # PEAK LOCATION correction from smoothed trace
     for peak_idx in range(len(peak_locs)):
 
-        start_idx = max(0, peak_locs[peak_idx] - ap_backwards_window)  # ensure window does not start before index 0
-        end_idx = peak_locs[peak_idx] + ap_forwards_window  # end index extends forward from peak
+        start_idx = max(0, peak_locs[peak_idx] - smoothing_correction_window)  # ensure window does not start before index 0
+        end_idx = peak_locs[peak_idx] + smoothing_correction_window  # end index extends forward from peak
         window = V_array[start_idx:end_idx]  # voltage slice around peak
         v_max = np.max(window)  # max voltage in the slice
-        peak_locs_shift = (peak_locs[peak_idx] - start_idx) - np.where(window == v_max)[0][0]  # shift from estimated peak to true peak
-        AP_locations_list += [peak_locs[peak_idx] - peak_locs_shift]  # corrected peak location appended
+        
+        #OLD doubble peaks in folder_file F2976/2025_08_27_0013.  31/5/25
+        # peak_locs_shift = (peak_locs[peak_idx] - start_idx) - np.where(window == v_max)[0][0]  # shift from estimated peak to true peak
+        # AP_locations_list += [peak_locs[peak_idx] - peak_locs_shift]  # corrected peak location appended
+
+
+        #TODO test bellow to replave above
+        window_max_indices = np.where(window == v_max)[0]
+        peak_loc_in_window = peak_locs[peak_idx] - start_idx #  index closest to the smoothed peak position in the window
+        closest_idx = window_max_indices[np.argmin(np.abs(window_max_indices - peak_loc_in_window))]
+        peak_locs_shift = peak_loc_in_window - closest_idx
+        AP_locations_list.append(peak_locs[peak_idx] - peak_locs_shift)
+
 
 
     # OLD 17 JUn 2025 REDEFINED GLOBAL ap_backwards_window
@@ -709,19 +721,20 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         if len(upshoot_loc_array) == 0 : # occures most for depolarisation block or unhealthy spikes
             
             # FORCE FIND (ogten too late on slope)
-            # dvdt = np.diff(v_temp) * sampling_rate / 1000
-            # second_dvdt = -np.diff(dvdt) 
-            # upshoot_candidates = np.where(dvdt > 5.5)[0] # first point > 5 mV/ms (max dvdt used also but I dont like)
-            # min_2nd_dvdt_index = np.argmin(second_dvdt)
-            # if len(upshoot_candidates) > 0:
-            #     upshoot_location = upshoot_candidates[np.argmin(np.abs(upshoot_candidates - min_2nd_dvdt_index))]
-            # else:
-            #     upshoot_location = min_2nd_dvdt_index + 1
-            # print(f"New AP detection implimented.")
+            if force_upshoot_detection == True:
+                dvdt = np.diff(v_temp) * sampling_rate / 1000
+                second_dvdt = -np.diff(dvdt) 
+                upshoot_candidates = np.where(dvdt > 5.5)[0] # first point > 5 mV/ms (max dvdt used also but I dont like)
+                min_2nd_dvdt_index = np.argmin(second_dvdt)
+                if len(upshoot_candidates) > 0:
+                    upshoot_location = upshoot_candidates[np.argmin(np.abs(upshoot_candidates - min_2nd_dvdt_index))]
+                else:
+                    upshoot_location = min_2nd_dvdt_index + 1
+                print(f"New AP detection implimented. Check for doublle peaks or poor data {folder_file} sweep {sweep_index}, peak index {peak_location}, upshoot index {upshoot_location}.")
 
-
-            # print(f"No upshoot found via derivitive {folder_file} sweep {sweep_index}, analising next peak.") 
-            continue
+            else:
+                # print(f"No upshoot found via derivitive {folder_file} sweep {sweep_index}, analising next peak.") 
+                continue
 
         if len(upshoot_loc_array) == 1 : 
             upshoot_loc_in_window_bin  = upshoot_loc_array[0] 
@@ -809,7 +822,12 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
             continue
 
         #WIDTH
-        fwhm_ms = calculate_fwhm(folder_file, V_array, peak_location, upshoot_location, sampling_rate, sec_to_ms, ap_width_min, ap_width_max)
+        if len(AP_locations_list) < 1 :
+            inter_spike_interval = np.min(np.diff(AP_locations_list)) #in values
+        else:
+            inter_spike_interval = int(0.5 * sampling_rate) #500ms if only 1 AP in trace
+
+        fwhm_ms = calculate_fwhm(folder_file, V_array, peak_location, upshoot_location, sampling_rate, sec_to_ms, ap_width_min, ap_width_max, inter_spike_interval)
         if fwhm_ms < ap_width_min or fwhm_ms > ap_width_max:
             # print(f"Calculated FWHM is {fwhm_ms:.2f}, outside of plausible limits ({ap_width_min} - {ap_width_max} ms).")
             height_to_width_ratio = AP_height/fwhm_ms
@@ -817,7 +835,7 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
                 # print(f"AP height/width ratio is {height_to_width_ratio:.2f}, outside plausable limmits (40 - 100), poor compensation, setting fwhm to nan.")
                 fwhm_ms = np.nan
             # else: 
-                # plot_fwhm(folder_file, V_array, upshoot_location, peak_location, sampling_rate, sec_to_ms)
+                # plot_fwhm(folder_file, V_array, upshoot_location, peak_location, sampling_rate, sec_to_ms, inter_spike_interval)
                 # print(f"AP height to width ratio, {height_to_width_ratio}, inside relevant bounds 40-100, appending fwhm as {fwhm_ms}.")
 
         
@@ -836,17 +854,19 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
     return AP_peak_voltages, valid_AP_locations , AP_upshoot_locations_list, AP_voltage_thresholds_list , AP_heights_list , AP_latencies_list , AP_rise_dvdt_list , AP_fwhm_list, AP_max_dvdt_list, AP_decay_dvdt_list
 
 ########## AP EXTRACTOR MODULES
-def get_window_bounds(peak_location, upshoot_location, array_length, isi_multiplier=3):
+def get_window_bounds(peak_location, upshoot_location, array_length, inter_spike_interval, isi_multiplier=3):
     """
     Define the window around the action potential using a conservative estimate based on the peak location.
     """
-    # Calculate average ISI to estimate the duration of an individual AP
-    average_isi = (peak_location - upshoot_location) * isi_multiplier
-    window_start = max(0, upshoot_location - average_isi)
-    window_end = min(array_length, peak_location + average_isi)
+    # # Calculate average ISI to estimate the duration of an individual AP
+    # average_isi = (peak_location - upshoot_location) * isi_multiplier
+    # window_start = max(0, upshoot_location - average_isi)
+    # window_end = min(array_length, peak_location + average_isi)
+    window_start = max(0, upshoot_location - int(isi_multiplier * inter_spike_interval // 2))
+    window_end   = min(array_length, peak_location + int(isi_multiplier * inter_spike_interval // 2))
     return window_start, window_end
 
-def calculate_fwhm(folder_file, v_array, peak_location, upshoot_location, sampling_rate, sec_to_ms, ap_width_min, ap_width_max):
+def calculate_fwhm(folder_file, v_array, peak_location, upshoot_location, sampling_rate, sec_to_ms,  ap_width_min, ap_width_max,inter_spike_interval):
     """
     Calculate the full width at half maximum (FWHM) of an action potential (AP).
 
@@ -869,7 +889,8 @@ def calculate_fwhm(folder_file, v_array, peak_location, upshoot_location, sampli
 
     # window_start = max(0, upshoot_location - int(window_size / sec_to_ms * sampling_rate))
     # window_end = min(len(v_array), peak_location + int(window_size / sec_to_ms * sampling_rate))
-    window_start, window_end = get_window_bounds(peak_location, upshoot_location, len(v_array))
+
+    window_start, window_end = get_window_bounds(peak_location, upshoot_location, len(v_array), inter_spike_interval)
 
 
     v_window = v_array[window_start:window_end]
@@ -892,7 +913,7 @@ def calculate_fwhm(folder_file, v_array, peak_location, upshoot_location, sampli
         fwhm_start = fwhm_start_candidates[-1]  # The last crossing before the peak
     else:
         warnings.warn("No crossing found before peak for FWHM calculation, setting to NaN.")
-        plot_fwhm(folder_file, v_array, upshoot_location, peak_location, sampling_rate, sec_to_ms)
+        plot_fwhm(folder_file, v_array, upshoot_location, peak_location, sampling_rate, sec_to_ms, inter_spike_interval)
         return np.nan
 
     # Find the crossing after the peak (descending phase)
@@ -902,7 +923,7 @@ def calculate_fwhm(folder_file, v_array, peak_location, upshoot_location, sampli
     else:
         print("No crossing found after peak for FWHM calculation, setting to NaN.")
         # warnings.warn("No crossing found after peak for FWHM calculation, setting to NaN.")
-        # plot_fwhm(folder_file, v_array, upshoot_location, peak_location, sampling_rate, sec_to_ms)
+        # plot_fwhm(folder_file, v_array, upshoot_location, peak_location, sampling_rate, sec_to_ms, inter_spike_interval)
         return np.nan
     
     # Calculate FWHM in ms
@@ -910,7 +931,7 @@ def calculate_fwhm(folder_file, v_array, peak_location, upshoot_location, sampli
 
     return fwhm_ms
 
-def plot_fwhm(folder_file, v_array, upshoot_location, peak_location, sampling_rate, sec_to_ms):
+def plot_fwhm(folder_file, v_array, upshoot_location, peak_location, sampling_rate, sec_to_ms, inter_spike_interval):
     """
     Plot the action potential and the half-maximum level to visualize the FWHM calculation.
 
@@ -922,7 +943,7 @@ def plot_fwhm(folder_file, v_array, upshoot_location, peak_location, sampling_ra
     sec_to_ms (float): Conversion factor from seconds to milliseconds.
     """
 
-    window_start, window_end = get_window_bounds(peak_location, upshoot_location, len(v_array))
+    window_start, window_end = get_window_bounds(peak_location, upshoot_location, len(v_array), inter_spike_interval)
 
     # Ensure the window is valid
     if window_end <= window_start:
@@ -1187,71 +1208,73 @@ def ap_characteristics_extractor_main(folder_file, V_array):
 ########################      RA DETECTION FUNCTION(S)  ####################
 
 
-def build_AP_DF(folder_file, V_array, I_array):
-    '''
-    BASE FUNCTION
-    Builds a df for a single file where each row is an AP with columns for AP charecteristics.
+# def build_AP_DF(folder_file, V_array, I_array, v_thresh):
+#     '''
+#     BASE FUNCTION
+#     Builds a df for a single file where each row is an AP with columns for AP charecteristics.
 
-    Input: 
-        folder_file (str)  : name of unique file identifier
-        V_array (np.ndarray) : 2D voltage array for folder_file, if not supplied fetched
-        I_array (np.ndarray) : 2D voltage array for folder_file, if not supplied fetched
+#     Input: 
+#         folder_file (str)  : name of unique file identifier
+#         V_array (np.ndarray) : 2D voltage array for folder_file, if not supplied fetched
+#         I_array (np.ndarray) : 2D voltage array for folder_file, if not supplied fetched
+#         v_thresh
 
-    Output: 
-        AP_df (pd.DataFrame): 
-                'folder_file':          string inentifier
-                'peak_location':        peak location within sweep
-                'upshoot_location':     upshoot location within sweep
-                'voltage_threshold':    voltage at detected upshoot
-                'slope':                slope of AP 
-                'latency':              time (s) from upshoot to peak             
-                'peak_voltage':         voltage at AP peak
-                'height':               mV height from upshoot to peak
-                'width':                peak full width at half maximum
-                'sweep':                sweep index
-                'I_injected':           pA of current (I) injected
-                'AP_type'               defult to np.NaN otherwise set in this finction to RA
+#     Output: 
+#         AP_df (pd.DataFrame): 
+#                 'folder_file':          string inentifier
+#                 'peak_location':        peak location within sweep
+#                 'upshoot_location':     upshoot location within sweep
+#                 'voltage_threshold':    voltage at detected upshoot
+#                 'slope':                slope of AP 
+#                 'latency':              time (s) from upshoot to peak             
+#                 'peak_voltage':         voltage at AP peak
+#                 'height':               mV height from upshoot to peak
+#                 'width':                peak full width at half maximum
+#                 'sweep':                sweep index
+#                 'I_injected':           pA of current (I) injected
+#                 'AP_type'               defult to np.NaN otherwise set in this finction to RA
 
-    '''
+#     '''
 
-    V_array_adj, I_array_adj = normalise_array_length(V_array, I_array, columns_match=True)
+#     V_array_adj, I_array_adj = normalise_array_length(V_array, I_array, columns_match=True)
     
-    # Extract AP characteristics
-    peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(folder_file, V_array)
+#     # Extract AP characteristics
+#     peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(folder_file, V_array)
 
-    # peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array)
+#     # peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array)
     
-    # Early return if no APs found
-    if np.all(np.isnan(peak_latencies_all)):
-        print (f"No APs detected in voltage trace {folder_file}.")
-        return pd.DataFrame(columns=['folder_file', 'peak_location', 'upshoot_location', 'voltage_threshold',
-           'slope', 'latency', 'peak_voltage', 'height', 'width', 'sweep',
-           'I_injected', 'AP_type'])
+#     # Early return if no APs found
+#     if np.all(np.isnan(peak_latencies_all)):
+#         print (f"No APs detected in voltage trace {folder_file}.")
+#         return pd.DataFrame(columns=['folder_file', 'peak_location', 'upshoot_location', 'voltage_threshold',
+#            'slope', 'latency', 'peak_voltage', 'height', 'width', 'sweep',
+#            'I_injected', 'AP_type'])
 
-    # create list of same length peak_locs_corr_all of the current injected at that peak location #GPT HERE IS MY QUESTION
+#     # create list of same length peak_locs_corr_all of the current injected at that peak location #GPT HERE IS MY QUESTION
 
-    # Create DataFrame of APs
-    AP_df = pd.DataFrame({
-        'folder_file': folder_file,
-        'peak_location': peak_locs_corr_all,
-        'upshoot_location': upshoot_locs_all,
-        'voltage_threshold': v_thresholds_all,
-        'rise_dvdt': peak_rise_all,
-        'max_dvdt': peak_max_dvdt_all,
-        'decay_dvdt': peak_decay_all,
-        'latency': peak_latencies_all,
-        'peak_voltage': peak_voltages_all,
-        'height': peak_heights_all,
-        'width': peak_fw_all,
-        'sweep': sweep_indices_all,
-        'I_injected': [I_array[loc, 0] for loc in peak_locs_corr_all], #sweep index is 0 as I_array is indentical
-        'AP_type': np.NaN  # default 
-    })
+#     # Create DataFrame of APs
+#     AP_df = pd.DataFrame({
+#         'folder_file': folder_file,
+#         'peak_location': peak_locs_corr_all,
+#         'upshoot_location': upshoot_locs_all,
+#         'voltage_threshold': v_thresholds_all,
+#         'rise_dvdt': peak_rise_all,
+#         'max_dvdt': peak_max_dvdt_all,
+#         'decay_dvdt': peak_decay_all,
+#         'latency': peak_latencies_all,
+#         'peak_voltage': peak_voltages_all,
+#         'height': peak_heights_all,
+#         'width': peak_fw_all,
+#         'sweep': sweep_indices_all,
+#         'I_injected': [I_array[loc, 0] for loc in peak_locs_corr_all], #sweep index is 0 as I_array is indentical
+#         'AP_type': np.NaN  # default 
+#     })
 
-    # Classify APs as 'RA_true' if threshold < -65 mV and AP_turn around > 20mV                        #HARD CODE
-    AP_df.loc[(AP_df['voltage_threshold'] < -65) & (AP_df['peak_voltage'] > 20), 'AP_type'] = 'RA'
+#     # Classify APs as 'RA_true' if threshold < -65 mV and AP_turn around > 20mV  
+
+#     AP_df.loc[(v_thresh < -65) & (AP_df['peak_voltage'] > 20), 'AP_type'] = 'RA'
     
-    return AP_df
+#     return AP_df
 
 
 
@@ -1407,6 +1430,7 @@ def extract_FI_x_y(folder_file, V_array, I_array, sampeling_rate):
                 return np.nan, np.nan, np.nan, np.nan
         else:
             I_step = I_sweep[non_zero_indices[0]+1]
+            I_step = int(round(I_step / 10.0)) * 10 # round to nearest 10pA
             V_rest_indices = np.where(I_sweep == 0)[0]
         I_steps.append(int(I_step))
 
@@ -1435,10 +1459,10 @@ def extract_FI_x_y(folder_file, V_array, I_array, sampeling_rate):
     return I_steps , AP_frequencies_Hz, V_rest , off_step_peak_locs
 
 
-def correct_I_offset(I_array_adj, folder_file, threshold_pA=1.0):
+def correct_I_offset_IF(I_array_adj,  threshold_pA=1.0):
     """
     Corrects for baseline offset in I_array_adj by subtracting the mean
-    of the flattest sweep, if the offset exceeds a given threshold.
+    of the flattest sweep, if the offset exceeds a given threshold. For IF step data. 
     """
     flattest_idx = np.argmin([np.std(I_array_adj[:, i]) for i in range(I_array_adj.shape[1])])
     offset = np.mean(I_array_adj[:, flattest_idx])
@@ -1450,6 +1474,8 @@ def correct_I_offset(I_array_adj, folder_file, threshold_pA=1.0):
         offset = 0
 
     return I_array_adj, offset
+
+
 
 def denoise_steps(I_array_adj):
     """

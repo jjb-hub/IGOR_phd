@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import ClassVar
+import itertools
 # from Cachable import Cachable
 from itertools import cycle
 import statsmodels.api as sm
@@ -59,20 +60,27 @@ class DataSelection (Cachable):
         self.output_dir = self._checkFileSystem("output")
         self.figure_output_dir = self._checkFileSystem("figures")
 
-        self.FP_df = FP(self.project).df
-        self.APP_df = APP(self.project).df
-        #addd Hunter when ready
-        self.cell_df = Ephys(self.project).df
-        # super().__post_init__()
+        # # here only the required function for data type should be selected
+        if self.data_type in ['FP', 'APP']:
+            self.FP_df = FP(self.project).df
+            self.APP_df = APP(self.project).df #can add pAD hunter
+
+
+        self.cell_df = Ephys(self.project).df         
+        
+
         self.validate_inputs()
         self.valid_files, self.valid_cell_ids = self.get_valid_folder_files()
         self.agg_df = self.get_filtered_data()
         self.treatment_count_df = self.generate_treatment_count_df()
 
     def validate_inputs(self):
-        if self.data_type not in ['FP', 'APP']: #TODO add pAD_hunter
-            raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of ['FP', 'APP'].")
-        valid_df = self.cell_df[self.cell_df[f'{self.data_type}_valid'].notna()]
+        if self.data_type not in ['FP', 'APP', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ]: #complete list of data types
+            raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of ['FP', 'APP', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC'].")
+        
+        if self.data_type in ["FP", "APP"]: #TODO file validator inbuild fo project_type = application only needs to be cleaned
+            valid_df = self.cell_df[self.cell_df[f'{self.data_type}_valid'].notna()] 
+        
         def validate_attribute(attribute, column_name):
             if attribute is not None:
                 valid_values = valid_df[column_name].unique()
@@ -82,6 +90,7 @@ class DataSelection (Cachable):
                         raise ValueError(f"Invalid {column_name}(s): {invalid_values}. Must be within {list(valid_values)}.")
                 elif attribute not in valid_values:
                     raise ValueError(f"Invalid {column_name}: {attribute}. Must be within {list(valid_values)}.")
+                
         validate_attribute(self.cell_type, 'cell_type')
         validate_attribute(self.treatment, 'treatment')
         validate_attribute(self.cell_subtype, 'cell_subtype')
@@ -96,7 +105,8 @@ class DataSelection (Cachable):
             raise ValueError(f"{valid_column} column does not exist in cell_df.")
         
         filtered_cell_df = self.cell_df.copy()
-        #apply filters 
+        
+        #apply filters if set
         if self.cell_type is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['cell_type'].isin([self.cell_type] if isinstance(self.cell_type, str) else self.cell_type)]
         if self.treatment is not None:
@@ -106,7 +116,7 @@ class DataSelection (Cachable):
         if self.I_set is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['I_set'].isin([self.I_set] if isinstance(self.I_set, str) else self.I_set)]
         if self.threshold_access_change is not None:
-            filtered_cell_df = filtered_cell_df[filtered_cell_df['access_change'].abs() <= self.threshold_access_change]
+            filtered_cell_df = filtered_cell_df[filtered_cell_df['Rs_pct_change'].abs() <= self.threshold_access_change]
 
         valid_cell_ids = filtered_cell_df['cell_id'].tolist()
         valid_files = filtered_cell_df[valid_column].dropna().tolist()
@@ -122,10 +132,15 @@ class DataSelection (Cachable):
         Fetches the data_type _df, filters and restructures it.
         Returns an aggregated df for stats and plotting (one row per cell_id and time).
         """
-        if self.data_type == 'APP':
+        if self.data_type == 'ramp_IC':
+            self.ramp_IC_df = Project(self.project).ramp_IC_df
+
+        
+
+        elif self.data_type == 'APP':
             filtered_df = self.APP_df[self.APP_df['folder_file'].isin(self.valid_files)].copy()
             timepoints = ['PRE', 'APP', 'WASH']
-            sweep_vars = ['AP_count', 'RA_count', 'RMP']#, 'inputR']
+            sweep_vars = ['AP_count', 'RA_count', 'SAP_count', 'RMP'] #, 'inputR']
             reshaped_data = []
 
             for timepoint in timepoints:
@@ -167,70 +182,6 @@ class DataSelection (Cachable):
             agg_APP_df = pd.concat(reshaped_data, ignore_index=True)
             agg_APP_df = self.add_cell_mapping(agg_APP_df)
             return agg_APP_df
-
-    # def get_filtered_data(self):
-    #     """
-    #     Fetches the data_type _df and filters it and returns restructured aggergate df for stats and plotting (one row for each cell_id and time).
-    #     """
-    #     # valid_files, valid_cell_ids = self.get_valid_folder_files()
-        
-    #     if self.data_type == 'APP':
-    #         filtered_df = self.APP_df[self.APP_df['folder_file'].isin(self.valid_files)]
-    #         #column names {dependant_vairable}_{time}
-    #         timepoints = ['PRE', 'APP', 'WASH']
-    #         columns = {
-    #         'RMP': 'RMP',
-    #         'inputR': 'inputR',
-    #         'RAcount': 'RA_count', #should becopme redundant? no need for hist plEASE MODIFY HIST
-    #         'APcount': 'AP_count', #
-    #         'sweep_AP_count': 'sweep_AP_count',
-    #         # 'sweep_RA_count': 'sweep_RA_count', 
-    #         }
-    #         reshaped_data = []
-
-    #         for timepoint in timepoints:
-    #             # time_specific_columns = {f'{var}_{timepoint}': name for var, name in columns.items() if f'{var}_{timepoint}' in filtered_df.columns}
-                
-    #             # existing_columns = [col for col in time_specific_columns.keys() if col in filtered_df.columns]
-    #             # current_data = filtered_df[['cell_id'] + existing_columns].copy()
-    #             # current_data['time'] = timepoint
-    #             # current_data.rename(columns=time_specific_columns, inplace=True)
-    #             # # aggregate mean data
-    #             # for col in ['RMP', 'inputR']:
-    #             #     if col in current_data.columns:
-    #             #         current_data[f'sweep_{col}'] = current_data[col]
-    #             #         current_data[col] = current_data[col].apply(lambda x: np.nanmean(x) if isinstance(x, list) and len(x) > 0 else (np.nan if isinstance(x, list) else x))
-                
-
-
-    #             for base in ['AP_count', 'RA_count', 'RMP', 'inputR']: 
-    #                 count_col = f'sweep_{base}'
-    #                 if count_col in filtered_df.columns:
-
-    #                     # Drop rows where count_col is NaN or not list/array-like, print dropped cell_ids. #TEMP TO DO ENSURE ALL LISTS OF 0 not np.nan if no APs
-    #                     mask_invalid = filtered_df[count_col].apply(lambda x: not isinstance(x, (list, np.ndarray)))
-    #                     dropped_cells = filtered_df.loc[mask_invalid, 'cell_id'].unique()
-    #                     if len(dropped_cells) > 0:
-    #                         print(f"Dropping cells with invalid {count_col}: {dropped_cells}")
-
-    #                     filtered_df = filtered_df.loc[~mask_invalid].copy()
-
-    #                     current_data[count_col] = filtered_df.apply(
-    #                         lambda row: (
-    #                             row[count_col][:int(row.get('drug_in', 0))] if timepoint == 'PRE' else
-    #                             row[count_col][int(row.get('drug_in', 0)):int(row.get('drug_out', len(row[count_col])))] if timepoint == 'APP' else
-    #                             row[count_col][int(row.get('drug_out', len(row[count_col]))):]
-    #                         ),
-    #                         axis=1
-    #                     )
-                                
-
-    #             reshaped_data.append(current_data)
-                
-    #         agg_APP_df = pd.concat(reshaped_data, ignore_index=True)
-    #         agg_APP_df = self.add_cell_mapping(agg_APP_df)
-
-    #         return agg_APP_df
         
 
         elif self.data_type == 'FP':
@@ -387,12 +338,16 @@ class DataSelection (Cachable):
         'AP_type': 'somatic'  
         })
         try:
-            valid_FP_folder_files = self.cell_df[self.cell_df['cell_id']==cell_id]['FP_valid'].values[0][:2]
-            mean_voltage_threshold = self.FP_df[self.FP_df['folder_file'].isin(valid_FP_folder_files)]['voltage_threshold'].explode().astype(float).mean()
-            AP_df.loc[(AP_df['voltage_threshold'] < mean_voltage_threshold-20 ), 'AP_type'] = 'RA'
+            FP_cell_id_PRE = self.FP_df[(self.FP_df['cell_id'] == cell_id) & (self.FP_df['treatment'] == 'PRE')]
+            cell_threshold = (FP_cell_id_PRE['voltage_threshold'].apply(lambda x: sum(x) / len(x) if isinstance(x, list) else x)).mean()
+
+            # valid_FP_folder_files = self.cell_df[self.cell_df['cell_id']==cell_id]['FP_valid'].values[0][:2]
+            # mean_voltage_threshold = self.FP_df[self.FP_df['folder_file'].isin(valid_FP_folder_files)]['voltage_threshold'].explode().astype(float).mean()
+
+            AP_df.loc[(AP_df['voltage_threshold'] < cell_threshold-20 ), 'AP_type'] = 'RA'
         except(IndexError, TypeError):
-            print(f" Cell {cell_id} has no valid FP to assess voltage threshold, setting RMP<-60mV")
-            AP_df.loc[(AP_df['voltage_threshold'] < -60) , 'AP_type'] = 'RA'
+            print(f" Cell {cell_id} has no valid FP to assess voltage threshold, setting RMP<-65mV")
+            AP_df.loc[(AP_df['voltage_threshold'] < -65) , 'AP_type'] = 'RA'
 
         if file_data_type == 'FP':
             AP_df_positive = AP_df[AP_df['I_injected'] > 0].iloc[:20] #HARD CODE keeping first 20 APs on + I step
@@ -439,9 +394,9 @@ class Figure(DataSelection):
             return df
     
     def check_valid_dependant_var(self):
-            if self.dependant_var not in self.agg_df.columns:
-                dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'I_set']]#HARD CODE
-                raise ValueError(f"Invalid dependant variable: {self.dependant_var}. Valid dv's : {dvs}")
+        if self.dependant_var not in self.agg_df.columns:
+            dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'I_set']]#HARD CODE
+            raise ValueError(f"Invalid dependant variable: {self.dependant_var}. Valid dv's : {dvs}")
             
     def get_pre_post_sweep_windows(self,
         df: pd.DataFrame,
@@ -450,48 +405,294 @@ class Figure(DataSelection):
         post_sweep_window: int | None = None,
         verbose: bool = True
         ):
-        '''Determine pre and post sweep windows and filter df to ensure each cell has sufficient sweeps.'''
+        """
+        Determine pre and post sweep windows and filter df to ensure each cell has sufficient sweeps.
+        If pre or post sweep window is not provided, the minimum available for all cells is used.
+        A cell is kept only if it has >= pre_sweep_window PRE sweeps and >= post_sweep_window (APP + WASH) sweeps.
+        """
         filtered_df = df.copy()
 
-        # --- PRE ---
+        # Calculate default pre_sweep_window
         if pre_sweep_window is None:
-            pre_sweep_window = filtered_df.loc[filtered_df['time'] == 'PRE', dependant_var].map(len).min()
+            pre_sweep_window = (
+                filtered_df.loc[filtered_df["time"] == "PRE", dependant_var]
+                .map(len)
+                .groupby(filtered_df["cell_id"])
+                .min()
+                .min()
+            )
             if verbose:
                 print(f"pre_sweep_window set to {pre_sweep_window}")
-        else:
-            pre_mask = ~((filtered_df['time'] == 'PRE') & 
-                        (filtered_df[dependant_var].map(len) < pre_sweep_window))
-            dropped_pre = filtered_df.loc[~pre_mask & (filtered_df['time'] == 'PRE'), 'cell_id'].unique()
-            if len(dropped_pre) > 0 and verbose:
-                print(f"Dropping {len(dropped_pre)} cells due to insufficient PRE sweeps (<{pre_sweep_window}): {list(dropped_pre)}")
-            filtered_df = filtered_df[pre_mask]
 
-        # --- POST ---
+        #  cells with enough PRE data
+        pre_counts = (
+            filtered_df.loc[filtered_df["time"] == "PRE"]
+            .groupby("cell_id")[dependant_var]
+            .apply(lambda x: x.map(len).sum())
+        )
+        sufficient_pre_cells = pre_counts[pre_counts >= pre_sweep_window].index.tolist()
+
+        # Calculate default post_sweep_window
         if post_sweep_window is None:
-            def _combined_len(df):
-                app_len = df.loc[df['time'] == 'APP', dependant_var].map(len).values
-                wash_len = df.loc[df['time'] == 'WASH', dependant_var].map(len).values
-                total = (app_len[0] if len(app_len) else 0) + (wash_len[0] if len(wash_len) else 0)
-                return total
+            def get_total_post_sweeps(group):
+                return group.loc[group["time"].isin(["APP", "WASH"]), dependant_var].map(len).sum()
 
-            grouped = filtered_df.groupby('cell_id')
-            post_lengths = grouped.apply(_combined_len)
-            post_sweep_window = post_lengths.min()
+            post_counts = filtered_df.groupby("cell_id").apply(get_total_post_sweeps)
+            post_sweep_window = post_counts.min()
             if verbose:
-                print(f"post_sweep_window set to {post_sweep_window}")
-        else:
-            def _sufficient_post(row):
-                if row['time'] not in ('APP', 'WASH'):
-                    return True
-                return len(row[dependant_var]) >= post_sweep_window
+                print(f"post_sweep_window default calculated: {post_sweep_window}")
 
-            post_mask = filtered_df.apply(_sufficient_post, axis=1)
-            dropped_post = filtered_df.loc[~post_mask & (filtered_df['time'].isin(['APP', 'WASH'])), 'cell_id'].unique()
-            if len(dropped_post) > 0 and verbose:
-                print(f"Dropping {len(dropped_post)} cells due to insufficient POST sweeps (<{post_sweep_window}): {list(dropped_post)}")
-            filtered_df = filtered_df[post_mask]
+        #  cells with enough POST data 
+        def has_enough_post(group):
+            return group.loc[group["time"].isin(["APP", "WASH"]), dependant_var].map(len).sum()
+
+        post_counts = filtered_df.groupby("cell_id").apply(has_enough_post)
+        sufficient_post_cells = post_counts[post_counts >= post_sweep_window].index.tolist()
+
+        # Intersect both criteria 
+        valid_cells = sorted(set(sufficient_pre_cells) & set(sufficient_post_cells))
+
+        # Verbose output for dropped cells 
+        all_cells = filtered_df["cell_id"].unique().tolist()
+        dropped_cells = sorted(set(all_cells) - set(valid_cells))
+        if verbose and dropped_cells:
+            print(f"Dropping {len(dropped_cells)} cells due to insufficient PRE or POST sweeps: {dropped_cells}")
+
+        filtered_df = filtered_df[filtered_df["cell_id"].isin(valid_cells)]
 
         return filtered_df, pre_sweep_window, post_sweep_window
+
+    def build_pre_post_df(self, df: Optional[pd.DataFrame] = None, slice: bool = True) -> pd.DataFrame:
+        '''
+        Builds a DataFrame with PRE and POST sweeps for each cell_id.
+
+        Parameters:
+            df (pd.DataFrame, optional): DataFrame to process. If None, uses self.data.
+            slice (bool, optional): If True, slices to uniform pre/post sweep window sizes. 
+                                    If False, uses full APP+WASH as POST, but still slices PRE.
+
+        Returns: 
+            pd.DataFrame with columns: cell_id, PRE_sweeps, POST_sweeps
+        '''
+        if df is None:
+            df = self.data
+
+        if slice:
+            df, self.pre_sweep_window, self.post_sweep_window = self.get_pre_post_sweep_windows(
+                df, 
+                dependant_var=self.dependant_var, 
+                pre_sweep_window=self.pre_sweep_window, 
+                post_sweep_window=self.post_sweep_window
+            )
+        else:
+            _, self.pre_sweep_window, self.post_sweep_window = self.get_pre_post_sweep_windows( #return but dont use filtered_df
+                df, 
+                dependant_var=self.dependant_var, 
+                pre_sweep_window=self.pre_sweep_window, 
+                post_sweep_window=self.post_sweep_window
+            )
+
+        rows = []
+        for cell_id, sub_df in df.groupby('cell_id'):
+            try:
+                pre_vals = sub_df[sub_df['time'] == 'PRE'][self.dependant_var].values[0]
+                app_vals = sub_df[sub_df['time'] == 'APP'][self.dependant_var].values[0]
+                wash_vals = sub_df[sub_df['time'] == 'WASH'][self.dependant_var].values[0]
+            except IndexError:
+                print(f"Skipping cell {cell_id} due to missing timepoints.")
+                continue
+
+            pre = pre_vals[-self.pre_sweep_window:] if self.pre_sweep_window is not None else pre_vals
+
+            if slice:
+                post = app_vals[:self.post_sweep_window]
+                if len(post) < self.post_sweep_window:
+                    post = np.concatenate([post, wash_vals[:self.post_sweep_window - len(post)]])
+            else:
+                post = np.concatenate([app_vals, wash_vals])
+
+            if len(pre) == 0 or len(post) == 0:
+                print(f"Skipping cell {cell_id} due to empty PRE or POST sweeps.")
+                continue
+
+            rows.append({
+                'cell_id': cell_id,
+                'dependant_var': self.dependant_var,
+                'PRE_sweeps': pre,
+                'POST_sweeps': post,
+            })
+
+        return pd.DataFrame(rows)
+
+
+
+    def group_consecutive_responses(self, bin_results: list[dict]) -> list[dict]:
+        # Drop NaN responses
+        bin_results = [br for br in bin_results if pd.notna(br['response'])]
+
+        # Sort by bin start index
+        bin_results.sort(key=lambda x: x['range_sweeps'][0])
+        grouped = []
+
+        for _, group in itertools.groupby(
+            enumerate(bin_results),
+            key=lambda x: (x[0] - x[1]['range_sweeps'][0], x[1]['response'])  # group by consecutive and same response
+        ):
+            group = [x[1] for x in group]
+            cell_id = group[0]['cell_id']
+            pre = group[0]['PRE_sweeps']
+            post = group[0]['POST_sweeps']
+            response_type = group[0]['response']
+
+            start_sweep = group[0]['range_sweeps'][0]
+            end_sweep = group[-1]['range_sweeps'][1] + 1
+
+            # Deltas
+            deltas = [g['delta'] for g in group]
+            mean_delta = np.mean(deltas)
+            max_delta = np.max(deltas)
+
+            # Handle p-values
+            p_vals = [g['p_val'] for g in group if g['p_val'] is not None]
+            if p_vals:
+                p_val = np.min(p_vals)
+                # Latency is first bin with p ≤ threshold
+                latency_sweep = next(
+                    (g['range_sweeps'][0] for g in group if g['p_val'] is not None and g['p_val'] <= self.p_thresh),
+                    start_sweep
+                )
+            else:
+                # No valid p-values: fallback to start of group
+                p_val = None
+                latency_sweep = start_sweep
+
+            grouped.append({
+                'cell_id': cell_id,
+                'dependant_var': self.dependant_var,
+                'PRE_sweeps': pre,
+                'POST_sweeps': post,
+                'response': response_type,
+                'mean_delta': mean_delta,
+                'max_delta': max_delta,
+                'p_val': p_val,
+                'latency_sweeps': latency_sweep,
+                'range_sweeps': (start_sweep, end_sweep)
+            })
+
+        return grouped
+
+
+
+
+    def get_responses(self, df) -> pd.DataFrame:  #take in pre_post_bins filtered or not but df with just cell_id pre post
+        result_rows = []
+
+        for _, row in df.iterrows():
+            pre = row['PRE_sweeps']
+            post = row['POST_sweeps']
+            cell_id = row['cell_id']
+
+            if self.dynamic_search:
+                bin_results = self.analyze_post_bins(pre, post, cell_id) #sliding window analysis, t-test and filter on diff_threshold
+                grouped = self.group_consecutive_responses(bin_results)
+                if grouped:
+                    result_rows.extend(grouped)
+                else:
+                    # print(f"No significant bins found for {cell_id}")
+                    result_rows.append({
+                        'cell_id': cell_id,
+                        'dependant_var': self.dependant_var,
+                        'PRE_sweeps': pre,
+                        'POST_sweeps': post, 
+                        'response': 'no response',
+                        'p_val': 1.0,
+                        'latency_sweeps': None,
+                        'range_sweeps': None
+                    })
+            else:
+                if '_count' in self.dependant_var: # no stats for cpunts to avoid 0 lists
+                    pre_mean = np.mean(pre)
+                    post_mean = np.mean(post)
+                    mean_diff = post_mean - pre_mean
+                    response = 'no response'
+                    if abs(mean_diff) >= self.diff_thresh:
+                        response = 'increase' if mean_diff > 0 else 'decrease'
+
+                    result = {
+                        'response': response,
+                        'mean_diff': mean_diff,
+                        'p_val': np.nan
+                    }
+                else:
+                    result = Stats(
+                        p_thresh=self.p_thresh,
+                        diff_thresh=self.diff_thresh
+                    ).welchs_t_test(pre, post)
+
+                    result_rows.append({
+                        'cell_id': cell_id,
+                        'dependant_var': self.dependant_var,
+                        'PRE_sweeps': pre,
+                        'POST_sweeps': post,
+                        'response': result['response'],
+                        'delta': result['mean_diff'] if self.dependant_var != 'sweep_inputR' else result['percent_diff'],
+                        'p_val': result['p_val'],
+                        'latency_sweeps': 0,
+                        'range_sweeps': (0, len(post))
+                    })
+
+        return pd.DataFrame(result_rows)
+    
+    def get_unit(self): 
+        if self.dependant_var == 'sweep_inputR':
+            return '%'
+        elif self.dependant_var == 'sweep_RMP':
+            return 'mV'
+        else:
+            return 'Hz'
+        
+    def analyze_post_bins(self, pre: np.ndarray, post: np.ndarray, cell_id: str) -> list[dict]:
+        results = []
+        n_bins = len(post) - self.bin_width + 1
+        pre_mean = np.mean(pre)
+
+        for i in range(n_bins):
+            bin_post = post[i:i + self.bin_width]  # sliding window of bin_width
+            if '_count' in self.dependant_var: #HARD HACKY TODO  
+                post_mean = np.mean(bin_post)
+                mean_diff = post_mean - pre_mean
+
+                if abs(mean_diff) >= self.diff_thresh:
+                    response = 'increase' if mean_diff > 0 else 'decrease'
+                else:
+                    response = 'no response'
+
+                result = {
+                    'response': response,
+                    'mean_diff': mean_diff,
+                    'p_val': None
+                }
+
+            else:
+                result = Stats(
+                    p_thresh=self.p_thresh,
+                    diff_thresh=self.diff_thresh,
+                    percentage_threshold= False if self.dependant_var != 'sweep_inputR' else True
+                ).welchs_t_test(pre, bin_post)
+
+            results.append({
+                'cell_id': cell_id,
+                'PRE_sweeps': pre,
+                'POST_sweeps': post,
+                'response': result['response'],
+                'delta':result['mean_diff'] if self.dependant_var != 'sweep_inputR' else result['percent_diff'],
+                'p_val': result['p_val'],
+                'latency_sweeps': i,  # start sweep index of the bin
+                'range_sweeps': (i, i + self.bin_width)  
+            })
+
+        return results
+
 
     
     def save_plot(self, fig, filename: str, formats=('png', 'svg')):
@@ -512,9 +713,165 @@ class Figure(DataSelection):
             fig.savefig(filepath, format=fmt, bbox_inches='tight', dpi=300)
         plt.close(fig)
         print(f"Saved figure: {filename} in formats: {formats}")
+   
+
+@dataclass
+class ResponseCharecterisation(Figure):
+    '''Extends cell_df with response charecterisation of multiple dependant vairables (dependant_vars) and corresponding thresholds (diff_thresholds)
+    '''
+    filename: str = None
+    n_minimum: float = field(kw_only = True, default = 3)
+    pre_sweep_window: int = None # window before and after drug_in
+    post_sweep_window: int = None 
+
+    diff_threshs: list[int] = field(kw_only=True) # ie 3mV RMP 0 AP_count
+    diff_thresh: int = field(kw_only = True, default = 0) # ie 3mV difference required to consider it a response 
+
+    dependant_vars: list[str] = field(kw_only=True)
+    dependant_var: str = field(init=False)  # will be set in __post_init__
+
+    p_thresh: float = field(kw_only = True, default = 0.05)
+    dynamic_search: bool = field(kw_only=True, default=False)
+    bin_width: int = field(kw_only=True, default=3)
 
 
 
+    def __post_init__(self):
+        self.filename = f"{self.dependant_vars}_{self.cell_type}_{self.treatment}_response"
+        self.slice = False if self.dynamic_search else True 
+        
+        super().__post_init__()
+        self.response_df = self.aggregate_cell_responses() #long format of significant bins for each dependant variable
+        self.response_cell_df = self.build_responder_cell_df() # added columns to cell_df for cell_ids in response_df
+        self.plot_functional_response_pie()
+
+    def aggregate_cell_responses(self):
+        dv_dfs = []
+        for dependant_var, diff_thresh in zip(self.dependant_vars, self.diff_threshs):
+            self.dependant_var = f"sweep_{dependant_var}"
+            self.diff_thresh = diff_thresh
+
+            data = self.filter_n_minimum(self.agg_df)
+            pre_post_df = self.build_pre_post_df(data, slice=self.slice)
+            dv_response_df = self.get_responses(pre_post_df)
+            dv_dfs.append(dv_response_df)
+
+        return pd.concat(dv_dfs, ignore_index=True)
+
+    def build_responder_cell_df(self):
+        """
+        Returns a subset of self.cell_df containing only cell_ids present in self.response_df,
+        with one response column and one latency column per dependant variable,
+        plus a boolean 'responder' column and a global 'response' summary column.
+        """
+        included_cells = self.response_df['cell_id'].unique()
+        temp_cell_df = self.cell_df[self.cell_df['cell_id'].isin(included_cells)].copy()
+
+        valid_responses = {'increase', 'decrease', 'biphasic'}
+
+        for dv in self.dependant_vars:
+            full_var_name = f"sweep_{dv}"
+            sub_df = self.response_df[self.response_df['dependant_var'] == full_var_name].copy()
+
+            # Lowercase all responses
+            sub_df['response'] = sub_df['response'].str.lower()
+
+            # Fill response per cell_id
+            response_series = sub_df.groupby('cell_id')['response'].apply(
+                lambda resps: (
+                    'biphasic' if {'increase', 'decrease'}.issubset(set(resps.dropna()))
+                    else resps.dropna().unique()[0] if len(resps.dropna().unique()) >= 1
+                    else 'no response'
+                )
+            ).reindex(temp_cell_df['cell_id'])
+
+            temp_cell_df[dv] = response_series.values
+
+            # Latency (min latency_sweeps for valid responses)
+            latency_series = sub_df[~sub_df['response'].isin(['no response', np.nan])].groupby('cell_id')['latency_sweeps'].min()
+            latency_series = latency_series.reindex(temp_cell_df['cell_id'])
+            temp_cell_df[f"{dv}_latency"] = latency_series.values
+
+        # Responder: True if any DV is not 'no response' or nan
+        def is_responder(row):
+            return any(val in valid_responses for val in row[self.dependant_vars])
+        
+        temp_cell_df['responder'] = temp_cell_df.apply(is_responder, axis=1)
+
+        def categorize_response_multiple_dvs(row, dvs=('RMP', 'AP_count')):
+            values = {row[dv].lower().strip() for dv in dvs}
+            if 'increase' in values and 'decrease' in values:
+                return 'mixed'
+            if 'biphasic' in values:
+                return 'mixed'
+            if values <= {'increase', 'no response'}:
+                return 'excitatory'
+            if values <= {'decrease', 'no response'}:
+                return 'inhibitory'
+            return 'no response'
+
+        temp_cell_df['response'] = temp_cell_df.apply(
+            lambda row: categorize_response_multiple_dvs(row) if row['responder'] else np.nan, axis=1
+        )
+        return temp_cell_df
+
+
+
+    def plot_functional_response_pie(self):
+        """
+        Plots a pie chart showing the distribution of functional response types
+        ('excitatory', 'inhibitory', 'mixed', 'no response') from self.response_cell_df
+        """
+        response_series = self.response_cell_df['response'].fillna('no response').str.lower()
+        counts = response_series.value_counts()
+        total_n = len(response_series)
+
+        # Define colors
+        colors = {
+            'excitatory': 'salmon',
+            'inhibitory': 'deepskyblue',
+            'mixed': 'mediumorchid',
+            'no response': 'whitesmoke'
+        }
+        pie_colors = [colors.get(label, 'gray') for label in counts.index]
+
+        # Print cell IDs for each category
+        for label in ['excitatory', 'inhibitory', 'mixed', 'no response']:
+            matching_cells = self.response_cell_df.loc[
+                response_series == label, 'cell_id'
+            ].tolist()
+            print(f"{label} cells ({len(matching_cells)}): {matching_cells}")
+
+        def format_autopct(pct):
+            count = int(round(pct * total_n / 100.0))
+            return f'{pct:.1f}%\n({count})' #/{total_n}
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+        counts.plot.pie(
+            autopct=format_autopct,
+            startangle=90,
+            ylabel='',
+            textprops={'fontsize': 12},
+            colors=pie_colors,
+            ax=ax
+        )
+
+        ax.set_title(f"{self.cell_type} response to {self.treatment} \n(n={total_n})", fontsize=14)
+
+        fig.text(0.5, 0.06, f"Significant response > {self.dependant_vars} for {self.diff_threshs}", 
+                ha='center', fontsize=10, style='italic')
+
+        fig.text(0.5, 0.02, 
+                f"PRE sweep window: {self.pre_sweep_window}   |   POST sweep window: {None if self.dynamic_search else self.post_sweep_window}",
+                ha='center', fontsize=10, style='italic')
+
+        plt.tight_layout()
+        plt.show()
+        self.save_plot(fig, self.filename + '_functional_pie')
+
+
+
+    
 @dataclass
 class ApplicationResponse(Figure):
     filename: str = None
@@ -523,130 +880,76 @@ class ApplicationResponse(Figure):
     pre_sweep_window: int = None # window before and after drug_in
     post_sweep_window: int = None 
     diff_thresh: int = field(kw_only = True, default = 0) # ie 3mV difference required to consider it a response 
-    labels: list = field(kw_only=True, default_factory=lambda: ['increase', 'decrease'])
+
     dependant_var: str = field(init=False)  # will be set in __post_init__
     p_thresh: float = field(kw_only = True, default = 0.05)
+    dynamic_search: bool = field(kw_only=True, default=False)
+    bin_width: int = field(kw_only=True, default=3)
 
     def __post_init__(self):
         self.dependant_var = f"sweep_{self.response_var}"
         self.filename = f"{self.dependant_var}_{self.cell_type}_{self.treatment}_response"
+        self.slice = True if self.dynamic_search else False 
         
         super().__post_init__()
         self.check_valid_dependant_var()
         self.data = self.filter_n_minimum(self.agg_df)
-        self.response_df = self.get_responses()
+        self.pre_post_df = self.build_pre_post_df(slice=self.slice) #update hist after TODO SLICE PRE but not post! when slice=False
+        self.response_df = self.get_responses(self.pre_post_df)
         self.fig = self.plot_pie()
     
-    def get_responses(self):
-
-        self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=self.dependant_var, pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
-        
-        
-        # # DEFINE SWEEP PRE POST WINDOWS
-        # if getattr(self, 'pre_sweep_window', None) is None:
-        #     pre_sweep_window = self.data.loc[self.data['time'] == 'PRE', self.dependant_var].map(len).min()
-        #     print(f"pre_sweep_window set to {pre_sweep_window}.")
-        # else:
-        #     pre_sweep_window = self.pre_sweep_window
-        #     pre_mask = ~((self.data['time'] == 'PRE') & 
-        #                 (self.data[self.dependant_var].map(len) < pre_sweep_window))
-        #     dropped_pre_cells = self.data.loc[
-        #         (self.data['time'] == 'PRE') & (~pre_mask), 'cell_id'
-        #     ].unique()
-        #     if len(dropped_pre_cells) > 0:
-        #         print(f"Dropping {len(dropped_pre_cells)} cells due to insufficient PRE sweeps (<{pre_sweep_window}): {list(dropped_pre_cells)}")
-        #     self.data = self.data[pre_mask]
-
-        
-        # # Handle post_sweep_window
-        # if getattr(self, 'post_sweep_window', None) is None:
-            
-        #     def _combined_len(df): # Get min length of combined APP + WASH sweeps for each cell
-        #         app_len = df.loc[df['time'] == 'APP', self.dependant_var].map(len).values
-        #         wash_len = df.loc[df['time'] == 'WASH', self.dependant_var].map(len).values
-        #         total = 0 # Sum lengths or 0 if empty
-        #         if len(app_len) > 0:
-        #             total += app_len[0]
-        #         if len(wash_len) > 0:
-        #             total += wash_len[0]
-        #         return total
-
-        #     grouped = self.data.groupby('cell_id')
-        #     post_lengths = grouped.apply(_combined_len)
-        #     post_sweep_window = post_lengths.min()
-        #     print(f"post_sweep_window set to {post_sweep_window}.")
-        # else:
-        #     post_sweep_window = self.post_sweep_window
-            
-        #     def _sufficient_post(row):
-        #         if row['time'] not in ('APP', 'WASH'):
-        #             return True  # don't filter non-post rows
-        #         return len(row[self.dependant_var]) >= post_sweep_window
-
-        #     post_mask = self.data.apply(_sufficient_post, axis=1)
-        #     dropped_post_cells = self.data.loc[
-        #         ~post_mask & (self.data['time'].isin(['APP', 'WASH'])),
-        #         'cell_id'
-        #     ].unique()
-        #     if len(dropped_post_cells) > 0:
-        #         print(f"Dropping {len(dropped_post_cells)} cells due to insufficient POST sweeps (<{post_sweep_window}): {list(dropped_post_cells)}")
-        #     self.data = self.data[post_mask]  
-
-        # def _get_sweeps(df, time_label):
-        #     row = df[df['time'] == time_label]
-        #     return row[self.dependant_var].values[0] if not row.empty else []
-        
-
-        result_rows = []
-        for cell_id, sub_df in self.data.groupby('cell_id'):
-            pre = sub_df[sub_df['time'] == 'PRE'][self.dependant_var].values[0][-pre_sweep_window:]
-            post = sub_df[sub_df['time'] == 'APP'][self.dependant_var].values[0][:post_sweep_window]
-            # pre = _get_sweeps(sub_df, 'PRE')[-pre_sweep_window:]
-            # post = _get_sweeps(sub_df, 'APP')[:post_sweep_window]
-
-            if len(post) < post_sweep_window:
-                post = np.concatenate([post, sub_df[sub_df['time'] == 'WASH'][self.dependant_var].values[0][:post_sweep_window - len(post)]])
-                # post = np.concatenate([post, _get_sweeps(sub_df, 'WASH')[:post_sweep_window - len(post)]])
-
-
-            if len(pre) == 0 or len(post) == 0:
-                print(f"Skipping cell {cell_id} due to empty PRE or POST sweeps.")
-                continue
-
-
-            result = Stats(p_thresh=self.p_thresh, diff_thresh=self.diff_thresh).welchs_t_test(pre, post, labels=self.labels)
-
-            result_rows.append({
-                'cell_id': cell_id,
-                'PRE_sweeps': pre,
-                'POST_sweeps': post,
-                'response':result['response'],
-                'delta':result['mean_diff'], #APs/sweep or mV or mOhm,
-                'p_val': result['p_val']
-                })
-
-        return pd.DataFrame(result_rows)
-
     def plot_pie(self):
-        total_n = len(self.response_df)
-        counts = self.response_df['response'].fillna('no response').value_counts()
-        default_colors = ['salmon', 'deepskyblue']
-        colors = {'no response': 'whitesmoke'}
-        for label, color in zip(self.labels, default_colors):
-            colors[label] = color
+        def collapse_responses(responses):
+            """
+            Collapse multiple responses for a single dependant vairable per cell_id to a single string: biphasic, increase, decrease or no response.
+            """
+            cleaned = responses.dropna().astype(str).str.strip().unique()
+            cleaned = [resp for resp in cleaned if resp.lower() != 'no response']
 
+            if {'increase', 'decrease'}.issubset(set(cleaned)):
+                return 'biphasic'
+            elif len(cleaned) == 1:
+                return cleaned[0]
+            elif len(cleaned) > 1:
+                return cleaned[-1]  # Use last non-'no response' value
+            else:
+                return 'no response'
+
+        # self.response_df['response'] = self.response_df['response'].astype(str).str.strip() #MOVE LATER
+
+
+        #Collapse to one row per cell_id
+        cell_responses = self.response_df.groupby('cell_id')['response'].apply(collapse_responses).reset_index()
+
+        # cell_responses = self.response_df.groupby('cell_id')['response'].apply(
+        #     lambda responses: (
+        #         'biphasic' if {'increase', 'decrease'}.issubset(set(responses.dropna()))
+        #         else responses.dropna().unique()[0] if len(responses.dropna().unique()) == 1
+        #         else responses.dropna().unique()[0] if len(responses.dropna().unique()) > 0
+        #         else 'no response'
+        #     )
+        # ).reset_index()
+
+        counts = cell_responses['response'].value_counts()
+        total_n = len(cell_responses)
+
+        colors = {
+            'increase': 'salmon',
+            'decrease': 'deepskyblue',
+            'biphasic': 'mediumorchid',
+            'no response': 'whitesmoke'
+        }
         pie_colors = [colors.get(label, 'gray') for label in counts.index]
+
+        # Print cell IDs by response label
+        for label in ['increase', 'decrease', 'biphasic', 'no response']:
+            matching_cells = cell_responses[cell_responses['response'] == label]['cell_id'].tolist()
+            print(f"{label} cells ({len(matching_cells)}): {matching_cells}")
 
         def format_autopct(pct):
             count = int(round(pct * total_n / 100.0))
             return f'{pct:.1f}%\n({count}/{total_n})'
-        
-        # Print cell IDs by response label
-        for label in self.labels:
-            matching_cells = self.response_df[self.response_df['response'].fillna('no response') == label]['cell_id'].tolist()
-            print(f"{label} cells ({len(matching_cells)}): {matching_cells}")
-        
-        # Plot pie chart
+
         fig, ax = plt.subplots(figsize=(6, 6))
         counts.plot.pie(
             autopct=format_autopct,
@@ -658,9 +961,19 @@ class ApplicationResponse(Figure):
         )
 
         ax.set_title(f"{self.response_var} response to {self.treatment} in {self.cell_type}\n(n={total_n})", fontsize=14)
+
+        
+        unit = self.get_unit()
+        fig.text(0.5, 0.06, f"Significant response > {self.diff_thresh} {unit}", 
+                ha='center', fontsize=10, style='italic')
+        fig.text(0.5, 0.02, f"PRE sweep window: {self.pre_sweep_window}   |   POST sweep window: {None if self.dynamic_search else self.post_sweep_window}",
+                ha='center', fontsize=10, style='italic')
+
         plt.tight_layout()
         plt.show()
         self.save_plot(fig, self.filename)
+
+
         
 
 
@@ -670,6 +983,8 @@ class Histogram(Figure):
     dependant_var: str = field(kw_only=True)
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id
     n_minimum: float = field(kw_only = True, default = 3)
+
+    #Drug application specific
     pre_sweep_window: int = None # window before and after drug_in
     post_sweep_window: int = None 
 
@@ -1040,6 +1355,7 @@ class Application(Figure):
     cell_id: str|list = field(kw_only = True, default = None) # optional pram for plotting specific cell/s application
     plot_all_APs: bool = field(kw_only=True, default=False)
     valid_only: bool = field(kw_only=True, default=False)
+    pre_window_sweeps: int = field(kw_only=True, default=None)
 
 
     def __post_init__(self):
@@ -1114,7 +1430,16 @@ class Application(Figure):
                 ax2.spines['right'].set_visible(False)
 
                 # DRUG APPLICATION BAR
-                ax1.axvspan((int((drug_in)* seconds_per_sweep) - seconds_per_sweep), (int(drug_out)* seconds_per_sweep), facecolor = "grey", alpha = 0.2) #drug bar shows start of drug_in sweep to end of drug_out sweep 
+                ax1.axvspan((int((drug_in)* seconds_per_sweep) - seconds_per_sweep), (int(drug_out)* seconds_per_sweep), facecolor = "grey", alpha = 0.3) #drug bar shows start of drug_in sweep to end of drug_out sweep 
+                if self.pre_window_sweeps is not None:
+                    pre_start = (int(drug_in) - self.pre_window_sweeps) * seconds_per_sweep
+                    pre_end = int(drug_in) * seconds_per_sweep
+                    ax1.axvspan(
+                        pre_start,
+                        pre_end,
+                        facecolor="lightgrey",
+                        alpha=0.4
+                    )
                 
                 #LABELS / TITLES
                 ax1.set_xlabel( "Time (s)", fontsize = 12) #, fontsize = 15

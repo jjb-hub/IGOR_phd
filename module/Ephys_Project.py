@@ -13,7 +13,7 @@ import igor2 as igor
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
-from module.action_potential_functions import calculate_max_firing, sweep_mean_RMP_calculator, sweep_mean_inputR_calculator, ap_characteristics_extractor_main, extract_FI_x_y, sag_current_analyser, mean_RMP_APP_calculator, spike_remover_nan, peak_finder,correct_I_offset, denoise_steps, FI_slope_and_rheobase
+from module.action_potential_functions import calculate_max_firing, sweep_mean_RMP_calculator, sweep_mean_inputR_calculator, ap_characteristics_extractor_main, extract_FI_x_y, sag_current_analyser, mean_RMP_APP_calculator, spike_remover_nan, peak_finder,correct_I_offset_IF, denoise_steps, FI_slope_and_rheobase
 from scipy.stats import ttest_ind
 from module.Stats import Stats
 tqdm.pandas()
@@ -34,6 +34,7 @@ class Project(Cachable):
     output_dir: str = field(init=False)
     figure_output_dir: str = field(init=False)
     accepted_extensions = ['.ibw', '.abf']
+    project_type: str = None # user can pass either 'application' or 'intrinsic_properties'
 
     def __post_init__(self):
         super().__init__(cache_dir=f"{ROOT}/{self.project}/cache")
@@ -42,7 +43,22 @@ class Project(Cachable):
         self.output_dir = self._checkFileSystem("output")
         self.figure_output_dir = self._checkFileSystem("figures")
         self.feature_df = self.load_feature_xlsx('features')
+        self.check_project_type()
+            
 
+    def check_project_type(self):
+        if self.project_type is None:
+            if "data_type" in self.feature_df.columns:
+                unique_types = set(self.feature_df["data_type"].dropna().unique())
+                if "APP" in unique_types:
+                    self.project_type = "application"
+                elif unique_types & {"st_VC", "ramp_IC", "IV_VC", "spont_IC", "IF_IC"}:
+                    self.project_type = "intrinsic_properties"
+                else:
+                    raise ValueError("Unrecognized data_type values in features.xlsx.")
+            else:
+                raise ValueError("features.xlsx must contain 'data_type' column.")
+        print(f"Project type set to: {self.project_type}")
 
     def _get_extension(self, folder_file: str) -> str:
         """
@@ -256,8 +272,8 @@ class EphysData (Project):
         ''' generic generator for dfs'''
         df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns] 
 
-        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
-        # df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
+        # df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
+        df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
         df = df[self.initial_columns + additional_columns]
         # cache(self.project, self.filename, df)
@@ -447,6 +463,7 @@ class ramp_IC(EphysData):
         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row['folder_file'], V_array)        
         
         rheobase_list = []
+        holding_I_list = []
         threshold_list = []
         height_list = []
         rise_list = []
@@ -472,23 +489,36 @@ class ramp_IC(EphysData):
             firt_AP_peak_loc = peak_locs_corr_all[0]
 
             try:
+                dI = np.diff(I_sweep) 
+                ramp_end_idx = np.argmax(np.abs(dI)) 
+                offset =  5 * round(np.mean(I_sweep[ramp_end_idx+50:]) / 5)     #np.mean(I_sweep[ramp_end_idx+50:])  
                 rheobase = I_sweep[firt_AP_peak_loc]  # pA
+
             except IndexError:
                 continue  # Skip corrupted index
 
             rheobase_list.append(rheobase)
+            holding_I_list.append(offset)
             threshold_list.append(v_thresholds_all[0])
             height_list.append(peak_heights_all[0])
             rise_list.append(peak_rise_all[0])
             decay_list.append(peak_decay_all[0])
             fwhm_list.append(peak_fw_all[0])
 
+
+        if any((lst is None or len(lst) == 0) for lst in [rheobase_list, holding_I_list, threshold_list, height_list, rise_list, decay_list, fwhm_list]):
+            print(f"⚠️ File {row['folder_file']} has empty lists, inspect data.")
+
+
+        row['possible_holding_I'] = np.nanmean(holding_I_list)
         row['rheobase_pA'] = np.nanmean(rheobase_list)
         row['v_thresh_mV'] = np.nanmean(threshold_list)
         row['AP_height_mV'] = np.nanmean(height_list)
         row['AP_rise_mV_ms'] = np.nanmean(rise_list)
         row['AP_decay_mV_ms'] = np.nanmean(decay_list)
         row['AP_width_ms'] = np.nanmean(fwhm_list)
+
+       
 
         return row
 
@@ -619,7 +649,7 @@ class IF_IC(EphysData):
         t = np.arange(len(I_array)) * dt
 
         # HARDCODE - ONLY REQUIRED FOR HFD I data pCLAMP data with holding attached to steps
-        I_array_offset, offset = correct_I_offset(I_array, row['folder_file']) 
+        I_array_offset, offset = correct_I_offset_IF(I_array) 
         I_array_adj_clean = denoise_steps(I_array_offset)
         I_steps , AP_frequencies_Hz, V_rest , off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
         FI_slope, rheobase_threshold, valid_APs = FI_slope_and_rheobase(row['folder_file'], I_steps, AP_frequencies_Hz)
@@ -661,7 +691,7 @@ class IV_IC(EphysData):
         t = np.arange(len(I_array)) * dt
 
         # HARDCODE - ONLY REQUIRED FOR HFD I data noisy with holding I (sometimes)
-        I_array_offset, offset = correct_I_offset(I_array, row['folder_file']) 
+        I_array_offset, offset = correct_I_offset_IF(I_array) 
         I_array_adj_clean = denoise_steps(I_array_offset)
 
         step_current_values, AP_frequencies_Hz, V_rest_FI, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
@@ -718,13 +748,13 @@ class FP(EphysData):
 
         
 
-         #fetch FP data for this cell and use the average threshold to define the RA 
+        #fetch FP data for this cell and use the average threshold to define the RA 
         try:
             cell_threshold = np.mean(row['voltage_threshold'])
         except:
             cell_threshold = -45 #so when you -20 is 65 for cells without FP
 
-        RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
+        RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 
 
         if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['RA'] = True
@@ -786,29 +816,16 @@ class APP(EphysData):
         # sweep_AP_count
         if len(v_thresholds_all)>0:
             if all (x > row.drug_in for x in sweep_indices_all):
-                row['induced_APs'] = True
+                row['induced_APs'] = True #unused TODO
             APs_per_sweep = np.zeros(V_array.shape[1], dtype=int)
             unique, counts = np.unique(sweep_indices_all, return_counts=True)
             APs_per_sweep[unique] = counts
             row['sweep_AP_count']=APs_per_sweep 
 
-        # # DEFINE RESPONSIVE CELL 
-        #     APs_per_sweep_PRE = APs_per_sweep[:row.drug_in]
-        #     APs_per_sweep_POST = APs_per_sweep[row.drug_in:]
-        #     result = Stats(p_thresh=0.05, diff_thresh=0).welchs_t_test(APs_per_sweep_PRE, APs_per_sweep_POST, labels=('increase', 'decrease'))
-        #     row['AP_response'] = result['response']
-        #     row['AP_diff'] = result['mean_diff'] #APs /sweep
-        #     row['AP_pval'] = result['p_val']
-        
+
         else:
             row['sweep_AP_count']=np.zeros(V_array.shape[1], dtype=int)
             
-        # # RMP 
-        # mean_RMP_POST = np.concatenate([mean_RMP_APP, mean_RMP_WASH])
-        # result = Stats(p_thresh=0.05, diff_thresh=3.0).welchs_t_test(mean_RMP_PRE, mean_RMP_POST, labels=('depol', 'hyperpol')) #HARD CODE 5mV diff considered relevant
-        # row['RMP_response'] = result['response']
-        # row['RMP_diff'] = result['mean_diff']
-        # row['RMP_pval'] = result['p_val']
 
         #fetch FP data for this cell and use the average threshold to define the RA 
         FP_df = self.getCache("FP_df")
@@ -818,7 +835,7 @@ class APP(EphysData):
         except:
             cell_threshold = -45 #so when you -20 is 65 for cells without FP
 
-        RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 #HARD CODE was -65 for all , now based on cell Threshold 
+        RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0
 
         if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
             row['RA'] = True
@@ -828,37 +845,22 @@ class APP(EphysData):
             
             row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
 
-            # row['RAcount_PRE'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index < row['drug_in'] and RA_condition(peak_voltage, threshold)])
-            # row['RAcount_APP'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if row['drug_in'] <= sweep_index <= row['drug_out'] and RA_condition(peak_voltage, threshold)])
-            # row['RAcount_WASH'] = len([peak_loc for peak_loc, sweep_index, peak_voltage, threshold in zip(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, v_thresholds_all) if sweep_index > row['drug_out'] and RA_condition(peak_voltage, threshold)])
-            
             # sweep_RA_count
             RA_sweep_locs = row['RA_sweep_locs']
             RA_per_sweep = np.zeros(V_array.shape[1], dtype=int)
             unique, counts = np.unique(RA_sweep_locs, return_counts=True)
             RA_per_sweep[unique] = counts
             row['sweep_RA_count'] = RA_per_sweep
+            row['sweep_SAP_count'] = row['sweep_AP_count'] - row['sweep_RA_count']
 
         else:
             row['RA_locs'] = []
-            # row['RAcount_PRE'] = 0
-            # row['RAcount_APP'] = 0
-            # row['RAcount_WASH'] = 0
             row['sweep_RA_count'] = np.zeros(V_array.shape[1], dtype=int)
+            row['sweep_SAP_count'] = row['sweep_AP_count']
 
         row['AP_locs'] = peak_locs_corr_all
         row['AP_sweep_locs'] = sweep_indices_all
         row['peak_voltages_all'] = peak_voltages_all
-
-        # if len(peak_locs_corr_all) > 0:
-        #     row['APcount_PRE'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index < row['drug_in']])
-        #     row['APcount_APP'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if row['drug_out'] >= sweep_index >= row['drug_in']])
-        #     row['APcount_WASH'] = len([peak_loc for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all) if sweep_index > row['drug_out']])
-        # else:
-        #     row['AP_locs'] = []
-        #     row['APcount_PRE'] = 0
-        #     row['APcount_APP'] = 0
-        #     row['APcount_WASH'] = 0
 
         # GENERIC functions
         def check_variability(values, Vairability_threshold=0.30): 
@@ -958,56 +960,131 @@ class Hunter(EphysData):
 @dataclass
 class Ephys(EphysData):
     ''' 
-    Buiilding aggregate df with cell info based off extracted data from each data type: APP, FP and RA_hunter each with their own class
+    Buiilding aggregate df with cell info based off extracted data from each data type in either : 
+        application  ['APP', 'FP']         or       intrinsic_properties ['st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ] +AMPA?NMDA + PPR to come #TODO
+        
         feature_df: excel input mapping folder_files to features
-
+        
+        ~ application = multiple timepoints                         
         FP_df: extraction of firing property data (FP)
         APP_df: extraction of applications data (APP)
-        RA_hunter_df: last unofficial data_type needs developing* #TODO
+        
+        ~ intrinsic_properties = one timepoint
+        st_VC: .. ect 
 
-    Ephys class:
+
+    Generates:
         cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
           '''
     filename: str = 'cell_df'
     sampling_rate: float = 2e4
     
     def __post_init__(self):
-        
-        self.FP_df = FP(self.project).df #for data_type class in project so this is for PSYCH_ephy
-        self.APP_df = APP(self.project).df
-        # self.hunter_df = Hunter(self.project).df some issue with 
-        super().__post_init__()
+        Project.__post_init__(self) # initates project only to get self.project_type
+
+        if self.project_type == 'application':
+            self.FP_df = FP(self.project).df 
+            self.APP_df = APP(self.project).df
+            # self.hunter_df = Hunter(self.project).df #TODO 
+        elif self.project_type == 'intrinsic_properties':
+            self.st_VC_df = st_VC(self.project).df
+            self.IV_VC_df = IV_VC(self.project).df
+            self.ramp_IC_df = ramp_IC(self.project).df
+            self.IF_IC_df = IF_IC(self.project).df
+            self.spont_IC_df = spont_IC(self.project).df
+            
+        super().__post_init__() # initiales all parent calsses including EphysData which will run generate()
         
     
     def generate(self) -> pd.DataFrame:
         """
-        Builds cell_df with each row a cell_id, access_change reported where possible and valid data is marked True in 'data_type' column i.e. "FP".
+        Builds cell_df with each row a cell_id, Rs_pct_change reported where possible and valid data is marked True in 'data_type' column i.e. "FP".
         """
+        if self.project_type == 'application':
+            return self.generate_application_cell_df()
+        elif self.project_type == 'intrinsic_properties':
+            return self.generate_intrinsic_cell_df()
+
+    def generate_intrinsic_cell_df(self):
+        df = self.feature_df.copy()
+        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region'] 
+        cell_df = (df.groupby('cell_id')
+                    .apply(lambda g: self.apply_check_unique(g, unique_cols=cell_wise_columns))
+                    .reset_index()
+                )
+        
+        # --- Add Rs_MOhm change from st_VC_df --- asumes only 2 measures per cell 
+        rs_changes = []
+        for cell_id, group in self.st_VC_df.groupby("cell_id"):
+            if len(group) != 2:
+                print(f"Warning: cell_id {cell_id} has {len(group)} st_VC entries (expected 2)") 
+                rs_changes.append((cell_id, np.nan, np.nan))
+                continue
+
+            rs_values = group["Rs_MOhm"].values
+            abs_change = abs(rs_values[1] - rs_values[0])
+            pct_change = ((rs_values[1] - rs_values[0]) / rs_values[0]) * 100 if rs_values[0] != 0 else np.nan
+            rs_changes.append((cell_id, abs_change, pct_change))
+
+        rs_df = pd.DataFrame(rs_changes, columns=["cell_id", "Rs_abs_change", "Rs_pct_change"])
+        cell_df = cell_df.merge(rs_df, on="cell_id", how="left")
+        
+        # --- Loop over other dfs : columns : average if multiple ---
+        reductions = [
+            (self.IF_IC_df, ["I_steps", "AP_frequencies_Hz"], False),
+            (self.ramp_IC_df, ["rheobase_pA", "v_thresh_mV", "AP_height_mV",
+                            "AP_rise_mV_ms", "AP_decay_mV_ms", "AP_width_ms"], True),
+            # (self.IV_VC_df, ["V_inj", "I_steady"], False)
+        ]
+        for df_src, cols, avg in reductions:
+            reduced = self.reduce_cellwise(df_src, cols, average=avg)
+            cell_df = cell_df.merge(reduced, on="cell_id", how="left")
+        
+        self.cache("cell_df", cell_df)
+        self.save_excel("cell_df", cell_df)
+        return cell_df
+
+
+    def generate_application_cell_df(self):
         df = self.feature_df.copy()
         df['treatment'] = df.apply(lambda row: row['treatment'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
-
-        def check_unique(series, cell_id):
-            unique_values = series.dropna().unique()
-            if len (unique_values) == 0:
-                return None
-            if len(unique_values) == 1:
-                return unique_values[0]
-            else:
-                raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
-
-        def apply_check_unique(group): # single value per cell_id
-            cell_id = group.name
-            I_set_values = group.loc[(group['data_type'] == 'APP') & (group['replication_no'] == 1) & (group['application_order'] == 1), 'I_set' ].unique()
-            I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
         
-            aggregated_data = group.agg({
-                'treatment': lambda series: check_unique(series, cell_id),
-                'cell_type': lambda series: check_unique(series, cell_id),
-                'cell_subtype': lambda series: check_unique(series, cell_id), 
-                'axon_presence':lambda series: check_unique(series, cell_id),
-                'axon_um':lambda series: check_unique(series, cell_id),
-            })
-            return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
+        cell_wise_columns = ['treatment', 'cell_type', 'cell_subtype', 'axon_presence', 'axon_um']
+
+        def _extract_I_set(group):
+            I_set_values = group.loc[
+                (group['data_type'] == 'APP')
+                & (group['replication_no'] == 1)
+                & (group['application_order'] == 1),
+                'I_set',
+            ].unique()
+            I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
+            return pd.Series({'I_set': I_set_value})
+
+        
+        #OLD 11Sept25
+        # def check_unique(series, cell_id):
+        #     unique_values = series.dropna().unique()
+        #     if len (unique_values) == 0:
+        #         return None
+        #     if len(unique_values) == 1:
+        #         return unique_values[0]
+        #     else:
+        #         raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
+
+        # def apply_check_unique(group): # single value per cell_id #NOT GENERIC OLD DELETE #TODO
+        #     cell_id = group.name
+        #     I_set_values = group.loc[(group['data_type'] == 'APP') & (group['replication_no'] == 1) & (group['application_order'] == 1), 'I_set' ].unique()
+        #     I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
+        
+        #     aggregated_data = group.agg({
+        #         'treatment': lambda series: check_unique(series, cell_id),
+        #         'cell_type': lambda series: check_unique(series, cell_id),
+        #         'cell_subtype': lambda series: check_unique(series, cell_id), 
+        #         'axon_presence':lambda series: check_unique(series, cell_id),
+        #         'axon_um':lambda series: check_unique(series, cell_id),
+        #     })
+        #     return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
 
         def calculate_percentage_diff(group):
             """
@@ -1025,7 +1102,7 @@ class Ephys(EphysData):
             
             # Check if there are enough values
             if len(pre_series) < 2 or len(non_pre_series) < 2:
-                return pd.Series({'access_change': None, 'FP_valid': None})
+                return pd.Series({'Rs_pct_change': None, 'FP_valid': None})
             
             # Generate all combinations of two values
             pre_combinations = list(combinations(pre_series, 2))
@@ -1050,7 +1127,7 @@ class Ephys(EphysData):
                         best_non_pre_pair = non_pre_pair
             
             if best_pre_pair is None or best_non_pre_pair is None:
-                return pd.Series({'access_change': None, 'FP_valid': None})
+                return pd.Series({'Rs_pct_change': None, 'FP_valid': None})
             
             # folder_file filtered on access
             pre_folder_files = pre_values[pre_values['R_series'].isin(best_pre_pair)]['folder_file'].tolist() 
@@ -1082,11 +1159,15 @@ class Ephys(EphysData):
                 pre_folder_files = pre_folder_files[:2]
                 non_folder_files = non_pre_folder_files[:2]
 
-            return pd.Series({'access_change': min_diff, 'FP_valid': pre_folder_files + non_folder_files})
+            return pd.Series({'Rs_pct_change': min_diff, 'FP_valid': pre_folder_files + non_folder_files})
 
 
-                    
-        cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index()
+        cell_df = (
+            df.groupby('cell_id')
+            .apply(lambda g: self.apply_check_unique(g, unique_cols=cell_wise_columns, extra_logic=_extract_I_set))
+            .reset_index()
+        )
+        # cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index() #OLD 11Sept25
         diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
         cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
 
@@ -1122,3 +1203,46 @@ class Ephys(EphysData):
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)
         return cell_df
+    
+
+    def apply_check_unique(self, group: pd.DataFrame, unique_cols: list, extra_logic=None):
+        cell_id = group.name
+
+        def check_unique(series, cell_id):
+            unique_values = series.dropna().unique()
+            if len(unique_values) == 0:
+                return None
+            if len(unique_values) == 1:
+                return unique_values[0]
+            else:
+                raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
+
+        aggregated_data = group.agg({
+            col: lambda series: check_unique(series, cell_id) for col in unique_cols
+        })
+
+        if extra_logic is not None:
+            aggregated_data = pd.concat([aggregated_data, extra_logic(group)])
+
+        return aggregated_data
+    
+    def reduce_cellwise(self, df: pd.DataFrame, cols: list, average: bool = False) -> pd.DataFrame:
+        """
+        Reduce a df to one row per cell_id for selected columns.
+
+        Args:
+            df: DataFrame with a 'cell_id' column.
+            cols: List of columns to reduce.
+            average: If True, average values per cell_id. If False, take the first value.
+
+        Returns:
+            DataFrame with columns: ['cell_id'] + cols
+        """
+        if average:
+            reduced = df.groupby("cell_id")[cols].mean().reset_index()
+        else:
+            reduced = df.groupby("cell_id")[cols].first().reset_index()
+        return reduced
+
+
+
