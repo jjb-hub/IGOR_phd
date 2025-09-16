@@ -1,0 +1,88 @@
+
+import pandas as pd
+from pathlib import Path
+
+# List of cell IDs to exclude
+# # --- Exclude specific cell_ids ---
+
+
+EXCLUDED=[  #consider  SIM230225a DRD230108c TLX230627b
+        'TLX210422a',
+        'TLX230622a',
+        'TLX230518c',
+        'TLX230719c',
+        'TLX230818a',
+        'TLX230627b',
+        'TLX221230b',
+
+        'DRD230104b',
+        'DRD230112a',
+        'DRD230703a',
+        'DRD230117b',
+        'DRD230126a',
+
+        'HUM230727b',
+
+        'CTG230222a',
+        'CTG230207a',
+        'CTG230220a',
+
+        'SIM241129a',
+        'SIM250410a',
+        'SIM250411e', 
+        'SIM210424a',
+        'SIM241202a',
+        'SIM230203a',
+        'SIM241218a',
+        'SIM241218e',
+ ]
+
+# # # ##### REMOVE EXCLUDED FROM PKL
+# # List of .pkl file paths to process
+# pkl_paths = [
+#     "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/APP_df.pkl",
+#     "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/FP_df.pkl",
+#     "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/cell_df.pkl"
+# ]
+
+# # Loop through each file, filter, and save a new version
+# for path_str in pkl_paths:
+#     path = Path(path_str)
+#     df = pd.read_pickle(path)
+
+#     if 'cell_id' not in df.columns:
+#         print(f"Skipping {path.name}: 'cell_id' column not found.")
+#         continue
+
+#     original_len = len(df)
+#     filtered_df = df[~df['cell_id'].isin(EXCLUDED)]
+#     removed_n = original_len - len(filtered_df)
+
+#     # Save to a new file with _filtered suffix
+#     new_path = path.with_name(f"{path.stem}_filtered{path.suffix}")
+#     filtered_df.to_pickle(new_path)
+#     print(f"Saved: {new_path.name} ({removed_n} rows removed)")
+
+
+# ##### EDIT EXCEL FEATURES CREATE EXCLUDED xlsx + add axon
+
+
+
+# # --- Load your Excel files ---
+df_main = pd.read_excel('/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/input/features_pre_exclusion.xlsx')      # e.g., has 'cell_id'
+df_axon = pd.read_excel('/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/input/Psych_immagibg.xlsx')      # has 'cell_id', 'axon_uM', 'axon_presence'
+
+
+# --- Merge on 'cell_id' to add axon information ---
+df_merged = pd.merge(df_main, df_axon[['cell_id', 'axon_uM', 'axon_presence']], on='cell_id', how='left')
+
+
+# ------ remove 'EXCLUDED' cell_ids ------
+df_filtered = df_merged[~df_merged['cell_id'].isin(EXCLUDED)]
+
+# # --- Save to a new Excel file ---
+df_filtered.to_excel('/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/input/features_exclusionsmade.xlsx', index=False)
+
+# Save excluded cell_ids in a separate dataframe
+excluded_features = df_main[df_main['cell_id'].isin(EXCLUDED)]
+excluded_features.to_excel('/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/input/features_excluded_only.xlsx', index=False)

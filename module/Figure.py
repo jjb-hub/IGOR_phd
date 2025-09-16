@@ -82,7 +82,7 @@ class DataSelection (Cachable):
             valid_df = self.cell_df[self.cell_df[f'{self.data_type}_valid'].notna()] 
         else:
             valid_df = self.cell_df
-            
+
         def validate_attribute(attribute, column_name):
             if attribute is not None:
                 valid_values = valid_df[column_name].unique()
@@ -263,7 +263,7 @@ class DataSelection (Cachable):
                 'cell_id_APP': cell_id_app
             })
         if self.threshold_access_change is not None:
-            access_filtered_df = self.cell_df[self.cell_df['access_change'].abs() <= self.threshold_access_change]
+            access_filtered_df = self.cell_df[self.cell_df['Rs_pct_change'].abs() <= self.threshold_access_change]
         else:
             access_filtered_df = self.cell_df
 
