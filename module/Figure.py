@@ -23,6 +23,8 @@ from module.action_potential_functions import ap_characteristics_extractor_main,
 from sklearn.cluster import KMeans
 from matplotlib.lines import Line2D
 from module.Stats import Stats
+import importlib
+
 
 
 # Root directory for projects #HACKY SHIT should have a project or filesystem class to prevent dupicate code
@@ -33,9 +35,11 @@ if not os.path.exists(ROOT):
 @dataclass
 class DataSelection (Cachable): 
     ''' 
+    Dataselection for a single data_type based of the folder_files used in the cell_df.
+
     Attributes:
         - project (str): defining the project and feature mapping ie RAW_df in Ephys
-        - data_type (str): The data type (e.g., 'APP' or 'FP').
+        - data_type (str): The data type 
         - cell_type (str | list): The type of cell to filter on (optional) / can inout list 
         - treatment (str | list): The treatment to filter on, i.e. drug applied (optional).
         - cell_subtype (str | list): The subtype of cell to filter on (optional).
@@ -44,6 +48,8 @@ class DataSelection (Cachable):
         '''
     
     project: str  = field(kw_only=True)
+    project_obj: Project = field(init=False, repr=False)
+
     data_type: str = field(kw_only=True)
     cell_type: str | list = field(kw_only=True, default=None)
     cell_subtype: str | list  = field(kw_only=True, default=None)
@@ -60,28 +66,40 @@ class DataSelection (Cachable):
         self.output_dir = self._checkFileSystem("output")
         self.figure_output_dir = self._checkFileSystem("figures")
 
-        # # here only the required function for data type should be selected
-        if self.data_type in ['FP', 'APP']:
-            self.FP_df = FP(self.project).df
-            self.APP_df = APP(self.project).df #can add pAD hunter
-
-
+        self.project_obj = Project(self.project) #gives self.project_type to include time or not 
+        self.load_extractor(self.data_type)
         self.cell_df = Ephys(self.project).df         
-        
 
-        self.validate_inputs()
+        self.validate_inputs() #except dv
         self.valid_files, self.valid_cell_ids = self.get_valid_folder_files()
-        self.agg_df = self.get_filtered_data()
-        self.treatment_count_df = self.generate_treatment_count_df()
+        self.agg_df = self.biild_agg_df() #validates dv
+        if  self.project_obj.project_type == "application":
+            self.treatment_count_df = self.generate_treatment_count_df() # not generic enpough yet #TODO
+
+    def load_extractor(self, data_type: str):
+        """Dynamically load the extractor class from Ephys_Project by name (data_type)."""
+        module = importlib.import_module("module.Ephys_Project")  
+        try:
+            cls = getattr(module, data_type)  
+        except AttributeError:
+            raise ValueError(f"No extractor class found for data_type '{data_type}' in Ephys_Project")
+        
+        df = cls(self.project).df
+        setattr(self, f"{data_type}_df", df)  
+        return df
+
 
     def validate_inputs(self):
+        '''
+        Checks for valid data_type and that the cell_type, cell_subtype and treatment are withing the data_type.columns()
+        '''
         if self.data_type not in ['FP', 'APP', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ]: #complete list of data types
             raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of ['FP', 'APP', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC'].")
         
-        if self.data_type in ["FP", "APP"]: #TODO file validator inbuild fo project_type = application only needs to be cleaned
-            valid_df = self.cell_df[self.cell_df[f'{self.data_type}_valid'].notna()] 
-        else:
-            valid_df = self.cell_df
+        # if self.data_type in ["FP", "APP"]: #TODO file validator inbuild fo project_type = application only needs to be cleaned
+        valid_df = self.cell_df[self.cell_df[f'{self.data_type}_folder_files'].notna()] 
+        # else:
+        #     valid_df = self.cell_df
 
         def validate_attribute(attribute, column_name):
             if attribute is not None:
@@ -102,7 +120,7 @@ class DataSelection (Cachable):
         Filters the cell_df based on the input parameters including threshold_access_change if not None.
         Returns a list of valid folder_files and cell_ids.
         """
-        valid_column = f'{self.data_type}_valid'
+        valid_column = f'{self.data_type}_folder_files'
         if valid_column not in self.cell_df.columns:
             raise ValueError(f"{valid_column} column does not exist in cell_df.")
         
@@ -129,16 +147,35 @@ class DataSelection (Cachable):
 
         return valid_files, valid_cell_ids
     
-    def get_filtered_data(self):
+    def biild_agg_df(self):
         """
-        Fetches the data_type _df, filters and restructures it.
-        Returns an aggregated df for stats and plotting (one row per cell_id and time).
+        Filters self.{data_type}_df for foler_files in cell_df["f{data_type}_folder_files"] and restructures it to a long format for plotting.
+        
+        Returns:
+          agg_df aggregate df for data_type for stats and plotting (one row per cell_id and time).
+
         """
-        if self.data_type == 'ramp_IC':
-            self.ramp_IC_df = Project(self.project).ramp_IC_df
+        data_type_df = getattr(self, f"{self.data_type}_df")
+
+        # Generic columns that exist for all data_types
+        generic_data_type_cols = ['cell_id', 'folder_file', 'treatment', 'cell_type', 'cell_subtype', 'I_set', 'error', 'traceback']
+
+        # Determine which dependent variables exist for this data_type
+        valid_dvs_for_data_type = [col for col in data_type_df.columns if col not in generic_data_type_cols]
+
+        # Filter only valid folder_files
+        filtered_df = data_type_df[data_type_df['folder_file'].isin(self.valid_files)].copy()
+        
+        if  self.project_obj.project_type == "intrinsic_properties":
+            # Intrinsic properties: no time, just keep cell_id, folder_file, and dependent variables
+            cols_to_keep = ['cell_id', 'folder_file'] + valid_dvs_for_data_type
+            filtered_df = filtered_df[cols_to_keep]
+
+            agg_df = self.add_cell_mapping(filtered_df)
+            return agg_df
 
         
-
+        # time required --> self.project_obj.project_type == "application": generalise #TODO
         elif self.data_type == 'APP':
             filtered_df = self.APP_df[self.APP_df['folder_file'].isin(self.valid_files)].copy()
             timepoints = ['PRE', 'APP', 'WASH']
@@ -182,7 +219,7 @@ class DataSelection (Cachable):
                 reshaped_data.append(current_data)
 
             agg_APP_df = pd.concat(reshaped_data, ignore_index=True)
-            agg_APP_df = self.add_cell_mapping(agg_APP_df)
+            agg_APP_df = self.add_cell_mapping(agg_APP_df, additional_cols=['I_set'])
             return agg_APP_df
         
 
@@ -212,30 +249,48 @@ class DataSelection (Cachable):
             'sag': 'mean',
             'voltage_threshold': 'mean'
             }).reset_index()
-            agg_FP_df = self.add_cell_mapping(agg_FP_df)
+            agg_FP_df = self.add_cell_mapping(agg_FP_df, additional_cols=['I_set'])
             return agg_FP_df
         else:
             raise ValueError(f"Unsupported data_type: {self.data_type}")
 
-    def add_cell_mapping(self, df):
-        '''
+    def add_cell_mapping(self, df, additional_cols: list = None):
+        """
         Adds cell feature columns based off cell_id in cell_df.
-        '''
+
+        Parameters:
+            df (pd.DataFrame): DataFrame to merge with cell_df features.
+            additional_cols (list, optional): List of extra columns to include from cell_df.
+
+        Returns:
+            pd.DataFrame: Merged DataFrame with added features.
+        """
         if 'cell_id' not in df.columns or 'cell_id' not in self.cell_df.columns:
             raise ValueError("Both DataFrames must have 'cell_id' column.")
-        
-        columns_to_map = ['cell_id', 'treatment', 'cell_type', 'cell_subtype', 'I_set']
+
+        # Always include these base columns
+        columns_to_map = ['cell_id', 'treatment', 'cell_type', 'cell_subtype']
+
+        # Add any extra columns specified by the caller
+        if additional_cols:
+            for col in additional_cols:
+                if col in self.cell_df.columns and col not in columns_to_map:
+                    columns_to_map.append(col)
+
+        # Ensure all columns exist in cell_df
         for column in columns_to_map:
             if column not in self.cell_df.columns:
                 raise ValueError(f"Column '{column}' is missing from cell_df.")
-    
+
         return df.merge(self.cell_df[columns_to_map].drop_duplicates(), on='cell_id', how='left')
+
     
 
 
     def generate_treatment_count_df(self) -> pd.DataFrame:
         '''
         Calculates the n for each treatment x cell_type given the threshold_access_change, saved as excel in cache.
+        TODO: 
         '''
 
         def is_valid_app(app_valid):
@@ -243,13 +298,13 @@ class DataSelection (Cachable):
         def is_valid_fp(fp_valid):
             return isinstance(fp_valid, list) and all(isinstance(x, str) for x in fp_valid)
         def process_group(group_df):
-            valid_fp = group_df[group_df['FP_valid'].apply(is_valid_fp)]
-            valid_app = group_df[group_df['APP_valid'].apply(is_valid_app)]
+            valid_fp = group_df[group_df['FP_folder_files'].apply(is_valid_fp)]
+            valid_app = group_df[group_df['APP_folder_files'].apply(is_valid_app)]
 
             fp_count = valid_fp['cell_id'].nunique()
             app_count = valid_app['cell_id'].nunique()
             both_valid_count = group_df[
-                group_df['FP_valid'].apply(is_valid_fp) & group_df['APP_valid'].apply(is_valid_app)
+                group_df['FP_folder_files'].apply(is_valid_fp) & group_df['APP_folder_files'].apply(is_valid_app)
             ]['cell_id'].nunique()
 
             cell_id_fp = valid_fp['cell_id'].unique().tolist()
@@ -380,20 +435,47 @@ class Figure(DataSelection):
     def __post_init__(self):
         # DataSelection.__post_init__(self)
         super().__post_init__()
-    
-    def filter_n_minimum(self,df):
+
+    def filter_n_minimum(self, df):
+        """
+        Filters a dataframe to enforce a minimum number of samples per group.
+
+        If 'time' column exists, groups by ['treatment', 'time'].
+        Otherwise, groups only by ['treatment'].
+        """
         df = df.dropna(subset=[self.dependant_var]).reset_index(drop=True)
-        group_sizes = df.groupby(['treatment', 'time']).size()
+
+        group_cols = ['treatment']
+        if 'time' in df.columns:
+            group_cols.append('time')
+
+        group_sizes = df.groupby(group_cols).size()
         insufficient_groups = group_sizes[group_sizes < self.n_minimum]
+
         if not insufficient_groups.empty:
             print(f"Warning: The following groups have less than {self.n_minimum} samples and will be excluded:")
             print(insufficient_groups)
-            df = df[~df[['treatment', 'time']].apply(tuple, axis=1).isin(insufficient_groups.index)].reset_index(drop=True)
+            df = df[~df[group_cols].apply(tuple, axis=1).isin(insufficient_groups.index)].reset_index(drop=True)
+
         if df.empty:
             print("No groups meet the minimum sample size requirement. Statistical analysis will not be performed.")
             return None
         else:
             return df
+
+    # def filter_n_minimum(self,df): #old 18Sept2025
+    #     df = df.dropna(subset=[self.dependant_var]).reset_index(drop=True)
+    #     group_sizes = df.groupby(['treatment', 'time']).size()
+    #     insufficient_groups = group_sizes[group_sizes < self.n_minimum]
+    #     if not insufficient_groups.empty:
+    #         print(f"Warning: The following groups have less than {self.n_minimum} samples and will be excluded:")
+    #         print(insufficient_groups)
+    #         df = df[~df[['treatment', 'time']].apply(tuple, axis=1).isin(insufficient_groups.index)].reset_index(drop=True)
+    #     if df.empty:
+    #         print("No groups meet the minimum sample size requirement. Statistical analysis will not be performed.")
+    #         return None
+    #     else:
+    #         return df
     
     def check_valid_dependant_var(self):
         if self.dependant_var not in self.agg_df.columns:
@@ -997,9 +1079,9 @@ class Histogram(Figure):
         self.data = self.filter_n_minimum(self.agg_df)
         if self.data_type == "APP":
             self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=self.dependant_var, pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
-        self.stats = self.generate_statistics()
+        # self.stats = self.generate_statistics() #DEPRICATED AND NOT GENERIC #TODO
         self.order = [t for t in color_dict.keys() if t in self.data['treatment'].unique()]
-        self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()]
+        self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()] #not generic #TODO
         self.fig = self.plot_histogram()
         
     def generate_statistics(self):
@@ -1486,14 +1568,14 @@ class RA_AP_analysis(Figure):
         #fetch valid folder_files for each data_type   #NO pAD hunter and no second application files!! #TODO
         agg_folder_files = []
         if 'APP' in self.data_types:
-            valid_folder_files = self.cell_df[self.cell_df['cell_id'] == self.cell_id]['APP_valid'].iloc[0]
+            valid_folder_files = self.cell_df[self.cell_df['cell_id'] == self.cell_id]['APP_folder_files'].iloc[0]
             if valid_folder_files is None: 
                  print(f"No valid APP files for cell_id {self.cell_id}, skipping.")
             else:
                 agg_folder_files.append(valid_folder_files)
 
         if 'FP' in self.data_types:
-            valid_folder_files = self.cell_df[self.cell_df['cell_id'] == self.cell_id]['FP_valid'].iloc[0]
+            valid_folder_files = self.cell_df[self.cell_df['cell_id'] == self.cell_id]['FP_folder_files'].iloc[0]
 
             if valid_folder_files is None:
                  print(f"No valid FP files for cell_id {self.cell_id}, skipping.")

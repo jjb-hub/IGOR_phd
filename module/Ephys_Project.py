@@ -608,16 +608,16 @@ class spont_IC(EphysData):    #TO DO BUILD EXCLUSION - traces with high vairabil
             polarity='positive'  # avoid clustering
         )  
 
-        # PLOT TO CHECK 
-        plt.figure(figsize=(12, 4))
-        plt.plot(trace, label='Voltage trace', color='black', linewidth=0.5)
-        plt.plot(peaks, trace[peaks], 'r.', label='sEPSPs', markersize=10)
-        plt.xlabel('Time (samples)')
-        plt.ylabel('Voltage (mV)')
-        plt.title(f"Detected sEPSPs in {row['folder_file']}")
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        # # PLOT TO CHECK 
+        # plt.figure(figsize=(12, 4))
+        # plt.plot(trace, label='Voltage trace', color='black', linewidth=0.5)
+        # plt.plot(peaks, trace[peaks], 'r.', label='sEPSPs', markersize=10)
+        # plt.xlabel('Time (samples)')
+        # plt.ylabel('Voltage (mV)')
+        # plt.title(f"Detected sEPSPs in {row['folder_file']}")
+        # plt.legend()
+        # plt.tight_layout()
+        # plt.show()
 
         row['sEPSP_frequency_Hz'] = frequency
         row['sEPSP_rise_times'] = rise_times
@@ -761,7 +761,7 @@ class FP(EphysData):
             row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
             row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
 
-        # FP FILE VALIDATOR
+        # FP FILE VALIDATOR #TODO REMOVE
         if np.mean(np.array(peak_voltages_all[:10])[~np.isnan(peak_voltages_all[:10])]) < 15: #mean of first 11 AP peaks is less than 15mV the file is marked invalid
             row['valid'] = False 
 
@@ -928,7 +928,7 @@ class APP(EphysData):
             if ap_burst_valid == False:
                 row['valid'] = False
 
-        rmp_valid = unidirectional_trend(row['sweep_RMP'], threshold=20) #assigns True if 
+        rmp_valid = unidirectional_trend(row['sweep_RMP'], threshold=20) #assigns True if # REFACTOR as not used in plotter
         if  rmp_valid == False:
             row['valid'] = False
 
@@ -998,7 +998,7 @@ class Ephys(EphysData):
     
     def generate(self) -> pd.DataFrame:
         """
-        Builds cell_df with each row a cell_id, Rs_pct_change reported where possible and valid data is marked True in 'data_type' column i.e. "FP".
+        Builds cell_df with each row a cell_id, Rs_pct_change reported where possible, each file used for calculation is stored f"{data_type}_folder_files".
         """
         if self.project_type == 'application':
             return self.generate_application_cell_df()
@@ -1013,32 +1013,43 @@ class Ephys(EphysData):
                     .reset_index()
                 )
         
-        # --- Add Rs_MOhm change from st_VC_df --- asumes only 2 measures per cell 
+        # --- Add Rs_MOhm change from st_VC_df (and track which files used) --- #
         rs_changes = []
         for cell_id, group in self.st_VC_df.groupby("cell_id"):
             if len(group) != 2:
                 print(f"Warning: cell_id {cell_id} has {len(group)} st_VC entries (expected 2)") 
-                rs_changes.append((cell_id, np.nan, np.nan))
+                rs_changes.append((cell_id, np.nan, np.nan, []))
                 continue
 
             rs_values = group["Rs_MOhm"].values
             abs_change = abs(rs_values[1] - rs_values[0])
             pct_change = ((rs_values[1] - rs_values[0]) / rs_values[0]) * 100 if rs_values[0] != 0 else np.nan
-            rs_changes.append((cell_id, abs_change, pct_change))
+            folder_files = group["folder_file"].tolist()
 
-        rs_df = pd.DataFrame(rs_changes, columns=["cell_id", "Rs_abs_change", "Rs_pct_change"])
+            rs_changes.append((cell_id, abs_change, pct_change, folder_files))
+
+        rs_df = pd.DataFrame(
+            rs_changes, 
+            columns=["cell_id", "Rs_abs_change", "Rs_pct_change", self.folder_files_col("st_VC")]
+        )
         cell_df = cell_df.merge(rs_df, on="cell_id", how="left")
-        
+            
+
         # --- Loop over other dfs : columns : average if multiple ---
         reductions = [
-            (self.IF_IC_df, ["I_steps", "AP_frequencies_Hz"], False),
+            (self.IF_IC_df, ["I_steps", "AP_frequencies_Hz"], "IF_IC", False),
             (self.ramp_IC_df, ["rheobase_pA", "v_thresh_mV", "AP_height_mV",
-                            "AP_rise_mV_ms", "AP_decay_mV_ms", "AP_width_ms"], True),
-            # (self.IV_VC_df, ["V_inj", "I_steady"], False)
+                            "AP_rise_mV_ms", "AP_decay_mV_ms", "AP_width_ms"], "ramp_IC", True),
+            # (self.IV_VC_df, ["V_inj", "I_steady"], "IV_VC", False)
         ]
-        for df_src, cols, avg in reductions:
+        for df_src, cols, data_type, avg in reductions:
             reduced = self.reduce_cellwise(df_src, cols, average=avg)
             cell_df = cell_df.merge(reduced, on="cell_id", how="left")
+
+            # Attach folder files used (here: just keep all unique per cell)
+            folder_files = df_src.groupby("cell_id")["folder_file"].apply(list).reset_index()
+            folder_files.rename(columns={"folder_file": self.folder_files_col(data_type)}, inplace=True)
+            cell_df = cell_df.merge(folder_files, on="cell_id", how="left")
         
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)
@@ -1102,7 +1113,7 @@ class Ephys(EphysData):
             
             # Check if there are enough values
             if len(pre_series) < 2 or len(non_pre_series) < 2:
-                return pd.Series({'Rs_pct_change': None, 'FP_valid': None})
+                return pd.Series({'Rs_pct_change': None, self.folder_files_col("FP"): None}) # mayher here files without pairs or not used should be dropped?
             
             # Generate all combinations of two values
             pre_combinations = list(combinations(pre_series, 2))
@@ -1127,7 +1138,7 @@ class Ephys(EphysData):
                         best_non_pre_pair = non_pre_pair
             
             if best_pre_pair is None or best_non_pre_pair is None:
-                return pd.Series({'Rs_pct_change': None, 'FP_valid': None})
+                return pd.Series({'Rs_pct_change': None, self.folder_files_col("FP"): None})
             
             # folder_file filtered on access
             pre_folder_files = pre_values[pre_values['R_series'].isin(best_pre_pair)]['folder_file'].tolist() 
@@ -1159,7 +1170,7 @@ class Ephys(EphysData):
                 pre_folder_files = pre_folder_files[:2]
                 non_folder_files = non_pre_folder_files[:2]
 
-            return pd.Series({'Rs_pct_change': min_diff, 'FP_valid': pre_folder_files + non_folder_files})
+            return pd.Series({'Rs_pct_change': min_diff, self.folder_files_col("FP"): pre_folder_files + non_folder_files})
 
 
         cell_df = (
@@ -1179,7 +1190,8 @@ class Ephys(EphysData):
                                     (self.APP_df['application_order'] == 1) &
                                     (self.APP_df['replication_no'] == 1)]
         valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
-        cell_df['APP_valid'] = cell_df['cell_id'].map(valid_files_dict)
+        cell_df[self.folder_files_col("APP")] = cell_df['cell_id'].map(valid_files_dict)
+
 
         # # Response of cell # MOVE TO agg df only?
         # ap_response_dict = filtered_app_df.set_index('cell_id')['AP_response'].to_dict() 
@@ -1244,5 +1256,8 @@ class Ephys(EphysData):
             reduced = df.groupby("cell_id")[cols].first().reset_index()
         return reduced
 
+    def folder_files_col(self, data_type: str) -> str:
+        """Return standardized column name for valid folder files of a given data_type."""
+        return f"{data_type}_folder_files"
 
 
