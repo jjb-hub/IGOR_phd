@@ -410,6 +410,7 @@ def sag_current_analyser(folder_file, V_array, I_array, step_current_values, AP_
             I_sweep = I_array[:, sweep_index]
             step_current = step_current_values[sweep_index]
 
+
             # Calculate steady state value using the steady_state_value function
             step_V_steady, hyper, first_current_point, last_current_point = steady_state_value(V_sweep, I_sweep, step_current, avg_window)
             
@@ -429,7 +430,7 @@ def sag_current_analyser(folder_file, V_array, I_array, step_current_values, AP_
             else:
                 print (f"Sag calculated {sag_ratio} is outside physiological bound 0% to 45%.")
                 return np.nan
-                # plot_sag(folder_file, V_sweep[first_current_point:last_current_point], np.arange(first_current_point, last_current_point) / 1000, RMP, step_V_steady, min_sag_voltage, sag_ratio)
+                plot_sag(folder_file, V_sweep[first_current_point:last_current_point], np.arange(first_current_point, last_current_point) / 1000, RMP, step_V_steady, min_sag_voltage, sag_ratio)
         
     # print("No sweep found with negative current injecttion and without action potentials, unable to calculate sag.")
     return [np.nan, np.nan, np.nan, np.nan]
@@ -1611,7 +1612,7 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 2):
 
 
     for points in [4, 3, 2]:
-        if len(list_of_non_zero) < points:
+        if len(list_of_non_zero) < points: # <4 sweeps with APs 
             return np.nan, np.nan, False
 
         x_fit = x[first_idx:first_idx + points]

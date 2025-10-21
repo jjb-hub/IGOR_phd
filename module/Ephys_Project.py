@@ -58,7 +58,7 @@ class Project(Cachable):
                     raise ValueError("Unrecognized data_type values in features.xlsx.")
             else:
                 raise ValueError("features.xlsx must contain 'data_type' column.")
-        print(f"Project type set to: {self.project_type}")
+        # print(f"Project type set to: {self.project_type}")
 
     def _get_extension(self, folder_file: str) -> str:
         """
@@ -272,8 +272,8 @@ class EphysData (Project):
         ''' generic generator for dfs'''
         df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns] 
 
-        # df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
-        df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
+        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
+        # df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
         df = df[self.initial_columns + additional_columns]
         # cache(self.project, self.filename, df)
@@ -437,7 +437,7 @@ class st_VC(EphysData):
             Cm_list.append(Cm * 1e12 if not np.isnan(Cm) else np.nan)    # pF
 
         # Final averaged values
-        row['Rs_MOhm'] = np.nanmean(Rs_list)
+        row['Rs_MOhm'] = np.nanmean(Rs_list) #Ra same
         row['Rm_MOhm'] = np.nanmean(Rm_list)
         row['tau_ms'] = np.nanmean(tau_list)
         row['Cm_pF'] = np.nanmean(Cm_list)
@@ -469,6 +469,7 @@ class ramp_IC(EphysData):
         rise_list = []
         decay_list = []
         fwhm_list = []
+        sweep_RMP_mV = []
 
         num_sweeps = V_array.shape[1]
 
@@ -493,10 +494,11 @@ class ramp_IC(EphysData):
                 ramp_end_idx = np.argmax(np.abs(dI)) 
                 offset =  5 * round(np.mean(I_sweep[ramp_end_idx+50:]) / 5)     #np.mean(I_sweep[ramp_end_idx+50:])  
                 rheobase = I_sweep[firt_AP_peak_loc]  # pA
-
+                rmp = np.mean(V_sweep[ramp_end_idx+50:])
             except IndexError:
                 continue  # Skip corrupted index
-
+            
+            sweep_RMP_mV.append(rmp)
             rheobase_list.append(rheobase)
             holding_I_list.append(offset)
             threshold_list.append(v_thresholds_all[0])
@@ -510,9 +512,10 @@ class ramp_IC(EphysData):
             print(f"⚠️ File {row['folder_file']} has empty lists, inspect data.")
 
 
-        row['possible_holding_I'] = np.nanmean(holding_I_list)
-        row['rheobase_pA'] = np.nanmean(rheobase_list)
-        row['v_thresh_mV'] = np.nanmean(threshold_list)
+        row['holding_I'] = np.nanmean(holding_I_list)
+        row['RMP_mV'] = np.nanmean(sweep_RMP_mV)
+        row['ramp_rheobase_pA'] = np.nanmean(rheobase_list)
+        row['ramp_voltage_threshold_mV'] = np.nanmean(threshold_list)
         row['AP_height_mV'] = np.nanmean(height_list)
         row['AP_rise_mV_ms'] = np.nanmean(rise_list)
         row['AP_decay_mV_ms'] = np.nanmean(decay_list)
@@ -565,13 +568,15 @@ class IV_VC(EphysData):
             V_inj_list.append(V_steady)
             I_steady_list.append(I_steady)
 
-        row['V_inj'] = V_inj_list
-        row['I_steady'] = I_steady_list
+        row['V_steps_mV'] = V_inj_list
+        row['I_step_steady_mV'] = I_steady_list
+        row['RMP_mV'] = np.mean(V[end+500:])
+        row['holding_I']=np.mean(I[end+500:])
         return row
 
 
 @dataclass
-class spont_IC(EphysData):    #TO DO BUILD EXCLUSION - traces with high vairability of baseline and remove APs
+class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairability of baseline and remove APs
     filename: str = "spont_IC_df"
     data_type: str = 'spont_IC'
     amplitude_threshold: float = 0.9 # mV
@@ -620,8 +625,8 @@ class spont_IC(EphysData):    #TO DO BUILD EXCLUSION - traces with high vairabil
         # plt.show()
 
         row['sEPSP_frequency_Hz'] = frequency
-        row['sEPSP_rise_times'] = rise_times
-        row['sEPSP_amplitudes'] = amplitudes
+        row['sEPSP_rise_times_ms'] = rise_times #check units
+        row['sEPSP_amplitudes_mV'] = amplitudes #check units
         return row
 
 
@@ -638,30 +643,60 @@ class IF_IC(EphysData):
     
     def process(self, row: pd.Series) -> pd.Series:
         """
-        Designed for a step protocol of a single step per sweep. 
-        Return:
-            I_step: list of I steps in unit of given I_array
-            f_Hz: list of frequency of APs on I step in Hz 
-        
-        """  
+        Processes current-clamp step protocols (I–F curves).
+
+        Takes: 
+            Voltage (V) and current (I) traces from a single cell recording.
+
+        Returns:
+            The input row (pd.Series) with extracted properties added. Columns added include:
+                '%_sag'
+                'IF_rheobase_pA', 'IF_slope'
+                'valid_APs'
+                'AP_peaks_mV', 'IF_voltage_threshold_mV', 'AP_height_mV', 
+                'AP_width_ms', 'AP_rise_mV_ms', 'AP_decay_mV_ms', 
+                'AP_latency_ms', 'AP_max_rise_mV_ms'
+                'I_steps_pA', 'AP_frequencies_Hz', 'max_firing_Hz'
+                'off_step_peak_locs'
+                'holding_I', 'RMP_mV'
+        """
         V_array, I_array, _ = self.load_data(row['folder_file'])
         dt = 1 / self.sampling_rate
         t = np.arange(len(I_array)) * dt
 
-        # HARDCODE - ONLY REQUIRED FOR HFD I data pCLAMP data with holding attached to steps
-        I_array_offset, offset = correct_I_offset_IF(I_array) 
+        peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row['folder_file'], V_array)  
+        if len(peak_voltages_all)==0: #returns is no APs are detected
+            return row
+    
+        
+        I_array_offset, offset = correct_I_offset_IF(I_array) # pCLAMP data with holding_I attached to steps | not IGOR data
         I_array_adj_clean = denoise_steps(I_array_offset)
-        I_steps , AP_frequencies_Hz, V_rest , off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
-        FI_slope, rheobase_threshold, valid_APs = FI_slope_and_rheobase(row['folder_file'], I_steps, AP_frequencies_Hz)
+        I_steps_pA , AP_frequencies_Hz, V_rest , off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
+        FI_slope, rheobase_threshold, valid_APs = FI_slope_and_rheobase(row['folder_file'], I_steps_pA, AP_frequencies_Hz)
 
+        row["%_sag"] = sag_current_analyser(row['folder_file'], V_array, I_array_adj_clean, I_steps_pA, AP_frequencies_Hz)
+        row["IF_rheobase_pA"] = rheobase_threshold
+        row["IF_slope"] = FI_slope
         row['valid_APs'] = valid_APs
-        row['I_steps'] = I_steps
+
+        row['AP_peaks_mV'] = peak_voltages_all[:10] #turn around on APs
+        row["IF_voltage_threshold_mV"] = v_thresholds_all[:10] #mV at upshoot
+        row["AP_height_mV"] = peak_heights_all[:10]
+        row["AP_width_ms"] = peak_fw_all[:10]
+        row["AP_rise_mV_ms"] = peak_rise_all[:10]
+        row["AP_decay_mV_ms"] = peak_decay_all[:10]
+        row["AP_latency_ms"] = peak_latencies_all[:10]
+        row["AP_max_rise_mV_ms"] = peak_max_dvdt_all[:10]
+
+        row['I_steps_pA'] = I_steps_pA
         row['AP_frequencies_Hz'] = AP_frequencies_Hz
-        row['FI_slope']=FI_slope
-        row['FI_rheobase'] = rheobase_threshold
-        row['V_rest'] = V_rest
-        row['possible_holding_I'] = offset
+        row['max_firing_Hz'] = calculate_max_firing(V_array)
+
         row['off_step_peak_locs']=off_step_peak_locs
+
+        row['holding_I'] = offset 
+        row["RMP_mV"]=V_rest
+
         return row
 
 
@@ -690,8 +725,8 @@ class IV_IC(EphysData):
         dt = 1 / self.sampling_rate
         t = np.arange(len(I_array)) * dt
 
-        # HARDCODE - ONLY REQUIRED FOR HFD I data noisy with holding I (sometimes)
-        I_array_offset, offset = correct_I_offset_IF(I_array) 
+        
+        I_array_offset, offset = correct_I_offset_IF(I_array) # pCLAMP data with holding_I attached to steps | not IGOR data
         I_array_adj_clean = denoise_steps(I_array_offset)
 
         step_current_values, AP_frequencies_Hz, V_rest_FI, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
@@ -701,11 +736,11 @@ class IV_IC(EphysData):
             print (f"No negative I steps for {row['folder_file']}, unable to calculate sag")
             sag_ratio, asym_current, step_current, V_rest_sag = np.nan, np.nan, np.nan, np.nan
 
-        row['sag']=sag_ratio
-        row['step_V_steady']=asym_current
-        row['I_injected']=step_current
-        row['RMP']= V_rest_sag
-        row['possible_holding_I']=offset
+        row['%_sag']=sag_ratio
+        row['V_step_steady_mV']=asym_current
+        row['I_steps_pA']=step_current
+        row['RMP_mV']= V_rest_sag
+        row['holding_I']=offset
 
         return row
 
@@ -723,34 +758,39 @@ class FP(EphysData):
     def process(self, row: pd.Series) -> pd.Series:
         """Processing logic specific to FP data type. Could also handle FP_APP data if sufficient to analise."""
         V_array , I_array, V_list = self.load_data(row['folder_file'])
-
-        row["max_firing"] = calculate_max_firing(V_array)
         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row['folder_file'], V_array)        
-        
         if len(peak_voltages_all)==0: #returns is no APs are detected
             return row
         
-        step_current_values, AP_frequencies_Hz, V_rest, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array, self.sampling_rate)
-        FI_slope, rheobase_threshold, FP_valid = FI_slope_and_rheobase(row['folder_file'], step_current_values, AP_frequencies_Hz)
+        I_steps_pA, AP_frequencies_Hz, V_rest, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array, self.sampling_rate)
+        FI_slope, rheobase_threshold, valid_APs = FI_slope_and_rheobase(row['folder_file'], I_steps_pA, AP_frequencies_Hz)
 
-        row["sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, step_current_values, AP_frequencies_Hz)
-        row["rheobased_threshold"] = rheobase_threshold
-        row["FI_slope"] = FI_slope
-        row["RMP"]=V_rest
-        row['AP_peak_voltages'] = peak_voltages_all[:10]
-        row["voltage_threshold"] = v_thresholds_all[:10]
-        row["AP_height"] = peak_heights_all[:10]
-        row["AP_width"] = peak_fw_all[:10]
-        row["AP_rise_dvdt"] = peak_rise_all[:10]
-        row["AP_decay_dvdt"] = peak_decay_all[:10]
-        row["AP_latency"] = peak_latencies_all[:10]
-        row["AP_dvdt_max"] = peak_max_dvdt_all[:10]
+        row["%_sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, I_steps_pA, AP_frequencies_Hz)
+        row["IF_rheobase_pA"] = rheobase_threshold
+        row["IF_slope"] = FI_slope
+        row['valid_APs'] = valid_APs
 
+        row['AP_peaks_mV'] = peak_voltages_all[:10] #turn around on APs
+        row["IF_voltage_threshold_mV"] = v_thresholds_all[:10] #mV at upshoot
+        row["AP_height_mV"] = peak_heights_all[:10]
+        row["AP_width_ms"] = peak_fw_all[:10]
+        row["AP_rise_mV_ms"] = peak_rise_all[:10]
+        row["AP_decay_mV_ms"] = peak_decay_all[:10]
+        row["AP_latency_ms"] = peak_latencies_all[:10]
+        row["AP_max_rise_mV_ms"] = peak_max_dvdt_all[:10]
+
+        row['I_steps_pA'] = I_steps_pA
+        row['AP_frequencies_Hz'] = AP_frequencies_Hz
+        row['max_firing_Hz'] = calculate_max_firing(V_array)
+
+        row['off_step_peak_locs']=off_step_peak_locs
+
+        # row['holding_I'] = offset #already in this one APP dataset PSYCH_Ephys
+        row["RMP_mV"]=V_rest
         
-
-        #fetch FP data for this cell and use the average threshold to define the RA 
+        #fetch FP data for this cell and use the average threshold to define the RA   #TODO merge with IF_IC   same data_type for base extraction
         try:
-            cell_threshold = np.mean(row['voltage_threshold'])
+            cell_threshold = np.mean(row['IF_voltage_threshold_mV'])
         except:
             cell_threshold = -45 #so when you -20 is 65 for cells without FP
 
@@ -998,7 +1038,7 @@ class Ephys(EphysData):
     
     def generate(self) -> pd.DataFrame:
         """
-        Builds cell_df with each row a cell_id, Rs_pct_change reported where possible, each file used for calculation is stored f"{data_type}_folder_files".
+        Builds cell_df with each row a cell_id, Rs_pct_change, keeps a record of the folder_files used in column f"{data_type}_folder_files".
         """
         if self.project_type == 'application':
             return self.generate_application_cell_df()
@@ -1007,13 +1047,13 @@ class Ephys(EphysData):
 
     def generate_intrinsic_cell_df(self):
         df = self.feature_df.copy()
-        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region'] 
+        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region', 'sex'] 
         cell_df = (df.groupby('cell_id')
                     .apply(lambda g: self.apply_check_unique(g, unique_cols=cell_wise_columns))
                     .reset_index()
                 )
         
-        # --- Add Rs_MOhm change from st_VC_df (and track which files used) --- #
+        # adds Rs_MOhm change from st_VC_df (track folder_files used)
         rs_changes = []
         for cell_id, group in self.st_VC_df.groupby("cell_id"):
             if len(group) != 2:
@@ -1035,21 +1075,48 @@ class Ephys(EphysData):
         cell_df = cell_df.merge(rs_df, on="cell_id", how="left")
             
 
-        # --- Loop over other dfs : columns : average if multiple ---
+        # df , columns to reduce, data_type, average
         reductions = [
-            (self.IF_IC_df, ["I_steps", "AP_frequencies_Hz"], "IF_IC", False),
-            (self.ramp_IC_df, ["rheobase_pA", "v_thresh_mV", "AP_height_mV",
+            (self.IF_IC_df, ["I_steps_pA", "AP_frequencies_Hz"], "IF_IC", False),
+            (self.ramp_IC_df, ["ramp_rheobase_pA", "ramp_voltage_threshold_mV", "AP_height_mV",
                             "AP_rise_mV_ms", "AP_decay_mV_ms", "AP_width_ms"], "ramp_IC", True),
-            # (self.IV_VC_df, ["V_inj", "I_steady"], "IV_VC", False)
+            (self.IV_VC_df, ["I_step_steady_mV", "V_steps_mV"], "IV_VC", False)
+            #(self.spont_IC_df, ["sEPSP_frequency_Hz", "sEPSP_rise_times_ms", "sEPSP_amplitudes_mV"], "spont_IC", True), #currently not used
+
         ]
         for df_src, cols, data_type, avg in reductions:
-            reduced = self.reduce_cellwise(df_src, cols, average=avg)
+            
+            reduced = self.reduce_cellwise(df_src, cols, average=avg) # columns per cell
             cell_df = cell_df.merge(reduced, on="cell_id", how="left")
 
-            # Attach folder files used (here: just keep all unique per cell)
-            folder_files = df_src.groupby("cell_id")["folder_file"].apply(list).reset_index()
-            folder_files.rename(columns={"folder_file": self.folder_files_col(data_type)}, inplace=True)
-            cell_df = cell_df.merge(folder_files, on="cell_id", how="left")
+            # select best folder_file per cell based on RMP and holding current
+            folder_col = self.folder_files_col(data_type)
+            df_best = df_src.copy()
+            df_best['rmp_score'] = -abs(df_best['RMP_mV'] + 70)  # closer to -70 is higher
+            df_best['holding_score'] = -df_best['holding_I']      # smaller holding_I is higher
+            df_best['total_score'] = df_best[['rmp_score', 'holding_score']].mean(axis=1)
+            best_files = (
+                df_best.sort_values(['cell_id', 'total_score'], ascending=[True, False])
+                .groupby('cell_id')
+                .first()
+                .reset_index()
+            )
+
+            cell_df = cell_df.drop(columns=[folder_col], errors='ignore')
+            cell_df = cell_df.merge(
+                best_files[['cell_id', 'folder_file']],
+                on='cell_id',
+                how='left'
+            ).rename(columns={'folder_file': folder_col})
+
+            # OLD CODE KEEPING ALL duplicated data_types
+            # reduced = self.reduce_cellwise(df_src, cols, average=avg)
+            # cell_df = cell_df.merge(reduced, on="cell_id", how="left")
+
+            # # Attach folder files used (here: just keep all unique per cell)
+            # folder_files = df_src.groupby("cell_id")["folder_file"].apply(list).reset_index()
+            # folder_files.rename(columns={"folder_file": self.folder_files_col(data_type)}, inplace=True)
+            # cell_df = cell_df.merge(folder_files, on="cell_id", how="left")
         
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)
@@ -1060,7 +1127,7 @@ class Ephys(EphysData):
         df = self.feature_df.copy()
         df['treatment'] = df.apply(lambda row: row['treatment'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
         
-        cell_wise_columns = ['treatment', 'cell_type', 'cell_subtype', 'axon_presence', 'axon_um']
+        cell_wise_columns = ['treatment', 'cell_type', 'cell_subtype', 'axon_presence', 'axon_um', 'sex', 'region']
 
         def _extract_I_set(group):
             I_set_values = group.loc[

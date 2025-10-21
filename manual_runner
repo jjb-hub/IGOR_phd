@@ -5,8 +5,10 @@ from pathlib import Path
 # List of cell IDs to exclude
 # # --- Exclude specific cell_ids ---
 
+#height <50 and AP_turn around <15mV
+folder_files_to_exclude = ['JJB210517/t27', 'JJB210604/t25', 'JJB210605/t35', 'JJB230122/t20', 'JJB230122/t21', 'JJB230122/t22', 'JJB230122/t24', 'JJB230122/t25', 'JJB230122/t26', 'JJB230203/t17', 'JJB230203/t18', 'JJB230203/t19', 'JJB230203/t20', 'JJB230203/t23', 'JJB230203/t24', 'JJB230203/t25', 'JJB230203/t27', 'JJB230203/t31', 'JJB230203/t32', 'JJB230203/t38', 'JJB230203/t42', 'JJB230203/t43', 'JJB230203/t46', 'JJB230203/t47', 'JJB230203/t49', 'JJB230207/t23', 'JJB230207/t24', 'JJB230606/t6', 'JJB230606/t7', 'JJB230606/t8', 'SAD241218/t5', 'SAD241218/t17', 'SAD241218/t18', 'SAD241218/t19']
 
-EXCLUDED=[  #consider  SIM230225a DRD230108c TLX230627b
+EXCLUDED=[  
         'TLX210422a',
         'TLX230622a',
         'TLX230518c',
@@ -20,6 +22,7 @@ EXCLUDED=[  #consider  SIM230225a DRD230108c TLX230627b
         'DRD230703a',
         'DRD230117b',
         'DRD230126a',
+        'DRD230108c',
 
         'HUM230727b',
 
@@ -35,38 +38,11 @@ EXCLUDED=[  #consider  SIM230225a DRD230108c TLX230627b
         'SIM230203a',
         'SIM241218a',
         'SIM241218e',
+        'SIM230225a',
  ]
-
-# # # ##### REMOVE EXCLUDED FROM PKL
-# # List of .pkl file paths to process
-# pkl_paths = [
-#     "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/APP_df.pkl",
-#     "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/FP_df.pkl",
-#     "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/cell_df.pkl"
-# ]
-
-# # Loop through each file, filter, and save a new version
-# for path_str in pkl_paths:
-#     path = Path(path_str)
-#     df = pd.read_pickle(path)
-
-#     if 'cell_id' not in df.columns:
-#         print(f"Skipping {path.name}: 'cell_id' column not found.")
-#         continue
-
-#     original_len = len(df)
-#     filtered_df = df[~df['cell_id'].isin(EXCLUDED)]
-#     removed_n = original_len - len(filtered_df)
-
-#     # Save to a new file with _filtered suffix
-#     new_path = path.with_name(f"{path.stem}_filtered{path.suffix}")
-#     filtered_df.to_pickle(new_path)
-#     print(f"Saved: {new_path.name} ({removed_n} rows removed)")
 
 
 # ##### EDIT EXCEL FEATURES CREATE EXCLUDED xlsx + add axon
-
-
 
 # # --- Load your Excel files ---
 df_main = pd.read_excel('/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/input/features_pre_exclusion.xlsx')      # e.g., has 'cell_id'
@@ -80,9 +56,42 @@ df_merged = pd.merge(df_main, df_axon[['cell_id', 'axon_uM', 'axon_presence']], 
 # ------ remove 'EXCLUDED' cell_ids ------
 df_filtered = df_merged[~df_merged['cell_id'].isin(EXCLUDED)]
 
+# ---------- remove 'folder_files_to_exclude' in folder_file col------
+df_filtered = df_filtered[~df_filtered['folder_file'].isin(folder_files_to_exclude)]
+
 # # --- Save to a new Excel file ---
 df_filtered.to_excel('/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/input/features_exclusionsmade.xlsx', index=False)
 
 # Save excluded cell_ids in a separate dataframe
 excluded_features = df_main[df_main['cell_id'].isin(EXCLUDED)]
 excluded_features.to_excel('/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/input/features_excluded_only.xlsx', index=False)
+
+
+
+# # ##### REMOVE EXCLUDED FROM PKL
+# List of .pkl file paths to process
+pkl_paths = [
+    "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/APP_df.pkl",
+    "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/FP_df.pkl",
+    "/Users/jasminebutler/Desktop/IGOR_phd/PROJECTS/PSYCH_Ephys/cache/cell_df.pkl"
+]
+
+# Loop through each file, filter, and save a new version
+for path_str in pkl_paths:
+    path = Path(path_str)
+    df = pd.read_pickle(path)
+
+    if 'cell_id' not in df.columns:
+        print(f"Skipping {path.name}: 'cell_id' column not found.")
+        continue
+
+    original_len = len(df)
+    filtered_df = df[~df['cell_id'].isin(EXCLUDED)]
+    removed_n = original_len - len(filtered_df)
+
+    # Save to a new file with _filtered suffix
+    new_path = path.with_name(f"{path.stem}_filtered{path.suffix}")
+    filtered_df.to_pickle(new_path)
+    print(f"Saved: {new_path.name} ({removed_n} rows removed)")
+
+

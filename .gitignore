@@ -9,3 +9,4 @@ figures
 debug.py
 cache
 ephys_phd.db
+manual_runner.py

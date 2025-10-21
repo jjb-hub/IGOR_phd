@@ -53,9 +53,10 @@ class DataSelection (Cachable):
     data_type: str = field(kw_only=True)
     cell_type: str | list = field(kw_only=True, default=None)
     cell_subtype: str | list  = field(kw_only=True, default=None)
+    region: str | list  = field(kw_only=True, default=None)
     treatment: str | list  = field(kw_only=True, default=None)
     I_set: str | list  = field(kw_only=True, default=None)
-    threshold_access_change: float = field(kw_only = True, default=30)
+    threshold_access_change: float = field(kw_only = True, default=30) # Rs % change threshold
 
 
     def __post_init__(self):
@@ -75,6 +76,7 @@ class DataSelection (Cachable):
         self.agg_df = self.biild_agg_df() #validates dv
         if  self.project_obj.project_type == "application":
             self.treatment_count_df = self.generate_treatment_count_df() # not generic enpough yet #TODO
+        # elif self.project_obj.project_type == ""
 
     def load_extractor(self, data_type: str):
         """Dynamically load the extractor class from Ephys_Project by name (data_type)."""
@@ -91,10 +93,11 @@ class DataSelection (Cachable):
 
     def validate_inputs(self):
         '''
-        Checks for valid data_type and that the cell_type, cell_subtype and treatment are withing the data_type.columns()
+        Checks for valid data_type and that the cell_type, region cell_subtype and treatment are withing the data_type.columns()
         '''
-        if self.data_type not in ['FP', 'APP', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ]: #complete list of data types
-            raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of ['FP', 'APP', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC'].")
+        data_types=['FP', 'APP', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ]
+        if self.data_type not in data_types: #complete list of data types
+            raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of {data_types}.")
         
         # if self.data_type in ["FP", "APP"]: #TODO file validator inbuild fo project_type = application only needs to be cleaned
         valid_df = self.cell_df[self.cell_df[f'{self.data_type}_folder_files'].notna()] 
@@ -114,6 +117,7 @@ class DataSelection (Cachable):
         validate_attribute(self.cell_type, 'cell_type')
         validate_attribute(self.treatment, 'treatment')
         validate_attribute(self.cell_subtype, 'cell_subtype')
+        validate_attribute(self.region, 'region')
    
     def get_valid_folder_files(self):
         """
@@ -137,6 +141,8 @@ class DataSelection (Cachable):
             filtered_cell_df = filtered_cell_df[filtered_cell_df['I_set'].isin([self.I_set] if isinstance(self.I_set, str) else self.I_set)]
         if self.threshold_access_change is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['Rs_pct_change'].abs() <= self.threshold_access_change]
+        if self.region is not None:
+            filtered_cell_df = filtered_cell_df[filtered_cell_df['region'].isin([self.region] if isinstance(self.region, str) else self.region)]
 
         valid_cell_ids = filtered_cell_df['cell_id'].tolist()
         valid_files = filtered_cell_df[valid_column].dropna().tolist()
@@ -157,11 +163,11 @@ class DataSelection (Cachable):
         """
         data_type_df = getattr(self, f"{self.data_type}_df")
 
-        # Generic columns that exist for all data_types
-        generic_data_type_cols = ['cell_id', 'folder_file', 'treatment', 'cell_type', 'cell_subtype', 'I_set', 'error', 'traceback']
+        
+        independant_vairables = ['cell_id', 'folder_file', 'treatment', 'cell_type', 'cell_subtype', 'I_set', 'region', 'error', 'traceback'] #region and I_set are project specific this need to be generalised
 
         # Determine which dependent variables exist for this data_type
-        valid_dvs_for_data_type = [col for col in data_type_df.columns if col not in generic_data_type_cols]
+        valid_dvs_for_data_type = [col for col in data_type_df.columns if col not in independant_vairables]
 
         # Filter only valid folder_files
         filtered_df = data_type_df[data_type_df['folder_file'].isin(self.valid_files)].copy()
@@ -239,7 +245,7 @@ class DataSelection (Cachable):
             'AP_dvdt_max': 'mean',
             'AP_height': 'mean',
             'AP_latency': 'mean',
-            'AP_peak_voltages': 'mean',
+            'AP_peak_voltages': 'mean',  #averaging catch now in histogram if it helps ?
             'AP_decay_dvdt': 'mean',
             'AP_rise_dvdt': 'mean',
             'AP_width': 'mean',
@@ -269,7 +275,7 @@ class DataSelection (Cachable):
             raise ValueError("Both DataFrames must have 'cell_id' column.")
 
         # Always include these base columns
-        columns_to_map = ['cell_id', 'treatment', 'cell_type', 'cell_subtype']
+        columns_to_map = ['cell_id', 'treatment', 'cell_type', 'cell_subtype', 'region', 'sex']
 
         # Add any extra columns specified by the caller
         if additional_cols:
@@ -1063,12 +1069,15 @@ class ApplicationResponse(Figure):
 
 @dataclass
 class Histogram(Figure):
+    '''
+    Generic histogram class for plotting histograms of a specified dependant variable across treatments (and timepoints if project == application).
+    '''
     filename: str = None
     dependant_var: str = field(kw_only=True)
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id
     n_minimum: float = field(kw_only = True, default = 3)
 
-    #Drug application specific
+    #for project_type ==  application 
     pre_sweep_window: int = None # window before and after drug_in
     post_sweep_window: int = None 
 
@@ -1077,33 +1086,41 @@ class Histogram(Figure):
         super().__post_init__()
         self.check_valid_dependant_var()
         self.data = self.filter_n_minimum(self.agg_df)
+
+        # If dependant_var contains lists or arrays, average them to a single numeric value
+        self.data[self.dependant_var] = self.data[self.dependant_var].apply(
+            lambda x: np.mean(x) if isinstance(x, (list, np.ndarray, pd.Series)) else x
+        )
         if self.data_type == "APP":
             self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=self.dependant_var, pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
-        # self.stats = self.generate_statistics() #DEPRICATED AND NOT GENERIC #TODO
         self.order = [t for t in color_dict.keys() if t in self.data['treatment'].unique()]
-        self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()] #not generic #TODO
+
+        if  self.project_obj.project_type == "application":
+            # self.stats = self.generate_statistics() #DEPRICATED AND NOT GENERIC #TODO
+            self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()] #not generic #TODO
+        
         self.fig = self.plot_histogram()
         
-    def generate_statistics(self):
-        #mixed effects models --> Tukey
-        model = mixedlm(f"{self.dependant_var} ~ time * treatment", self.data, groups=self.data["cell_id"])
-        result = model.fit()
-        interaction_pvalues = {term: result.pvalues[term] for term in result.pvalues.keys() if 'time' in term and 'treatment' in term}
-        significant_interactions = {term: pval for term, pval in interaction_pvalues.items() if pval < 0.05}
+    # def generate_statistics(self): DEPRICATED AND NOT GENERIC
+    #     #mixed effects models --> Tukey
+    #     model = mixedlm(f"{self.dependant_var} ~ time * treatment", self.data, groups=self.data["cell_id"])
+    #     result = model.fit()
+    #     interaction_pvalues = {term: result.pvalues[term] for term in result.pvalues.keys() if 'time' in term and 'treatment' in term}
+    #     significant_interactions = {term: pval for term, pval in interaction_pvalues.items() if pval < 0.05}
 
-        if significant_interactions:
-            print(f"significant interaction/s: {significant_interactions}, performingm tukey post hoc.")
-            tukey = pairwise_tukeyhsd(endog=self.data[self.dependant_var], groups=self.data['time'] + self.data['treatment'], alpha=0.05)
-            significant_pairs = []
-            for row in tukey.summary().data[1:] :
-                reject = row[-1]  # The last column indicates whether the null hypothesis was rejected
-                if reject == 'True':  #  if the comparison is significant
-                    group1, group2 = row[0], row[1]
-                    significant_pairs.append((group1, group2))
-                    return significant_pairs
-        else:
-            print("No significant interaction found.")
-            return None
+    #     if significant_interactions:
+    #         print(f"significant interaction/s: {significant_interactions}, performingm tukey post hoc.")
+    #         tukey = pairwise_tukeyhsd(endog=self.data[self.dependant_var], groups=self.data['time'] + self.data['treatment'], alpha=0.05)
+    #         significant_pairs = []
+    #         for row in tukey.summary().data[1:] :
+    #             reject = row[-1]  # The last column indicates whether the null hypothesis was rejected
+    #             if reject == 'True':  #  if the comparison is significant
+    #                 group1, group2 = row[0], row[1]
+    #                 significant_pairs.append((group1, group2))
+    #                 return significant_pairs
+    #     else:
+    #         print("No significant interaction found.")
+    #         return None
 
 
     def specify_markers(self, df, ax):
@@ -1119,11 +1136,11 @@ class Histogram(Figure):
             sns.stripplot(
                 x='treatment',
                 y=self.dependant_var,
-                hue='time',
-                hue_order=['PRE', 'APP', 'WASH'],
+                hue='time' if self.project_obj.project_type == "application" else 'treatment',
+                hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
                 order=self.order ,
                 data=subset_to_plot,
-                palette={"PRE":"azure", "APP": "teal", "WASH":"cadetblue"},
+                palette=color_dict,
                 edgecolor="k",
                 linewidth=1,
                 linestyle="-",
@@ -1146,23 +1163,23 @@ class Histogram(Figure):
         sns.barplot(
             x='treatment',
             y=self.dependant_var,
-            hue='time',
-            hue_order=self.hue_order,
+            hue='time' if self.project_obj.project_type == "application" else 'treatment',
+            hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
             order=self.order ,
             data=df,
             errorbar = 'sd',
-            palette={"PRE":"azure", "APP": "teal", "WASH":"cadetblue"},
+            palette=color_dict,
             edgecolor="k",
             ax=ax
         )
         sns.swarmplot(
             x='treatment',
             y=self.dependant_var,
-            hue='time',
-            hue_order=self.hue_order,
+            hue='time' if self.project_obj.project_type == "application" else 'treatment',
+            hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
             order=self.order ,
             data=df,
-            palette={"PRE":"azure", "APP": "teal", "WASH":"cadetblue"},
+            palette=color_dict,
             edgecolor="k",
             linewidth=0.5,
             ax=ax, 
@@ -1181,7 +1198,7 @@ class Histogram(Figure):
         ax.legend(handles=combined_handles, labels=combined_labels, loc='best', title='Legend')
 
 
-        counts = df.groupby('treatment')['cell_id'].nunique()
+        counts = df.groupby('treatment')['cell_id'].nunique() #count unique cells per treatment #TODO add mouse count 
         for tick, treatment in enumerate(self.order):
             count = counts.get(treatment, 0)
             ax.text(tick, -0.1, f'n={count}', ha='center', va='top', fontsize=24, color='black', transform=ax.get_xaxis_transform())
@@ -1189,7 +1206,7 @@ class Histogram(Figure):
         # Customize plot labels and titles
         ax.set_ylabel(unit_dict[self.dependant_var], fontsize=24)
         ax.set_xlabel('')
-        ax.set_title(f'{self.cell_type} - {self.dependant_var}', fontsize=28)
+        ax.set_title(f'{self.cell_type if self.cell_type is not None else ""} {unit_dict[self.dependant_var]}', fontsize=28)
         ax.tick_params(axis='x', labelsize=24)
         ax.tick_params(axis='y', labelsize=24)
         plt.tight_layout()

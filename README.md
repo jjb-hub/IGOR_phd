@@ -17,6 +17,6 @@ folder_files mapped to treatment, cell_id and data_type in features.xlsx
 
 OUTPUT:
 
-For each data_type a df is made to extract relevant parameters for folder_file
+For each data_type a df is made to extract relevant parameters for folder_file this is handeled by the EphysData parent calss.
 
 Cell_df aggregates some info for cell ? which ?
