@@ -638,7 +638,7 @@ class IF_IC(EphysData):
 
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -693,9 +693,21 @@ class IF_IC(EphysData):
         row['max_firing_Hz'] = calculate_max_firing(V_array)
 
         row['off_step_peak_locs']=off_step_peak_locs
-
-        row['holding_I'] = offset 
         row["RMP_mV"]=V_rest
+        row['holding_I'] = offset 
+
+        # retro axonal action potential detection RA APs
+        try:
+            cell_threshold = np.mean(row['IF_voltage_threshold_mV'])
+        except:
+            cell_threshold = -45 #so when you -20 is 65 for cells without FP
+        RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 
+        if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
+            row['RA'] = True
+            row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
+            row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
+
+
 
         return row
 
@@ -801,9 +813,9 @@ class FP(EphysData):
             row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
             row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
 
-        # FP FILE VALIDATOR #TODO REMOVE
-        if np.mean(np.array(peak_voltages_all[:10])[~np.isnan(peak_voltages_all[:10])]) < 15: #mean of first 11 AP peaks is less than 15mV the file is marked invalid
-            row['valid'] = False 
+        # # FP FILE VALIDATOR #TODO REMOVE
+        # if np.mean(np.array(peak_voltages_all[:10])[~np.isnan(peak_voltages_all[:10])]) < 15: #mean of first 11 AP peaks is less than 15mV the file is marked invalid
+        #     row['valid'] = False 
 
         return row
     
@@ -1006,8 +1018,8 @@ class Ephys(EphysData):
         feature_df: excel input mapping folder_files to features
         
         ~ application = multiple timepoints                         
-        FP_df: extraction of firing property data (FP)
-        APP_df: extraction of applications data (APP)
+        FP_df: extraction of firing property data (FP) --> IF_IC
+        APP_df: extraction of applications data (APP) -->APP_IC
         
         ~ intrinsic_properties = one timepoint
         st_VC: .. ect 
