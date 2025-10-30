@@ -13,11 +13,14 @@ CACHE_DIR = f"{INPUT_DIR}/cache"
 # order used in histogram
 # #TODO IMPROVE
 color_dict = { 
+              # sex
+              "M":'lightblue',
+              "F":'pink',
               #stress models
-              "CTL": 'lightblue',
-              "ELS": 'pink',
-              "SD": 'lightblue',
-              "HCD": 'pink',
+              "CTR": 'lightgrey',
+              "ELS": 'orange',
+              "SD": 'lightslategrey',
+              "HCD": 'dodgerblue',
               #drugs
               "CONTROL": 'grey', 
               "CONTROL_CNQX_APP5": 'grey',
@@ -29,6 +32,9 @@ color_dict = {
               "LSD":"purple", 
               "LSD_CNQX_APP5": 'purple',
               "MDL":'blue', 
+                #regions
+              "aIC":'red',
+              "pIC":'blue',
                 #AP figures
               "RA":"orange",
               "Somatic":"blue",
@@ -64,6 +70,9 @@ color_dict = {
 #             }
 
 unit_dict = {
+    "M":"Male",
+    "F":"Female",
+
     "Rs_MOhm": "Series Resistance (MΩ)", 
     "Rm_MOhm": "Membrane Resistance (MΩ)",
     "tau_ms": "Time Constant (ms)",
@@ -95,6 +104,12 @@ unit_dict = {
     "I_steady_pA": "Steady-State Current (pA)",
     "RMP_mV": "Resting Membrane Potential (mV)",
     "V_step_steady_mV": "Steady-State Voltage on step (mV)",
+
+    "AP_count": "number of APs",
+    "RA_count": "number of retroaxonal APs",
+    "SAP_count": "number of somatic APs",
+    "inputR_MOhm": "Input resistance (MΩ)"
+
 }
 
 

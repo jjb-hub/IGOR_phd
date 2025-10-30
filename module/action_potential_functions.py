@@ -153,73 +153,6 @@ def plot_ap_window(
     ax.grid(True)
     plt.show()
 
-# OLD 17 June 2025 change to optional 
-# def plot_ap_window(folder_file, v_array, peak_location, upshoot_location, threshold_voltage, latency, rise_dvdt, max_dvdt, max_dvdt_location, input_sampling_rate, sec_to_ms):
-#     """
-#     Plot the action potential (AP) window centered around the upshoot location, including the slope and the point of maximum derivative (dV/dt).
-    
-#     Inputs:
-#         v_array (numpy.ndarray): The array containing voltage data for a single sweep.
-#         upshoot_location (int): The index in v_array corresponding to the AP upshoot.
-#         threshold_voltage (float): The voltage value at the upshoot.
-#         latency (float): Half of the latency period for the AP in milliseconds.
-#         rise_dvdt (float): The average slope of rising phase of the AP from 20-80% of the AP_height.
-#         max_dvdt (float): The maximum derivative (dV/dt) within the window.
-#         max_dvdt_location (int): The index in v_array where max dV/dt occurs.
-#         input_sampling_rate (float): The sampling rate at which the data was recorded (in Hz).
-#         sec_to_ms (float): Conversion factor from seconds to milliseconds.
-#     """
-#     # Define the window around the upshoot location
-#     window_size_samples = int(latency * (input_sampling_rate / 1000))
-#     window_start = max(0, upshoot_location - window_size_samples)
-#     window_end = min(len(v_array), peak_location + window_size_samples)
-    
-#     # Calculate 3/4 latency in samples
-#     ten_percent_latency_samples = int((latency * 1/10) * (input_sampling_rate / 1000))
-#     ten_percent_latency_time = upshoot_location / input_sampling_rate * sec_to_ms + (latency * 1/10)
-#     ninty_percent_latency_samples = int((latency * 9/10) * (input_sampling_rate / 1000))
-#     ninty_percent_latency_time = upshoot_location / input_sampling_rate * sec_to_ms + (latency * 9/10)
-
-
-#     # Create time points for the entire sweep
-#     time_points = np.arange(len(v_array)) / input_sampling_rate * sec_to_ms
-#     window_time_points = time_points[window_start:window_end]
-
-#     # Extracting the window of interest for plotting
-#     v_window = v_array[window_start:window_end]
-    
-#     # Create the figure and axis
-#     fig, ax = plt.subplots(figsize=(10, 6))
-#     ax.plot(window_time_points, v_window, label='Raw Voltage Trace', color='blue')
-
-#     # Upshoot
-#     ax.axvline(time_points[upshoot_location], color='red', linestyle='--', label='Upshoot', linewidth=2)
-
-#     # Peak location
-#     ax.axvline(time_points[peak_location], color='orange', linestyle='--', label='AP Peak', linewidth=2)
-
-#     # Plotting the slope as a line
-#     slope_line_x = [ten_percent_latency_time, ninty_percent_latency_time]
-#     slope_line_y = [threshold_voltage, threshold_voltage + rise_dvdt * latency]
-#     ax.plot(slope_line_x, slope_line_y, label='Slope', color='green', linewidth=2)
-
-#     # Indicating the max dV/dt point
-#     ax.axvline(time_points[max_dvdt_location], color='purple', linestyle='--', label=f'Max dV/dt: {max_dvdt:.2f} mV/ms', linewidth=2)
-    
-#     # Annotating max dV/dt value
-#     ax.annotate(f'{max_dvdt:.2f} mV/ms', xy=(time_points[max_dvdt_location], max_dvdt), xytext=(10, 3),
-#                 textcoords='offset points', arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=.5'))
-
-#     # Setting up the plot
-#     ax.set_xlabel('Time (ms)')
-#     ax.set_ylabel('Voltage (mV)')
-#     ax.set_title(f'AP Characteristics {folder_file}')
-#     ax.legend()
-#     ax.grid(True)
-
-#     # Display the plot
-#     plt.show()
-
 
 ########## BASE
 
@@ -668,16 +601,6 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
         peak_locs_shift = peak_loc_in_window - closest_idx
         AP_locations_list.append(peak_locs[peak_idx] - peak_locs_shift)
 
-
-
-    # OLD 17 JUn 2025 REDEFINED GLOBAL ap_backwards_window
-    # for peak_idx in range(len(peak_locs)) : 
-    #     while peak_locs[peak_idx]  < ap_backwards_window: # peak_idx at begining of trace 
-    #         ap_backwards_window = int(ap_backwards_window - 10) # set backward window -10 looping until is < peak_locs[peak_idx]   
-    #     v_max  = np.max(V_array[peak_locs[peak_idx] - ap_backwards_window : peak_locs[peak_idx] + ap_forwards_window]) 
-    #     peak_locs_shift = ap_backwards_window - np.where(V_array[peak_locs[peak_idx] - ap_backwards_window: peak_locs[peak_idx] + ap_forwards_window] == v_max)[0][0]
-    #     AP_locations_list += [ peak_locs[peak_idx] - peak_locs_shift ]  
-    
 
 
     #FILTER ON PEAK VOLTAGE > min_ap_peak_voltage
@@ -1460,17 +1383,27 @@ def extract_FI_x_y(folder_file, V_array, I_array, sampeling_rate):
     return I_steps , AP_frequencies_Hz, V_rest , off_step_peak_locs
 
 
-def correct_I_offset_IF(I_array_adj,  threshold_pA=1.0):
+def correct_I_offset_IF(I_array_adj, threshold_pA=1.0, step_threshold=5):
     """
-    Corrects for baseline offset in I_array_adj by subtracting the mean
-    of the flattest sweep, if the offset exceeds a given threshold. For IF step data. 
+    Corrects baseline offset (holding current) in I_array_adj for IF steps.
     """
-    flattest_idx = np.argmin([np.std(I_array_adj[:, i]) for i in range(I_array_adj.shape[1])])
-    offset = np.mean(I_array_adj[:, flattest_idx])
+    # find flattest sweep
+    stds = [np.std(I_array_adj[:, i]) for i in range(I_array_adj.shape[1])]
+    flattest_idx = np.argmin(stds)
+    sweep = I_array_adj[:, flattest_idx]
+    
+    if np.ptp(sweep) < step_threshold:  # peak-to-peak < threshold
+        offset = np.mean(sweep)
+    else:
+        # fallback using pre/post step points - detect step by largest change
+        diffs = np.max(I_array_adj, axis=0) - np.min(I_array_adj, axis=0)
+        step_idx = np.argmax(diffs)
+        pre_step = I_array_adj[:5, step_idx]   
+        post_step = I_array_adj[-5:, step_idx] 
+        offset = np.mean(np.concatenate([pre_step, post_step]))
 
     if abs(offset) > threshold_pA:
-        # print(f"I_array for {folder_file} is offset by {offset:.2f} pA, correcting.")
-        I_array_adj = I_array_adj - offset
+        I_array_adj -= offset
     else:
         offset = 0
 
@@ -1488,6 +1421,9 @@ def denoise_steps(I_array_adj):
 
     for i in range(n_sweeps):
         trace = I_array_adj[:, i]
+        if np.all(trace == 0): # clean all 0 trace
+            denoised[:, i] = 0
+            continue
         d = np.diff(trace)
         threshold = np.max(np.abs(d)) * 0.3
         step_idx = np.where(np.abs(d) > threshold)[0]
@@ -1547,9 +1483,9 @@ def denoise_steps(I_array_adj):
 
 
 
-def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 2):
+def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 3):
     """
-    Calculate FI slope and rheobase threshold based on the first APs.
+    Calculate IF slope and rheobase threshold based on the first APs.
     
     Parameters:
         folder_file (str): Unique identifier.
@@ -1560,7 +1496,7 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 2):
         tuple: (FI_slope, rheobase_threshold, valid_FP=True ) or (np.nan, np.nan, False) if failed.
     """
 
-    def valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I, min_fit_quality=0.2):
+    def valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I, min_fit_quality=0.5, margin_pA=5):
         """
         Evaluates whether a linear fit is valid based on normalized residuals and rheobase bounds.
 
@@ -1573,7 +1509,7 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 2):
             last_I (float): Last current step without action potentials.
             first_I (float): First current step with action potentials.
             min_fit_quality (float, default=0.2):  Normalized residual.
-            min_consecutive (float, default-2): number of consecutive sweeps required to start slope calculation.
+            min_consecutive (float, default=2): number of consecutive sweeps required to start slope calculation.
 
         Returns:
             is_valid (bool): True if fit passes quality check and rheobase falls between
@@ -1586,10 +1522,11 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 2):
         rheo = -intercept / slope if slope != 0 else np.nan
         if not np.isfinite(rheo):
             return False, rheo, fit_quality
-        return (fit_quality <= min_fit_quality and last_I <= rheo < first_I), rheo, fit_quality
+        
+        return (fit_quality <= min_fit_quality and last_I <= rheo < first_I+margin_pA), rheo, fit_quality
 
-    # Find the first occurrence of spiking
-    list_of_non_zero = np.flatnonzero(y)
+    
+    list_of_non_zero = np.flatnonzero(y) #indexes with APs
     if len(list_of_non_zero) == 0:
         print(f'NO APs DETECTED: {folder_file} check FP data or AP health.')
         return np.nan, np.nan, False
@@ -1598,37 +1535,55 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 2):
     for i in range(len(list_of_non_zero) - min_consecutive + 1):
         if np.all(np.diff(list_of_non_zero[i:i + min_consecutive]) == 1):
             first_idx = list_of_non_zero[i]
-            break
+            
+            seq_end = first_idx # find how long this consecutive run actually lasts
+            while (seq_end + 1 < len(y)) and (y[seq_end + 1] > 0):
+                seq_end += 1
+            seq_len = seq_end - first_idx + 1
+            break        
     else:
         print(f"No consecutive APs detected: {folder_file}")
         return np.nan, np.nan, False
 
-    if first_idx == 0:
+    if first_idx is None or first_idx == 0:
         print(f'Cannot determine last I without APs for: {folder_file}')
         return np.nan, np.nan, False
 
-    last_I = x[first_idx - 1]
-    first_I = x[first_idx]
+    last_I = x[first_idx - 1] # last current step with NO spikes
+    first_I = x[first_idx] # first current step WITH spikes
 
 
-    for points in [4, 3, 2]:
-        if len(list_of_non_zero) < points: # <4 sweeps with APs 
-            return np.nan, np.nan, False
-
-        x_fit = x[first_idx:first_idx + points]
-        y_fit = y[first_idx:first_idx + points]
+    for points in range(min(7, seq_len)  , min_consecutive - 1, -1):
+        x_fit = x[first_idx-1:first_idx + points]
+        y_fit = y[first_idx-1:first_idx + points]
+        y_fit = np.round(y_fit, 3)
 
         if not (np.all(np.isfinite(x_fit)) and np.all(np.isfinite(y_fit))):
             print(f"Non-finite values detected in {folder_file}. Skipping fit.")
             return np.nan, np.nan, False
 
         var_y = np.var(y_fit)
-        if var_y == 0 or np.isnan(var_y):
+        # if var_y == 0 or np.isnan(var_y):
+        if var_y < (np.mean(y_fit) * 1e-6) ** 2 or np.isnan(var_y): 
+            print(f"IF_slope incalculable non vairable firing frequency for {folder_file}.")
             return np.nan, np.nan, False
+        
+        # OPTION 1
+        slope, intercept, r_value, p_value, std_err = linregress(x_fit, y_fit)
 
-        slope, intercept = np.polyfit(x_fit, y_fit, 1)
-        is_good_fit, rheo, _ = valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I)
+        # OPTION 2
+        # with warnings.catch_warnings():
+        #     warnings.simplefilter('ignore', np.RankWarning)
+        #     slope, intercept = np.polyfit(x_fit, y_fit, 1)
+        # slope, intercept = np.polyfit(x_fit, y_fit, 1) # RankWarning: Polyfit may be poorly conditioned
+
+        #OPTION 3 
+        # A = np.vstack([x_fit, np.ones_like(x_fit)]).T
+        # slope, intercept = np.linalg.lstsq(A, y_fit, rcond=None)[0]
+
         # plot_FI_curve_and_fit(folder_file, x, y, slope, intercept) 
+        is_good_fit, rheo, _ = valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I)
+        
 
         if is_good_fit:
             return slope, rheo, True
@@ -1638,82 +1593,10 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 2):
     if is_still_good or last_I > (-intercept / slope):
         return slope, last_I, True
 
-    print(f"Unable to calculate FI slope or rheobase threshold with sufficient quality fit.")
+    print(f"Unable to calculate FI slope or rheobase threshold with sufficient quality fit for {folder_file}.")
     return np.nan, np.nan, False
 
 
-# def extract_FI_slope_and_rheobased_threshold(folder_file, x, y): #updated above old as of 11/6/25 OLD CODE
-#     '''
-#     Calculation of the FI slope and rheobase threshold, linear fir of first 3 non zero points, checking for fit quality and bounds between last_I_without_APs and first_I_with_APs. 
-#     If criteria not met will recalculate with 2 points, if fit is adiquite and rheobase is not, will calculate 1/2 way between steps. 
-
-#     Parameters:
-#         folder_file (string): unique file identifier.
-#         x (numpy.ndarray): 1D array representing the current input (usually in pA).
-#         y (numpy.ndarray): 1D array representing frequency (usualy Hz) action potentials per sweep.
-
-#     Returns:
-#         FI_slope (float): The slope of the FI curve, calculated using a linear fit.
-#         rheobase_threshold (float): The calculated rheobase threshold in pA, determined as the x-intercept of the linear fit / 1/2 way between I steps without and with APs.
-#     '''
-#     # Identifying indices of nonzero elements (AP count)
-#     list_of_non_zero = [i for i, element in enumerate(y) if element != 0]
-
-#     if len(list_of_non_zero) == 0:
-#         print(f'NO APs DETECTED: {folder_file} check FP data or AP health.')
-#         return np.nan, np.nan 
-
-#     last_I_without_APs = x[list_of_non_zero[0]-1] # bug SAD241218/t52 IndexError: list index out of range 
-#     first_I_with_APs = x[list_of_non_zero[0]]
-#     min_fit_quality = 0.2
-
-
-#     for points_to_use in [4, 3, 2]:  # Try with 4 points first, then with 3, 2 if needed #started with 3 before 8/4/24
-#         # Check if there are enough points for a reliable linear fit
-#         if len(list_of_non_zero) < points_to_use:
-#             # print("Not enough data points for a reliable fit.")
-#             return np.nan, np.nan
-
-#         # Preparing data for linear fit first 3 I steps with APs
-#         x_fit = np.array(x[list_of_non_zero[0]:list_of_non_zero[0] + points_to_use])
-#         y_fit = np.array(y[list_of_non_zero[0]:list_of_non_zero[0] + points_to_use])
-
-#         #CHECK VALIDTY
-#         if not (np.all(np.isfinite(x_fit)) and np.all(np.isfinite(y_fit))):
-#             print(f"Non-finite values detected in {folder_file}. Skipping fit.")
-#             return np.nan, np.nan
-
-#         y_variance = np.var(y_fit)
-#         if y_variance == 0 or np.isnan(y_variance):
-#             # print(f"Zero or NaN variance in {folder_file}. Skipping fit.")  #usualy unhealthy cells
-#             return np.nan, np.nan  
-         
-#         # Performing linear fit
-#         slope, intercept = np.polyfit(x_fit, y_fit, 1)
-
-#         # Calculating quality of fit
-#         residuals = np.sum((np.polyval([slope, intercept], x_fit) - y_fit) ** 2)
-        
-#         # Calculating rheobase threshold
-#         rheobase_threshold = -intercept / slope
-#         if np.isnan(rheobase_threshold) or np.isinf(rheobase_threshold):
-#             print(f"Invalid rheobase threshold for {folder_file}.")
-#             rheobase_threshold = np.nan 
-
-#         # Checking fit quality and physiological bounds
-#         if residuals / np.var(y_fit) <= min_fit_quality and last_I_without_APs <= rheobase_threshold < first_I_with_APs: #lower bound allows for - values 
-#             # print (f" SAVING Fit : {(residuals / np.var(y_fit)):.2f} , Slope : {slope:.2f}  , Rheobase(pA): {rheobase_threshold:.2f}, Steps: {last_I_without_APs} < pA < {first_I_with_APs}")
-#             return slope, rheobase_threshold
-#         # else:
-#             # print(f"File {folder_file} trying with {points_to_use-1} points due to poor fit ({(residuals / np.var(y_fit)):.2f}) or out-of-bounds rheobase {rheobase_threshold:.2f}pA, Steps: {last_I_without_APs} < pA < {first_I_with_APs}.")
-#             # plot_FI_curve_and_fit(folder_file, x, y, slope, intercept)  
-
-#     if residuals / np.var(y_fit) <= min_fit_quality and last_I_without_APs > rheobase_threshold:
-#         # print (f" SAVING Fit : {(residuals / np.var(y_fit)):.2f} , Slope : {slope:.2f} , Rheobase(pA): {last_I_without_APs}")
-#         return slope, last_I_without_APs
-#     else:
-#         print(f"Unable to calculate FI slope / rheobase threshold with sufficient quality fit." )
-#         return np.nan, np.nan
 
 def plot_FI_curve_and_fit(folder_file, x, y, slope, intercept):
     """
@@ -1751,58 +1634,6 @@ def plot_FI_curve_and_fit(folder_file, x, y, slope, intercept):
     
     # Show the plot
     plt.show()
-
-#OLD 15/3/23
-# def extract_FI_slope_and_rheobased_threshold(x,y, slope_liniar = True):
-#     '''
-
-#     Calculates the slope of the frequency-current (FI) curve and the rheobase threshold.
-
-#     input:
-#         x (numpy.ndarray): 1D array representing the current input (usually in pA).
-#         y (numpy.ndarray): 1D array representing the number of action potentials per sweep.
-#         slope_linear (bool): If True, a linear fit is used to calculate the slope; if False, a sigmoid fit is used, and the slope is determined from the 'k' value of the sigmoid (default True).
-
-#     Returns:
-#         slope (float): The slope of the FI curve. It's either the linear slope or the 'k' value from the sigmoid fit.
-#         rheobase_threshold (float): The calculated rheobase threshold in pA, determined as the x-intercept of the linear fit of the FI curve.
-
-
-#     '''
-#     list_of_non_zero = [i for i, element in enumerate(y) if element!=0] #indicies of non-0 element in y
-
-#     #need to handle pAD here 
-#     x_threshold = np.array (x[list_of_non_zero[0]:list_of_non_zero[0]+3])# taking the first 3 non zero points to build linear fit corisponsing to the first 3 steps with APs
-#     y_threshold = np.array(y[list_of_non_zero[0]:list_of_non_zero[0]+3])
-    
-#     # rehobased threshold with linear
-#     coef = np.polyfit(x_threshold,y_threshold,1) #coef = m, b #rheobase: x when y = 0 (nA) 
-#     rheobase_threshold = -coef[1]/coef[0] #-b/m
-#     #liniar_FI_slope
-#     if slope_liniar == True:
-#         FI_slope_linear = coef[0]  
-#     else: #sigmoid_FI_slope
-#         x_sig, y_sig = trim_after_AP_dropoff(x,y) #remove data after depolarisation block/AP dropoff
-#         x_sig, y_sig = sigmoid_fit_0_0_trim ( x_sig, y_sig, zeros_to_keep = 3) # remove excessive (0,0) point > 3 preceeding first AP
-#         x_fit, y_fit , popt = fit_sigmoid( x_sig, y_sig, maxfev = 1000000, visualise = False) #calculate sigmoid best fit #popt =  [L ,x0, k]  
-#         FI_slope_linear = popt[2]
-        
-#     return FI_slope_linear, rheobase_threshold
-     
-########## PLOTTTING -- can we move it to plotters 
-    # if main_big_plot: 
-    #     plot_window = 500 
-
-    #     for idx in range(len(peak_locs_corr)):    
-
-    #         fig  = plt.figure(figsize = (20,20))
-    #         plt.plot(v_array[peak_locs_corr[idx] - plot_window : peak_locs_corr[idx] + plot_window    ])
-    #         plt.plot( upshoot_locs[idx] -  peak_locs_corr[idx] + plot_window , v_array[upshoot_locs[idx]  ]  , '*', label = 'Threshold')
-    #         plt.plot(  plot_window , v_array[peak_locs_corr[idx]]  , '*', label = 'Peak')
-    #         plt.legend()
-    #         plt.show()
-
-    # return peak_locs_corr , upshoot_locs, v_thresholds , peak_heights , peak_latencies , peak_slope , peak_fw
 
 def replace_nan_with_mean(array): #OLD 26_5_25
         '''
@@ -1924,7 +1755,6 @@ def sweep_mean_RMP_calculator(V_array, I_array=None):
     return: list of mean RMP for each sweep 
     
     '''
-    # V_array_cleaned  = spike_remover(V_array) #NOT WORKING JJB210427/t8 # OLD 26_5_25 changed to nan not average
     V_array_cleaned  = spike_remover_nan(V_array)
 
     if I_array is None or (I_array == 0).all() :
@@ -1940,49 +1770,6 @@ def sweep_mean_RMP_calculator(V_array, I_array=None):
         mean_RMP_sweep_list = np.nanmean(V_masked, axis=0).tolist()
     return mean_RMP_sweep_list
 
-# def mean_inputR_APP_calculator(V_array, I_array):
-#     '''
-#     input:      V_array, I_array (2D array of df shape)
-#                 drug_in  :  integer , sweep number when drug was applied (included in APP)
-#                 drug_out :  integer , sweep number when drug was washed out (included in WASH)
-
-#     returns :   input_R_PRE, input_R_APP, input_R_WASH in MOhms
-#                 input R for each sweep = current injected / change in V in a list/array 
-#     '''
-#     I_sweep = getI_array_sweep(I_array)
-#     input_R_ohms_V_array = []
-    
-#     for index, V_sweep in enumerate(V_array.T):  # Transpose V_array to iterate over columns/sweeps
-        
-#         if index < 2: #skip first 3 sweeps as often holding I was being set or cell was not stabelised
-#             input_R_ohms_V_array.append(np.nan) #preserve sweeps for APP_splitter
-#             continue
-
-#         V_sweep, I_sweep =normalise_array_length(V_sweep, I_sweep)
-#         # V_cleaned  = spike_remover(V_sweep) #oOLD 26_5_25 assigns mean  of trace 
-#         V_cleaned  = spike_remover_nan(V_sweep)
-
-#         #flatten sweeps
-#         V_cleaned = V_cleaned.flatten()
-#         I_sweep = I_sweep.flatten()
-
-#         #fetch delta_V
-#         steady_state , hyper  , first_current_point, last_current_point= steady_state_value(V_sweep, I_sweep)  #with I injection
-#         rmp = np.nanmean(V_cleaned[I_sweep == 0]) #without I injection 
-#         delta_V_mV = abs(steady_state - rmp) #change in mV
-#         #fetch I injected 
-#         delta_I_pA = abs(np.unique(I_sweep[I_sweep != 0])[0])
-#         # fectch sweep input R (ohm)
-#         delta_I_A = delta_I_pA * 1e-12  #  picoamperes to amperes
-#         delta_V_V = delta_V_mV * 1e-3  # millivolts to volts
-
-#         sweep_input_R_ohms = (delta_V_V / delta_I_A) 
-#         input_R_ohms_V_array.append(sweep_input_R_ohms)
-#         sweep_input_R_MOhms = sweep_input_R_ohms / 1e6  # Convert Ohms to Megaohms
-
-#     input_R_PRE, input_R_APP, input_R_WASH =APP_splitter(input_R_ohms_V_array, drug_in, drug_out)
-
-#     return input_R_PRE, input_R_APP, input_R_WASH 
 
 def sweep_mean_inputR_calculator(V_array, I_array):
     '''

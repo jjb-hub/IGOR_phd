@@ -50,7 +50,7 @@ class Project(Cachable):
         if self.project_type is None:
             if "data_type" in self.feature_df.columns:
                 unique_types = set(self.feature_df["data_type"].dropna().unique())
-                if "APP" in unique_types:
+                if "APP_IC" in unique_types:
                     self.project_type = "application"
                 elif unique_types & {"st_VC", "ramp_IC", "IV_VC", "spont_IC", "IF_IC"}:
                     self.project_type = "intrinsic_properties"
@@ -272,8 +272,8 @@ class EphysData (Project):
         ''' generic generator for dfs'''
         df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns] 
 
-        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
-        # df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
+        # df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
+        df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
         df = df[self.initial_columns + additional_columns]
         # cache(self.project, self.filename, df)
@@ -335,7 +335,7 @@ class st_VC(EphysData):
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
-        """Extract Rs, Rm, Cm, tau from each voltage step in the st_VC protocol."""  #HERE TO CHECK AND WORK FOR HFD
+        """Extract Rs, Rm, Cm, tau from each voltage step in the st_VC protocol.""" 
         V_array, I_array, _ = self.load_data(row['folder_file'])
         V = V_array[:, 0]  # mV
         I = I_array[:, 0]  # pA
@@ -638,7 +638,8 @@ class IF_IC(EphysData):
 
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type', 'R_series'] # R_series is redundant for pCLAMP data #TODO
+        
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -669,7 +670,7 @@ class IF_IC(EphysData):
             return row
     
         
-        I_array_offset, offset = correct_I_offset_IF(I_array) # pCLAMP data with holding_I attached to steps | not IGOR data
+        I_array_offset, offset = correct_I_offset_IF(I_array) 
         I_array_adj_clean = denoise_steps(I_array_offset)
         I_steps_pA , AP_frequencies_Hz, V_rest , off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
         FI_slope, rheobase_threshold, valid_APs = FI_slope_and_rheobase(row['folder_file'], I_steps_pA, AP_frequencies_Hz)
@@ -707,7 +708,9 @@ class IF_IC(EphysData):
             row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
             row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
 
-
+        # FILE VALIDATOR 
+        if np.mean(np.array(peak_voltages_all[:10])[~np.isnan(peak_voltages_all[:10])]) < 15: #mean of first 11 AP peaks is less than 15mV the file is marked invalid
+            row['valid'] = False 
 
         return row
 
@@ -757,95 +760,29 @@ class IV_IC(EphysData):
         return row
 
 @dataclass
-class FP(EphysData):
+class APP_IC(EphysData):
     
-    filename: str = "FP_df"
-    data_type: str = 'FP'
-    
-  
-    def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'treatment', 'replication_no', 'application_order', 'R_series', 'cell_type', 'cell_subtype']
-        super().__post_init__()
-    
-    def process(self, row: pd.Series) -> pd.Series:
-        """Processing logic specific to FP data type. Could also handle FP_APP data if sufficient to analise."""
-        V_array , I_array, V_list = self.load_data(row['folder_file'])
-        peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row['folder_file'], V_array)        
-        if len(peak_voltages_all)==0: #returns is no APs are detected
-            return row
-        
-        I_steps_pA, AP_frequencies_Hz, V_rest, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array, self.sampling_rate)
-        FI_slope, rheobase_threshold, valid_APs = FI_slope_and_rheobase(row['folder_file'], I_steps_pA, AP_frequencies_Hz)
-
-        row["%_sag"] = sag_current_analyser(row['folder_file'], V_array, I_array, I_steps_pA, AP_frequencies_Hz)
-        row["IF_rheobase_pA"] = rheobase_threshold
-        row["IF_slope"] = FI_slope
-        row['valid_APs'] = valid_APs
-
-        row['AP_peaks_mV'] = peak_voltages_all[:10] #turn around on APs
-        row["IF_voltage_threshold_mV"] = v_thresholds_all[:10] #mV at upshoot
-        row["AP_height_mV"] = peak_heights_all[:10]
-        row["AP_width_ms"] = peak_fw_all[:10]
-        row["AP_rise_mV_ms"] = peak_rise_all[:10]
-        row["AP_decay_mV_ms"] = peak_decay_all[:10]
-        row["AP_latency_ms"] = peak_latencies_all[:10]
-        row["AP_max_rise_mV_ms"] = peak_max_dvdt_all[:10]
-
-        row['I_steps_pA'] = I_steps_pA
-        row['AP_frequencies_Hz'] = AP_frequencies_Hz
-        row['max_firing_Hz'] = calculate_max_firing(V_array)
-
-        row['off_step_peak_locs']=off_step_peak_locs
-
-        # row['holding_I'] = offset #already in this one APP dataset PSYCH_Ephys
-        row["RMP_mV"]=V_rest
-        
-        #fetch FP data for this cell and use the average threshold to define the RA   #TODO merge with IF_IC   same data_type for base extraction
-        try:
-            cell_threshold = np.mean(row['IF_voltage_threshold_mV'])
-        except:
-            cell_threshold = -45 #so when you -20 is 65 for cells without FP
-
-        RA_condition = lambda peak_voltage, threshold: threshold <= (cell_threshold - 20) and peak_voltage > 0 
-
-        if any(RA_condition(peak_voltage, threshold) for peak_voltage, threshold in zip(peak_voltages_all, v_thresholds_all)):
-            row['RA'] = True
-            row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if threshold <= -65 and peak_voltage > 20]
-            row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
-
-        # # FP FILE VALIDATOR #TODO REMOVE
-        # if np.mean(np.array(peak_voltages_all[:10])[~np.isnan(peak_voltages_all[:10])]) < 15: #mean of first 11 AP peaks is less than 15mV the file is marked invalid
-        #     row['valid'] = False 
-
-        return row
-    
-@dataclass
-class APP(EphysData):
-    
-    filename: str = "APP_df"
-    data_type: str = 'APP'
+    filename: str = "APP_IC_df"
+    data_type: str = 'APP_IC'
 
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'treatment', 'drug_in', 'drug_out', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'treatment', 'drug_in', 'drug_out', 'cell_type', 'cell_subtype']
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
-        """Generate APP_df from scratch, 
+        """Generate APP_IC_df from scratch, 
         Processing logic specific to APP data type."""
         V_array , I_array, V_list = self.load_data(row['folder_file'])
 
-        
-
-
         if I_array is not None and (I_array[:, 0] != 0).any():
-            row['sweep_inputR']=sweep_mean_inputR_calculator(V_array, I_array)
+            row['sweep_inputR_MOhm']=sweep_mean_inputR_calculator(V_array, I_array)
             # input_R_PRE, input_R_APP, input_R_WASH = mean_inputR_APP_calculator(V_array, I_array, row.drug_in, row.drug_out)
             # row['inputR_PRE'] = input_R_PRE
             # row['inputR_APP'] = input_R_APP
             # row['inputR_WASH'] = input_R_WASH
             pass_I_array = I_array
         else:
-            row['sweep_inputR']= np.nan
+            row['sweep_inputR_MOhm']= np.nan
             # row['inputR_PRE'] = []
             # row['inputR_APP'] = []
             # row['inputR_WASH'] = []
@@ -858,11 +795,9 @@ class APP(EphysData):
         # row['RMP_APP'] = mean_RMP_APP
         # row['RMP_WASH'] = mean_RMP_WASH
 
-        row['sweep_RMP']=sweep_mean_RMP_calculator(V_array, I_array=pass_I_array)
+        row['sweep_RMP_mV']=sweep_mean_RMP_calculator(V_array, I_array=pass_I_array)
 
         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row.folder_file, V_array)
-
-        
 
         
         # sweep_AP_count
@@ -874,15 +809,12 @@ class APP(EphysData):
             APs_per_sweep[unique] = counts
             row['sweep_AP_count']=APs_per_sweep 
 
-
         else:
             row['sweep_AP_count']=np.zeros(V_array.shape[1], dtype=int)
             
-
-        #fetch FP data for this cell and use the average threshold to define the RA 
-        FP_df = self.getCache("FP_df")
+        IF_IC_df = self.getCache("IF_IC_df")
         try:
-            FP_cell_id_PRE = FP_df[(FP_df['cell_id'] == row['cell_id']) & (FP_df['treatment'] == 'PRE')]
+            FP_cell_id_PRE = IF_IC_df[(IF_IC_df['cell_id'] == row['cell_id']) & (IF_IC_df['treatment'] == 'PRE')]
             cell_threshold = (FP_cell_id_PRE['voltage_threshold'].apply(lambda x: sum(x) / len(x) if isinstance(x, list) else x)).mean()
         except:
             cell_threshold = -45 #so when you -20 is 65 for cells without FP
@@ -893,9 +825,7 @@ class APP(EphysData):
             row['RA'] = True
             row['RA_locs'] = [peak_locs_corr_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if RA_condition(peak_voltage, threshold)]
             row['RA_sweep_locs'] = [sweep_indices_all[i] for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)) if RA_condition(peak_voltage, threshold)]
-
-            
-            row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 #RA/minute
+            row['RA_per_min'] = len(row['RA_locs']) / V_array.shape[0] * V_array.shape[1] / self.sampling_rate / 60 
 
             # sweep_RA_count
             RA_sweep_locs = row['RA_sweep_locs']
@@ -915,7 +845,7 @@ class APP(EphysData):
         row['peak_voltages_all'] = peak_voltages_all
 
         # GENERIC functions
-        def check_variability(values, Vairability_threshold=0.30): 
+        def check_variability(values, vairability_threshold=0.30): 
             """Check if variability of values exceeds the given threshold."""
             values = np.array(values)[~np.isnan(values)]
             if len(values) <= 1:
@@ -923,7 +853,7 @@ class APP(EphysData):
             min_val = np.min(values)
             max_val = np.max(values)
             # print(f" % var  {abs((max_val - min_val) / min_val)}")
-            return abs((max_val - min_val) / min_val) <= Vairability_threshold
+            return abs((max_val - min_val) / min_val) <= vairability_threshold
         
         def group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=0.5):
             """
@@ -967,23 +897,25 @@ class APP(EphysData):
             return True  
         
         # APP FILE INVALIDATORS 
-        baseline = row['sweep_RMP'][1:int(row.get('drug_in', 0))]
-        if check_variability(baseline,Vairability_threshold=0.3)  == False: #assigns True if < vairability threshold
+        baseline = row['sweep_RMP_mV'][1:int(row.get('drug_in', 0))]
+        if check_variability(baseline, vairability_threshold=0.3)  == False: #assigns True if < vairability threshold
             row['valid'] = False 
 
         if len(peak_voltages_all)>0: # if APs 
-            if np.mean(np.nanmean(peak_voltages_all)) < 15: #HARDCODE minimum 15 mV AP height to declare offset issues
-                row['offset']= True
+            if np.mean(np.nanmean(peak_voltages_all)) < 15: #HARDCODE minimum 15 mV AP height 
+                row['valid']= False
 
             peak_voltage_burst_max = group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=1)
             ap_burst_valid = unidirectional_trend(peak_voltage_burst_max, threshold=10)
             if ap_burst_valid == False:
                 row['valid'] = False
 
-        rmp_valid = unidirectional_trend(row['sweep_RMP'], threshold=20) #assigns True if # REFACTOR as not used in plotter
+        rmp_valid = unidirectional_trend(row['sweep_RMP_mV'], threshold=20) #assigns True if # REFACTOR as not used in plotter
         if  rmp_valid == False:
             row['valid'] = False
 
+        else:
+            row['valid'] = None #could be True
         return row
         
 class Hunter(EphysData):
@@ -992,7 +924,7 @@ class Hunter(EphysData):
     data_type: str = 'Hunter'
 
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'replication_no', 'application_order', 'cell_type', 'cell_subtype']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'cell_type', 'cell_subtype']
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
@@ -1013,20 +945,20 @@ class Hunter(EphysData):
 class Ephys(EphysData):
     ''' 
     Buiilding aggregate df with cell info based off extracted data from each data type in either : 
-        application  ['APP', 'FP']         or       intrinsic_properties ['st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ] +AMPA?NMDA + PPR to come #TODO
+        application  ['APP_IC', 'IF_IC']         or       intrinsic_properties ['st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ] +AMPA?NMDA + PPR to come #TODO
         
         feature_df: excel input mapping folder_files to features
         
         ~ application = multiple timepoints                         
-        FP_df: extraction of firing property data (FP) --> IF_IC
-        APP_df: extraction of applications data (APP) -->APP_IC
+        IF_IC_df: extraction of firing property data (IF_IC) 
+        APP_IC_df: extraction of applications data (APP_IC) 
         
         ~ intrinsic_properties = one timepoint
         st_VC: .. ect 
 
 
     Generates:
-        cell_df: mapping of cells to features including change in access and FP_valid and APP_valid columns with valid folder_files
+        cell_df: mapping of cells to features including change in access and IF_IC_valid and APP_IC_valid columns with valid folder_files
           '''
     filename: str = 'cell_df'
     sampling_rate: float = 2e4
@@ -1034,10 +966,10 @@ class Ephys(EphysData):
     def __post_init__(self):
         Project.__post_init__(self) # initates project only to get self.project_type
 
-        if self.project_type == 'application':
-            self.FP_df = FP(self.project).df 
-            self.APP_df = APP(self.project).df
-            # self.hunter_df = Hunter(self.project).df #TODO 
+        if self.project_type == 'application': #TODO change to loop for data types in project
+            self.IF_IC_df = IF_IC(self.project).df 
+            self.APP_IC_df = APP_IC(self.project).df
+
         elif self.project_type == 'intrinsic_properties':
             self.st_VC_df = st_VC(self.project).df
             self.IV_VC_df = IV_VC(self.project).df
@@ -1059,7 +991,7 @@ class Ephys(EphysData):
 
     def generate_intrinsic_cell_df(self):
         df = self.feature_df.copy()
-        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region', 'sex'] 
+        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region', 'sex', 'subject_id'] 
         cell_df = (df.groupby('cell_id')
                     .apply(lambda g: self.apply_check_unique(g, unique_cols=cell_wise_columns))
                     .reset_index()
@@ -1068,24 +1000,32 @@ class Ephys(EphysData):
         # adds Rs_MOhm change from st_VC_df (track folder_files used)
         rs_changes = []
         for cell_id, group in self.st_VC_df.groupby("cell_id"):
-            if len(group) != 2:
-                print(f"Warning: cell_id {cell_id} has {len(group)} st_VC entries (expected 2)") 
+            group = group.sort_values(by="folder_file")
+            rs_values = group["Rs_MOhm"].values
+            folder_files = group["folder_file"].tolist()
+
+            if len(group)<2:
+                print(f"Warning: cell_id {cell_id} has < 2 st_VC enteries, unable to calculate access change.")
                 rs_changes.append((cell_id, np.nan, np.nan, []))
                 continue
 
-            rs_values = group["Rs_MOhm"].values
-            abs_change = abs(rs_values[1] - rs_values[0])
-            pct_change = ((rs_values[1] - rs_values[0]) / rs_values[0]) * 100 if rs_values[0] != 0 else np.nan
-            folder_files = group["folder_file"].tolist()
+            # if len(group) != 2:
+            #     print(f"Warning: cell_id {cell_id} has {len(group)} st_VC entries (expected 2)") 
 
-            rs_changes.append((cell_id, abs_change, pct_change, folder_files))
+            first_val, last_val = rs_values[0], rs_values[-1]
+            rs_values = group["Rs_MOhm"].values
+            abs_change = abs(last_val- first_val)
+            pct_change = ((last_val- first_val) / first_val) * 100 if first_val != 0 else np.nan
+            used_folder_files = [folder_files[0], folder_files[-1]]
+
+            rs_changes.append((cell_id, abs_change, pct_change, used_folder_files))
 
         rs_df = pd.DataFrame(
             rs_changes, 
             columns=["cell_id", "Rs_abs_change", "Rs_pct_change", self.folder_files_col("st_VC")]
         )
         cell_df = cell_df.merge(rs_df, on="cell_id", how="left")
-            
+    
 
         # df , columns to reduce, data_type, average
         reductions = [
@@ -1094,10 +1034,9 @@ class Ephys(EphysData):
                             "AP_rise_mV_ms", "AP_decay_mV_ms", "AP_width_ms"], "ramp_IC", True),
             (self.IV_VC_df, ["I_step_steady_mV", "V_steps_mV"], "IV_VC", False)
             #(self.spont_IC_df, ["sEPSP_frequency_Hz", "sEPSP_rise_times_ms", "sEPSP_amplitudes_mV"], "spont_IC", True), #currently not used
-
         ]
+
         for df_src, cols, data_type, avg in reductions:
-            
             reduced = self.reduce_cellwise(df_src, cols, average=avg) # columns per cell
             cell_df = cell_df.merge(reduced, on="cell_id", how="left")
 
@@ -1120,15 +1059,6 @@ class Ephys(EphysData):
                 on='cell_id',
                 how='left'
             ).rename(columns={'folder_file': folder_col})
-
-            # OLD CODE KEEPING ALL duplicated data_types
-            # reduced = self.reduce_cellwise(df_src, cols, average=avg)
-            # cell_df = cell_df.merge(reduced, on="cell_id", how="left")
-
-            # # Attach folder files used (here: just keep all unique per cell)
-            # folder_files = df_src.groupby("cell_id")["folder_file"].apply(list).reset_index()
-            # folder_files.rename(columns={"folder_file": self.folder_files_col(data_type)}, inplace=True)
-            # cell_df = cell_df.merge(folder_files, on="cell_id", how="left")
         
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)
@@ -1137,52 +1067,30 @@ class Ephys(EphysData):
 
     def generate_application_cell_df(self):
         df = self.feature_df.copy()
-        df['treatment'] = df.apply(lambda row: row['treatment'] if row['application_order'] == 1 else np.nan, axis=1)  # make treatment column
+        cell_wise_columns = ['cell_type', 'cell_subtype', 'axon_presence', 'axon_um', 'sex', 'region', 'subject_id'] # treatment and I_set added later based off APP_IC
         
-        cell_wise_columns = ['treatment', 'cell_type', 'cell_subtype', 'axon_presence', 'axon_um', 'sex', 'region']
-
-        def _extract_I_set(group):
-            I_set_values = group.loc[
-                (group['data_type'] == 'APP')
-                & (group['replication_no'] == 1)
-                & (group['application_order'] == 1),
-                'I_set',
-            ].unique()
-            I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
-            return pd.Series({'I_set': I_set_value})
+        def _extract_APP_attributes(group):
+            # There is exactly one APP_IC row per cell
+            app_row = group[group['data_type'] == 'APP_IC'].iloc[0]
+            return pd.Series({
+                'I_set': app_row['I_set'],
+                'treatment': app_row['treatment']
+            })
 
         
-        #OLD 11Sept25
-        # def check_unique(series, cell_id):
-        #     unique_values = series.dropna().unique()
-        #     if len (unique_values) == 0:
-        #         return None
-        #     if len(unique_values) == 1:
-        #         return unique_values[0]
-        #     else:
-        #         raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
-
-        # def apply_check_unique(group): # single value per cell_id #NOT GENERIC OLD DELETE #TODO
-        #     cell_id = group.name
-        #     I_set_values = group.loc[(group['data_type'] == 'APP') & (group['replication_no'] == 1) & (group['application_order'] == 1), 'I_set' ].unique()
-        #     I_set_value = I_set_values[0] if len(I_set_values) > 0 else np.nan
-        
-        #     aggregated_data = group.agg({
-        #         'treatment': lambda series: check_unique(series, cell_id),
-        #         'cell_type': lambda series: check_unique(series, cell_id),
-        #         'cell_subtype': lambda series: check_unique(series, cell_id), 
-        #         'axon_presence':lambda series: check_unique(series, cell_id),
-        #         'axon_um':lambda series: check_unique(series, cell_id),
-        #     })
-        #     return pd.concat([aggregated_data, pd.Series({'I_set': I_set_value})])
-
-        def calculate_percentage_diff(group):
+        def calculate_percentage_diff(group):  
+            #there are two ways access could be handeled 
+            # 1 there is a column R_series for given folder files or 2 there are st_VC folder_files
+            # 2 there is no column R_series and the change should be calculated from first to last st_VC recording 
             """
+            USING R_series column for foler_files (data_type == 'IF_IC')
+            
             Selects the two PRE and two non-PRE FP files with the most similar R_series values to compute access change. 
             If several have the same access chose the filder_files that have the least mising values."""
             cell_id = group.name
+
             #FIRING PROPERTY 
-            cell_fp_df = self.FP_df[self.FP_df['cell_id'] == cell_id]
+            cell_fp_df = self.IF_IC_df[self.IF_IC_df['cell_id'] == cell_id]
             pre_values = cell_fp_df[cell_fp_df['treatment'] == 'PRE'][['R_series', 'folder_file']]
             non_pre_values = cell_fp_df[cell_fp_df['treatment'] != 'PRE'][['R_series', 'folder_file']]
             
@@ -1192,7 +1100,7 @@ class Ephys(EphysData):
             
             # Check if there are enough values
             if len(pre_series) < 2 or len(non_pre_series) < 2:
-                return pd.Series({'Rs_pct_change': None, self.folder_files_col("FP"): None}) # mayher here files without pairs or not used should be dropped?
+                return pd.Series({'Rs_pct_change': None, self.folder_files_col("IF_IC"): None}) # mayher here files without pairs or not used should be dropped?
             
             # Generate all combinations of two values
             pre_combinations = list(combinations(pre_series, 2))
@@ -1217,17 +1125,20 @@ class Ephys(EphysData):
                         best_non_pre_pair = non_pre_pair
             
             if best_pre_pair is None or best_non_pre_pair is None:
-                return pd.Series({'Rs_pct_change': None, self.folder_files_col("FP"): None})
-            
+                return pd.Series({
+                    'Rs_pct_change': None,
+                    self.folder_files_col("IF_IC"): None
+                })
+
             # folder_file filtered on access
             pre_folder_files = pre_values[pre_values['R_series'].isin(best_pre_pair)]['folder_file'].tolist() 
             non_pre_folder_files = non_pre_values[non_pre_values['R_series'].isin(best_non_pre_pair)]['folder_file'].tolist()
 
             # filter folder_files on extracted features and absence of RA
             if len(pre_folder_files) > 2 or len(non_pre_folder_files) > 2:
-                FP_feature_cols = [
-                    'AP_peak_voltages', 'AP_rise_dvdt', 'AP_width', 'FI_slope',
-                    'max_firing', 'rheobased_threshold', 'sag',  'voltage_threshold', 'AP_decay_dvdt'
+                IF_IC_feature_cols = [
+                    'AP_peaks_mV', 'AP_rise_mV_ms', 'AP_width_ms', 'IF_slope',
+                    'max_firing_Hz', 'IF_rheobase_pA', '%_sag',  'IF_voltage_threshold_mV', 'AP_decay_mV_ms'
                 ]
                 
                 pre_df = cell_fp_df[cell_fp_df['treatment'] == 'PRE'].copy()
@@ -1238,49 +1149,45 @@ class Ephys(EphysData):
                 non_pre_df = non_pre_df[non_pre_df['R_series'].isin(best_non_pre_pair)]
                 
                 # Count missing values in relevant columns
-                pre_df['missing_count'] = pre_df[FP_feature_cols].isna().sum(axis=1)
-                non_pre_df['missing_count'] = non_pre_df[FP_feature_cols].isna().sum(axis=1)
+                pre_df['missing_count'] = pre_df[IF_IC_feature_cols].isna().sum(axis=1)
+                non_pre_df['missing_count'] = non_pre_df[IF_IC_feature_cols].isna().sum(axis=1)
 
                 # Sort and select top 2
                 pre_folder_files = pre_df.sort_values(by='missing_count')['folder_file'].iloc[:2].tolist()
-                non_folder_files = non_pre_df.sort_values(by='missing_count')['folder_file'].iloc[:2].tolist()
+                non_pre_folder_files = non_pre_df.sort_values(by='missing_count')['folder_file'].iloc[:2].tolist()
             else:
                 # Safe fallback if only 1–2 values are returned, keep them directly
                 pre_folder_files = pre_folder_files[:2]
-                non_folder_files = non_pre_folder_files[:2]
+                non_pre_folder_files = non_pre_folder_files[:2]
 
-            return pd.Series({'Rs_pct_change': min_diff, self.folder_files_col("FP"): pre_folder_files + non_folder_files})
+                return pd.Series({
+                    'Rs_pct_change': min_diff,
+                    self.folder_files_col("IF_IC"): pre_folder_files + non_pre_folder_files
+                })
 
-
+        #initalise off feature df
         cell_df = (
             df.groupby('cell_id')
-            .apply(lambda g: self.apply_check_unique(g, unique_cols=cell_wise_columns, extra_logic=_extract_I_set))
-            .reset_index()
-        )
-        # cell_df = df.groupby('cell_id').apply(apply_check_unique).reset_index() #OLD 11Sept25
-        diff_df = self.FP_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
+            .apply(lambda g: self.apply_check_unique(g, unique_cols=cell_wise_columns, extra_logic=_extract_APP_attributes))
+            .reset_index())
+        
+        diff_df = ( self.IF_IC_df 
+                   .groupby('cell_id', group_keys=False)
+                   .apply(calculate_percentage_diff))
+
+        # diff_df = self.IF_IC_df.groupby('cell_id').apply(calculate_percentage_diff).reset_index()
         cell_df = cell_df.merge(diff_df, on='cell_id', how='left')
 
 
         # APPLICATION FILES
-        filtered_app_df = self.APP_df[ 
-                                    # (self.APP_df['valid'] == True) & vaildators based on vairability - changing exclusion criteria 
-                                    (self.APP_df['valid'] != False) & 
-                                    (self.APP_df['application_order'] == 1) &
-                                    (self.APP_df['replication_no'] == 1)]
+        filtered_app_df = self.APP_IC_df[ (self.APP_IC_df['valid'] != False)]
         valid_files_dict = filtered_app_df.set_index('cell_id')['folder_file'].to_dict()
-        cell_df[self.folder_files_col("APP")] = cell_df['cell_id'].map(valid_files_dict)
+        cell_df[self.folder_files_col("APP_IC")] = cell_df['cell_id'].map(valid_files_dict)
 
 
-        # # Response of cell # MOVE TO agg df only?
-        # ap_response_dict = filtered_app_df.set_index('cell_id')['AP_response'].to_dict() 
-        # rmp_response_dict = filtered_app_df.set_index('cell_id')['RMP_response'].to_dict()
-        # cell_df['firing'] = cell_df['cell_id'].map(ap_response_dict)
-        # cell_df['RMP'] = cell_df['cell_id'].map(rmp_response_dict)
-
-        # Check RA status in FP_df and APP_df
-        fp_ra_df = self.FP_df[self.FP_df['RA'] == True][['cell_id', 'folder_file', 'RA_per_min']] #FP and APP dataframes where RA is True
-        app_ra_df = self.APP_df[self.APP_df['RA'] == True][['cell_id', 'folder_file', 'RA_per_min']]
+        # Check RA status in IF_IC_df and APP_IC_df
+        fp_ra_df = self.IF_IC_df[self.IF_IC_df['RA'] == True][['cell_id', 'folder_file', 'RA_per_min']] #FP and APP dataframes where RA is True
+        app_ra_df = self.APP_IC_df[self.APP_IC_df['RA'] == True][['cell_id', 'folder_file', 'RA_per_min']]
         combined_ra_df = pd.concat([fp_ra_df, app_ra_df])
 
         ra_folder_files = combined_ra_df.groupby('cell_id')['folder_file'].apply(list).to_dict()

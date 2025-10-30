@@ -15,7 +15,7 @@ from typing import Optional
 # from module.utils import  subselectDf, saveFigure, getCache, isCached, cache, cache_excel #should become Cashable class
 from module.constants import CACHE_DIR, color_dict, unit_dict
 # from module.Ephys import Ephys, APP, FP, EphysData # I THINK THIS IS OLD?
-from module.Ephys_Project import Ephys, APP, FP, Project
+from module.Ephys_Project import Ephys, APP_IC, Project, IF_IC
 from module.Cachable import Cachable
 from collections import defaultdict
 #Readapting
@@ -95,7 +95,7 @@ class DataSelection (Cachable):
         '''
         Checks for valid data_type and that the cell_type, region cell_subtype and treatment are withing the data_type.columns()
         '''
-        data_types=['FP', 'APP', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ]
+        data_types=['APP_IC', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ]
         if self.data_type not in data_types: #complete list of data types
             raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of {data_types}.")
         
@@ -180,85 +180,84 @@ class DataSelection (Cachable):
             agg_df = self.add_cell_mapping(filtered_df)
             return agg_df
 
-        
-        # time required --> self.project_obj.project_type == "application": generalise #TODO
-        elif self.data_type == 'APP':
-            filtered_df = self.APP_df[self.APP_df['folder_file'].isin(self.valid_files)].copy()
-            timepoints = ['PRE', 'APP', 'WASH']
-            sweep_vars = ['AP_count', 'RA_count', 'SAP_count', 'RMP'] #, 'inputR']
-            reshaped_data = []
+        elif self.project_obj.project_type == "application": # all data_type files other than APP_IC will be PRE and POST
 
-            for timepoint in timepoints:
-                current_data = pd.DataFrame()
-                current_data['cell_id'] = filtered_df['cell_id']
-                current_data['folder_file'] = filtered_df['folder_file']
-                current_data['time'] = timepoint
+            # should become a generic for loop for each data_type PRE and POST 
+            if self.data_type == 'IF_IC': 
+                filtered_df = self.IF_IC_df[self.IF_IC_df['folder_file'].isin(self.valid_files)].copy()
+                filtered_df['time'] = filtered_df['treatment'].apply(lambda x: 'WASH' if x != 'PRE' else 'PRE')
 
-                for base in sweep_vars:
-                    sweep_col = f'sweep_{base}'
-                    if sweep_col not in filtered_df.columns:
-                        continue
 
-                    # Filter out invalid types (not list/array)
-                    mask_invalid = filtered_df[sweep_col].apply(lambda x: not isinstance(x, (list, np.ndarray)))
-                    dropped_cells = filtered_df.loc[mask_invalid, 'cell_id'].unique()
-                    if len(dropped_cells) > 0:
-                        print(f"Dropping cells with invalid {sweep_col}: {dropped_cells}")
-                    valid_df = filtered_df.loc[~mask_invalid].copy()
+                #aggregate appropriate cols ie not "I_steps_pA" , "AP_frequencies_Hz" / 'V_step_steady_mV', 'I_steady_pA'
+                for col in ['AP_max_rise_mV_ms', 'AP_height_mV', 'AP_latency_ms', 'AP_peaks_mV',
+                            'AP_decay_mV_ms', 'AP_rise_mV_ms', 'AP_width_ms', '%_sag', 'IF_voltage_threshold_mV']:
+                    filtered_df[col] = filtered_df[col].apply(lambda x: np.mean(x) if isinstance(x, list) else x)
+                agg_IF_IC_df = filtered_df.groupby(['cell_id', 'time']).agg({
+                'AP_max_rise_mV_ms': 'mean',
+                'AP_height_mV': 'mean',
+                'AP_latency_ms': 'mean',
+                'AP_peaks_mV': 'mean',  #averaging catch now in histogram if it helps ?
+                'AP_decay_mV_ms': 'mean',
+                'AP_rise_mV_ms': 'mean',
+                'AP_width_ms': 'mean',
+                'IF_slope': 'mean',
+                'max_firing_Hz': 'mean',
+                'IF_rheobase_pA': 'mean',
+                '%_sag': 'mean',
+                'IF_voltage_threshold_mV': 'mean'
+                }).reset_index()
+                agg_IF_IC_df = self.add_cell_mapping(agg_IF_IC_df, additional_cols=['I_set'])
+                return agg_IF_IC_df
 
-                    # Align to time window
-                    def extract_time_segment(row):
-                        sweep_data = row[sweep_col]
-                        if timepoint == 'PRE':
-                            return sweep_data[:int(row.get('drug_in', 0))]
-                        elif timepoint == 'APP':
-                            return sweep_data[int(row.get('drug_in', 0)):int(row.get('drug_out', len(sweep_data)))]
-                        elif timepoint == 'WASH':
-                            return sweep_data[int(row.get('drug_out', len(sweep_data))):]
-                        return []
+            elif self.data_type == 'APP_IC': #
+                filtered_df = self.APP_IC_df[self.APP_IC_df['folder_file'].isin(self.valid_files)].copy()
+                timepoints = ['PRE', 'APP', 'WASH']
+                sweep_vars = ['AP_count', 'RA_count', 'SAP_count', 'RMP_mV', 'inputR_MOhm'] 
+                reshaped_data = []
 
-                    # Apply extraction + mean aggregation
-                    extracted = valid_df.apply(extract_time_segment, axis=1)
-                    current_data[sweep_col] = extracted
-                    current_data[base] = extracted.apply(lambda x: np.nanmean(x) if isinstance(x, (list, np.ndarray)) and len(x) > 0 else np.nan)
+                for timepoint in timepoints:
+                    current_data = pd.DataFrame()
+                    current_data['cell_id'] = filtered_df['cell_id']
+                    current_data['folder_file'] = filtered_df['folder_file']
+                    current_data['time'] = timepoint
 
-                reshaped_data.append(current_data)
+                    for base in sweep_vars:
+                        sweep_col = f'sweep_{base}'
+                        if sweep_col not in filtered_df.columns:
+                            continue
 
-            agg_APP_df = pd.concat(reshaped_data, ignore_index=True)
-            agg_APP_df = self.add_cell_mapping(agg_APP_df, additional_cols=['I_set'])
-            return agg_APP_df
-        
+                        # Filter out invalid types (not list/array)
+                        mask_invalid = filtered_df[sweep_col].apply(lambda x: not isinstance(x, (list, np.ndarray)))
+                        dropped_cells = filtered_df.loc[mask_invalid, 'cell_id'].unique()
+                        if len(dropped_cells) > 0:
+                            print(f"Dropping cells with invalid {sweep_col}: {dropped_cells} for {timepoint}")
+                        valid_df = filtered_df.loc[~mask_invalid].copy()
 
-        elif self.data_type == 'FP':
-            filtered_df = self.FP_df[self.FP_df['folder_file'].isin(self.valid_files)].copy()
-            filtered_df['time'] = filtered_df['treatment'].apply(lambda x: 'WASH' if x != 'PRE' else 'PRE')
-            #columns to keep
-            filtered_df = filtered_df[['cell_id', 'time', 'AP_decay_dvdt', 'AP_rise_dvdt',
-                        'AP_dvdt_max', 'AP_height', 'AP_latency', 'AP_peak_voltages',
-                        'AP_width', 'FI_slope', 'max_firing', 
-                        'rheobased_threshold', 'sag', 'voltage_threshold']]
-            #aggregate 
-            for col in ['AP_dvdt_max', 'AP_height', 'AP_latency', 'AP_peak_voltages',
-                        'AP_decay_dvdt', 'AP_rise_dvdt', 'AP_width', 'sag', 'voltage_threshold']:
-                filtered_df[col] = filtered_df[col].apply(lambda x: np.mean(x) if isinstance(x, list) else x)
-            agg_FP_df = filtered_df.groupby(['cell_id', 'time']).agg({
-            'AP_dvdt_max': 'mean',
-            'AP_height': 'mean',
-            'AP_latency': 'mean',
-            'AP_peak_voltages': 'mean',  #averaging catch now in histogram if it helps ?
-            'AP_decay_dvdt': 'mean',
-            'AP_rise_dvdt': 'mean',
-            'AP_width': 'mean',
-            'FI_slope': 'mean',
-            'max_firing': 'mean',
-            'rheobased_threshold': 'mean',
-            'sag': 'mean',
-            'voltage_threshold': 'mean'
-            }).reset_index()
-            agg_FP_df = self.add_cell_mapping(agg_FP_df, additional_cols=['I_set'])
-            return agg_FP_df
-        else:
-            raise ValueError(f"Unsupported data_type: {self.data_type}")
+                        # Align to time window
+                        def extract_time_segment(row):
+                            sweep_data = row[sweep_col]
+                            if timepoint == 'PRE':
+                                return sweep_data[:int(row.get('drug_in', 0))]
+                            elif timepoint == 'APP':
+                                return sweep_data[int(row.get('drug_in', 0)):int(row.get('drug_out', len(sweep_data)))]
+                            elif timepoint == 'WASH':
+                                return sweep_data[int(row.get('drug_out', len(sweep_data))):]
+                            return []
+
+                        # Apply extraction + mean aggregation
+                        extracted = valid_df.apply(extract_time_segment, axis=1)
+                        current_data[sweep_col] = extracted
+                        current_data[base] = extracted.apply(lambda x: np.nanmean(x) if isinstance(x, (list, np.ndarray)) and len(x) > 0 else np.nan)
+
+                    reshaped_data.append(current_data)
+
+                agg_APP_IC_df = pd.concat(reshaped_data, ignore_index=True)
+                agg_APP_IC_df = self.add_cell_mapping(agg_APP_IC_df, additional_cols=['I_set'])
+                return agg_APP_IC_df
+            
+            else:
+                raise ValueError(f"Unsupported data_type: {self.data_type}")
+            
 
     def add_cell_mapping(self, df, additional_cols: list = None):
         """
@@ -275,7 +274,7 @@ class DataSelection (Cachable):
             raise ValueError("Both DataFrames must have 'cell_id' column.")
 
         # Always include these base columns
-        columns_to_map = ['cell_id', 'treatment', 'cell_type', 'cell_subtype', 'region', 'sex']
+        columns_to_map = ['cell_id', 'treatment', 'cell_type', 'cell_subtype', 'region', 'sex', 'subject_id']
 
         # Add any extra columns specified by the caller
         if additional_cols:
@@ -304,13 +303,13 @@ class DataSelection (Cachable):
         def is_valid_fp(fp_valid):
             return isinstance(fp_valid, list) and all(isinstance(x, str) for x in fp_valid)
         def process_group(group_df):
-            valid_fp = group_df[group_df['FP_folder_files'].apply(is_valid_fp)]
-            valid_app = group_df[group_df['APP_folder_files'].apply(is_valid_app)]
+            valid_fp = group_df[group_df['IF_IC_folder_files'].apply(is_valid_fp)]
+            valid_app = group_df[group_df['APP_IC_folder_files'].apply(is_valid_app)]
 
             fp_count = valid_fp['cell_id'].nunique()
             app_count = valid_app['cell_id'].nunique()
             both_valid_count = group_df[
-                group_df['FP_folder_files'].apply(is_valid_fp) & group_df['APP_folder_files'].apply(is_valid_app)
+                group_df['IF_IC_folder_files'].apply(is_valid_fp) & group_df['APP_IC_folder_files'].apply(is_valid_app)
             ]['cell_id'].nunique()
 
             cell_id_fp = valid_fp['cell_id'].unique().tolist()
@@ -337,18 +336,19 @@ class DataSelection (Cachable):
         '''
         Finds relevant info for folder_file and returns truple of:  string lable , the row from the df
         '''
-        if folder_file in self.FP_df['folder_file'].values:
-            row = self.FP_df[self.FP_df['folder_file'] == folder_file]
-            return 'FP', row
-        elif folder_file in self.APP_df['folder_file'].values:
-            row = self.APP_df[self.APP_df['folder_file'] == folder_file]
-            return 'APP', row
+        data_type_df = getattr(self, f"{self.data_type}_df")
+        if folder_file in self.IF_IC_df['folder_file'].values:
+            row = self.IF_IC_df[self.IF_IC_df['folder_file'] == folder_file]
+            return 'IF_IC', row
+        elif folder_file in self.APP_IC_df['folder_file'].values:
+            row = self.APP_IC_df[self.APP_IC_df['folder_file'] == folder_file]
+            return 'APP_IC', row
         else:
             return 'Unknown', None
 
         
     def folder_file_AP_df(self, cell_id, folder_file,  V_array=None, I_array=None): 
-        '''builds AP_df for single folder_file.'''
+        '''builds action potential pd.DataFrame 'AP_df' for single folder_file.'''
         if V_array is None or I_array is None:
             V_array , I_array, V_list = Project(self.project).load_data(folder_file)
             if I_array is None:
@@ -366,19 +366,25 @@ class DataSelection (Cachable):
                                         'slope', 'latency', 'peak_voltage', 'height', 'width', 'sweep',
                                         'I_injected', 'AP_type'])
         
-        file_data_type, row_info = self.fetch_data_type(folder_file)
+        # file_data_type, row_info = self.fetch_data_type(folder_file) #check it always wors
+        file_data_type = self.data_type
+        row_info = self.project_obj.feature_df[self.project_obj.feature_df['cell_id'] == cell_id]
+
         drug_used = row_info['treatment'].iloc[0]
 
-        if file_data_type == 'APP':
+        if file_data_type == 'APP_IC':
             drug_in =  row_info['drug_in'].iloc[0]
             drug_out = row_info['drug_out'].iloc[0]
             drug_labels = [ 'PRE' if _ < drug_in else 'APP' if drug_in <= _ <= drug_out else 'WASH' for _ in sweep_indices_all ]
             current_injected = [I_array[loc, 0] for loc in peak_locs_corr_all]
 
-        if file_data_type == 'FP':
+        if file_data_type == 'IF_IC': 
             drug_labels = [row_info['treatment'].iloc[0] if row_info['treatment'].iloc[0] == 'PRE' else 'WASH' for _ in sweep_indices_all]
             current_injected = [I_array[loc, sweep] for loc, sweep in zip(peak_locs_corr_all, sweep_indices_all)]
 
+        else:
+            print(f"JASMINE GENERALISE THIS FOR ALL DATA TYEPS :) !")
+            #TODO generalise for all data_types also
 
         AP_df = pd.DataFrame({
         'folder_file': folder_file,
@@ -400,12 +406,13 @@ class DataSelection (Cachable):
         'I_injected': current_injected,  # Sweep index is 0 as I_array is identical
         'AP_type': 'somatic'  
         })
-        try:
-            FP_cell_id_PRE = self.FP_df[(self.FP_df['cell_id'] == cell_id) & (self.FP_df['treatment'] == 'PRE')]
-            cell_threshold = (FP_cell_id_PRE['voltage_threshold'].apply(lambda x: sum(x) / len(x) if isinstance(x, list) else x)).mean()
+        try: # should try ramp_IC for ramp_voltage_threshold_mV first #TODO
+            IF_IC_local = IF_IC(self.project_obj.project).df
+            FP_cell_id_PRE = IF_IC_local[(IF_IC_local['cell_id'] == cell_id) & (IF_IC_local['treatment'] == 'PRE')]
+            cell_threshold = (FP_cell_id_PRE['IF_voltage_threshold_mV'].apply(lambda x: sum(x) / len(x) if isinstance(x, list) else x)).mean()
 
-            # valid_FP_folder_files = self.cell_df[self.cell_df['cell_id']==cell_id]['FP_valid'].values[0][:2]
-            # mean_voltage_threshold = self.FP_df[self.FP_df['folder_file'].isin(valid_FP_folder_files)]['voltage_threshold'].explode().astype(float).mean()
+            # valid_IF_IC_folder_files = self.cell_df[self.cell_df['cell_id']==cell_id]['FP_valid'].values[0][:2]
+            # mean_voltage_threshold = IF_IC_local[IF_IC_local['folder_file'].isin(valid_IF_IC_folder_files)]['voltage_threshold'].explode().astype(float).mean()
 
             AP_df.loc[(AP_df['voltage_threshold'] < cell_threshold-20 ), 'AP_type'] = 'RA'
         except(IndexError, TypeError):
@@ -451,7 +458,11 @@ class Figure(DataSelection):
         """
         df = df.dropna(subset=[self.dependant_var]).reset_index(drop=True)
 
-        group_cols = ['treatment']
+        if hasattr(self, 'compare'):
+            group_cols = [self.compare]
+        else:
+            group_cols = ['treatment'] # some classes sont have compare like ApplicationResponse
+
         if 'time' in df.columns:
             group_cols.append('time')
 
@@ -468,6 +479,15 @@ class Figure(DataSelection):
             return None
         else:
             return df
+        
+    def safe_str(self, x):
+        """Convert attribute to clean string for filename."""
+        if x is None:
+            return None
+        if isinstance(x, (list, tuple, set)):
+            return ", ".join(map(str, x))
+        return str(x)
+    
 
     # def filter_n_minimum(self,df): #old 18Sept2025
     #     df = df.dropna(subset=[self.dependant_var]).reset_index(drop=True)
@@ -490,7 +510,7 @@ class Figure(DataSelection):
             
     def get_pre_post_sweep_windows(self,
         df: pd.DataFrame,
-        dependant_var: str,
+        dependant_var: str, #should have sweep_{dv}
         pre_sweep_window: int | None = None,
         post_sweep_window: int | None = None,
         verbose: bool = True
@@ -564,20 +584,22 @@ class Figure(DataSelection):
         Returns: 
             pd.DataFrame with columns: cell_id, PRE_sweeps, POST_sweeps
         '''
+        sweep_dv = f"sweep_{self.dependant_var}" 
+        
         if df is None:
             df = self.data
 
         if slice:
             df, self.pre_sweep_window, self.post_sweep_window = self.get_pre_post_sweep_windows(
                 df, 
-                dependant_var=self.dependant_var, 
+                dependant_var=sweep_dv, 
                 pre_sweep_window=self.pre_sweep_window, 
                 post_sweep_window=self.post_sweep_window
             )
         else:
             _, self.pre_sweep_window, self.post_sweep_window = self.get_pre_post_sweep_windows( #return but dont use filtered_df
                 df, 
-                dependant_var=self.dependant_var, 
+                dependant_var=sweep_dv, 
                 pre_sweep_window=self.pre_sweep_window, 
                 post_sweep_window=self.post_sweep_window
             )
@@ -585,9 +607,9 @@ class Figure(DataSelection):
         rows = []
         for cell_id, sub_df in df.groupby('cell_id'):
             try:
-                pre_vals = sub_df[sub_df['time'] == 'PRE'][self.dependant_var].values[0]
-                app_vals = sub_df[sub_df['time'] == 'APP'][self.dependant_var].values[0]
-                wash_vals = sub_df[sub_df['time'] == 'WASH'][self.dependant_var].values[0]
+                pre_vals = sub_df[sub_df['time'] == 'PRE'][sweep_dv].values[0]
+                app_vals = sub_df[sub_df['time'] == 'APP'][sweep_dv].values[0]
+                wash_vals = sub_df[sub_df['time'] == 'WASH'][sweep_dv].values[0]
             except IndexError:
                 print(f"Skipping cell {cell_id} due to missing timepoints.")
                 continue
@@ -725,7 +747,7 @@ class Figure(DataSelection):
                         'PRE_sweeps': pre,
                         'POST_sweeps': post,
                         'response': result['response'],
-                        'delta': result['mean_diff'] if self.dependant_var != 'sweep_inputR' else result['percent_diff'],
+                        'delta': result['mean_diff'] if self.dependant_var != 'sweep_inputR_MOhm' else result['percent_diff'],
                         'p_val': result['p_val'],
                         'latency_sweeps': 0,
                         'range_sweeps': (0, len(post))
@@ -734,7 +756,7 @@ class Figure(DataSelection):
         return pd.DataFrame(result_rows)
     
     def get_unit(self): 
-        if self.dependant_var == 'sweep_inputR':
+        if self.dependant_var == 'sweep_inputR_mOhm':
             return '%'
         elif self.dependant_var == 'sweep_RMP':
             return 'mV'
@@ -767,7 +789,7 @@ class Figure(DataSelection):
                 result = Stats(
                     p_thresh=self.p_thresh,
                     diff_thresh=self.diff_thresh,
-                    percentage_threshold= False if self.dependant_var != 'sweep_inputR' else True
+                    percentage_threshold= False if self.dependant_var != 'sweep_inputR_MOhm' else True
                 ).welchs_t_test(pre, bin_post)
 
             results.append({
@@ -775,7 +797,7 @@ class Figure(DataSelection):
                 'PRE_sweeps': pre,
                 'POST_sweeps': post,
                 'response': result['response'],
-                'delta':result['mean_diff'] if self.dependant_var != 'sweep_inputR' else result['percent_diff'],
+                'delta':result['mean_diff'] if self.dependant_var != 'sweep_inputR_MOhm' else result['percent_diff'],
                 'p_val': result['p_val'],
                 'latency_sweeps': i,  # start sweep index of the bin
                 'range_sweeps': (i, i + self.bin_width)  
@@ -888,7 +910,7 @@ class ResponseCharecterisation(Figure):
         
         temp_cell_df['responder'] = temp_cell_df.apply(is_responder, axis=1)
 
-        def categorize_response_multiple_dvs(row, dvs=('RMP', 'AP_count')):
+        def categorize_response_multiple_dvs(row, dvs=('RMP_mV', 'AP_count')):
             values = {row[dv].lower().strip() for dv in dvs}
             if 'increase' in values and 'decrease' in values:
                 return 'mixed'
@@ -965,19 +987,17 @@ class ResponseCharecterisation(Figure):
 @dataclass
 class ApplicationResponse(Figure):
     filename: str = None
-    response_var: str = field(kw_only=True)
+    dependant_var: str = field(kw_only=True)
     n_minimum: float = field(kw_only = True, default = 3)
     pre_sweep_window: int = None # window before and after drug_in
     post_sweep_window: int = None 
     diff_thresh: int = field(kw_only = True, default = 0) # ie 3mV difference required to consider it a response 
 
-    dependant_var: str = field(init=False)  # will be set in __post_init__
     p_thresh: float = field(kw_only = True, default = 0.05)
     dynamic_search: bool = field(kw_only=True, default=False)
     bin_width: int = field(kw_only=True, default=3)
 
     def __post_init__(self):
-        self.dependant_var = f"sweep_{self.response_var}"
         self.filename = f"{self.dependant_var}_{self.cell_type}_{self.treatment}_response"
         self.slice = True if self.dynamic_search else False 
         
@@ -1050,7 +1070,7 @@ class ApplicationResponse(Figure):
             ax=ax
         )
 
-        ax.set_title(f"{self.response_var} response to {self.treatment} in {self.cell_type}\n(n={total_n})", fontsize=14)
+        ax.set_title(f"{self.dependant_var} response to {self.treatment} in {self.cell_type}\n(n={total_n})", fontsize=14)
 
         
         unit = self.get_unit()
@@ -1065,6 +1085,189 @@ class ApplicationResponse(Figure):
 
 
         
+@dataclass
+class IF_curve(Figure):
+    '''
+    Plotting IF_IC data between compare which defaults to treatment. 
+    Dependant vairables will be I_steps_pA AND AP_frequencies_Hz, not an input pram.
+    '''
+    compare: str = field(kw_only = True, default = 'treatment') # should add elsewhere incase you want to compare sex or something other rhan treatment
+    I_range_pA: str = field(kw_only = True, default = 'all_cells')
+    filename: str = None
+    specify: str = field(kw_only = True, default = None) # specify marker to see subsets e.g. I_set or cell_id
+    n_minimum: float = field(kw_only = True, default = 3)
+
+    dependant_var: str = 'AP_frequencies_Hz'
+    bin_size: int = field(kw_only=True, default=10)  # 10pA binning
+
+    def __post_init__(self):
+        if self.data_type != 'IF_IC':
+            print(f"IF curve is only possible with data_type IF_IC. ")
+            return
+        
+        #Build filename #TODO make generic in Figure class
+        parts = [self.safe_str(self.compare)]
+        for attr in [self.specify, getattr(self, "cell_type", None), getattr(self, "region", None)]:
+            val = self.safe_str(attr)
+            if val:
+                parts.append(val)
+        raw_name = "IF_curve between " + " - ".join(parts)
+        self.filename = self.sanitize_filename(raw_name)
+
+        super().__post_init__()
+        self.data = self.filter_n_minimum(self.agg_df)
+        self.df_long =  self.preprocess_IF_data(n_min=self.n_minimum, bin_size=self.bin_size, I_range_pA=self.I_range_pA)
+        self.fig = self.plot_IF_curve()
+
+    
+    def preprocess_IF_data(self, n_min=None, bin_size=None, I_range_pA=None):
+        """
+        Build a long-format DataFrame for IF plotting, with optional binning,
+        filtering for minimum number of cells per group, and optional I-step range.
+        
+        Parameters
+        ----------
+        n_min : int
+            Minimum number of cells per compare group to include a bin.
+        bin_size : int
+            Size of I-step binning in pA.
+        I_range_pA : None, tuple, or 'all_cells'
+            - None: include all bins
+            - (min_I, max_I): include only bins within this current range
+            - 'all_cells': include only bins where all cells are represented
+        """
+
+        df = self.data.copy()
+        keep_cols = ['cell_id', self.compare, 'I_steps_pA', 'AP_frequencies_Hz']
+        if self.specify is not None and self.specify != self.compare:
+            keep_cols.append(self.specify)
+        df = df[keep_cols]
+
+        df = df[df['I_steps_pA'].str.len() == df['AP_frequencies_Hz'].str.len()]
+        df = df.explode(['I_steps_pA', 'AP_frequencies_Hz'])
+
+        # Convert to numeric
+        df['I_steps_pA'] = pd.to_numeric(df['I_steps_pA'], errors='coerce')
+        df['AP_frequencies_Hz'] = pd.to_numeric(df['AP_frequencies_Hz'], errors='coerce')
+
+        # Create binned current steps
+        df['I_step_bin'] = (np.round(df['I_steps_pA'] / bin_size) * bin_size).astype(int)
+
+        # Filter bins with fewer than n_min cells per compare group
+        counts = df.groupby(['I_step_bin', self.compare])['cell_id'].nunique().reset_index(name='n_cells')
+        valid_bins = counts.groupby('I_step_bin').filter(lambda g: (g['n_cells'] >= n_min).all())['I_step_bin'].unique()
+        df = df[df['I_step_bin'].isin(valid_bins)]
+
+        # filter by I_range_pA
+        if I_range_pA is not None:
+            if I_range_pA == 'all_cells':   #  only bins where all cells are represented
+                cells_per_bin = df.groupby('I_step_bin')['cell_id'].nunique()
+                max_cells = df['cell_id'].nunique()
+                valid_bins = cells_per_bin[cells_per_bin == max_cells].index
+                df = df[df['I_step_bin'].isin(valid_bins)]
+            elif isinstance(I_range_pA, (tuple, list)) and len(I_range_pA) == 2: # set I step range
+                df = df[(df['I_step_bin'] >= I_range_pA[0]) & (df['I_step_bin'] <= I_range_pA[1])]
+            else:
+                raise ValueError("I_range_pA must be None, a tuple/list (min,max), or 'all_cells'")
+        return df
+
+    def plot_IF_curve(self):
+        df = self.df_long.copy()
+        agg = df.groupby(['I_step_bin', self.compare])[self.dependant_var].agg(
+                mean='mean',
+                sd='std',
+                n='count'
+            ).reset_index()
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        # lineplot mean_IF between self.compare
+        sns.lineplot(
+            data=df,
+            x="I_step_bin",
+            y=self.dependant_var,
+            hue=self.compare,
+            errorbar="sd",
+            ax=ax,
+            palette=color_dict,
+            linewidth=2.5,
+            marker="o"
+        )
+        # for grp, sub in agg.groupby(self.compare): #plot errorbar
+        #     ax.errorbar(
+        #         x=sub['I_step_bin'],
+        #         y=sub['mean'],
+        #         yerr=sub['sd'],
+        #         fmt='none',        # don't re-plot the marker
+        #         ecolor=color_dict[grp],
+        #         elinewidth=1.5,
+        #         capsize=5
+        #     )
+
+        if self.specify is not None and self.specify in df.columns:
+            markers = cycle(['o', 's', '^', 'D', 'v', '<', '>'])
+            legend_handles_labels = {}
+
+            for spec_value in df[self.specify].unique():
+                marker = next(markers)
+                sub_df = df[df[self.specify] == spec_value].copy()
+                # sns.scatterplot(
+                #     data=sub_df,
+                #     x="I_step_bin",
+                #     y=self.dependant_var,
+                #     facecolors='none', 
+                #     hue=self.compare,
+                #     ax=ax,
+                #     palette=color_dict,
+                #     legend=False,
+                #     marker=marker,
+                #     s=10,              
+                #     # edgecolor='',   
+                #     alpha=0.9,         
+                #     zorder=10,         
+                # )
+                for comp in sub_df[self.compare].unique():
+                    comp_df = sub_df[sub_df[self.compare] == comp]
+                    ax.scatter(
+                        comp_df["I_step_bin"],
+                        comp_df[self.dependant_var],
+                        marker=marker,
+                        s=10,
+                        facecolors='none',                   
+                        edgecolors=color_dict.get(comp, 'k'), 
+                        linewidths=1.2,
+                        alpha=0.9,
+                        zorder=10
+                    )
+                legend_handles_labels[spec_value] = plt.Line2D(
+                    [0], [0],
+                    marker=marker,
+                    label=str(spec_value),
+                    color='black',
+                    linestyle='',
+                    markersize=6
+                )
+
+        n_mapping = agg.groupby(self.compare)['n'].max().to_dict()
+        handles, labels = ax.get_legend_handles_labels()
+        # Add n= counts to the compare group labels
+        new_labels = [f"{lbl} (n={n_mapping[lbl]})" if lbl in n_mapping else lbl for lbl in labels]
+        # Combine scatter marker legend handles
+        scatter_handles = list(legend_handles_labels.values())
+        scatter_labels = [h.get_label() for h in scatter_handles]
+        combined_handles = handles + scatter_handles
+        combined_labels = new_labels + scatter_labels
+        ax.legend(combined_handles, combined_labels, loc='best', title='Legend')
+
+        ax.set_xlabel("Current injection (pA)", fontsize=16)
+        ax.set_ylabel("Firing frequency (Hz)", fontsize=16)
+        ax.set_title(f"FI curve across {self.compare}", fontsize=18)
+        sns.despine(ax=ax)
+        plt.tight_layout()
+        plt.show()
+        self.save_plot(fig, self.filename)
+        
+        return fig
+
 
 
 @dataclass
@@ -1074,10 +1277,10 @@ class Histogram(Figure):
     '''
     filename: str = None
     dependant_var: str = field(kw_only=True)
+    compare: str = field(kw_only=True, default='treatment') #bars to compare on x-axis
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id
     n_minimum: float = field(kw_only = True, default = 3)
 
-    #for project_type ==  application 
     pre_sweep_window: int = None # window before and after drug_in
     post_sweep_window: int = None 
 
@@ -1085,43 +1288,21 @@ class Histogram(Figure):
         self.filename = f"{self.dependant_var}_{self.specify}" 
         super().__post_init__()
         self.check_valid_dependant_var()
-        self.data = self.filter_n_minimum(self.agg_df)
+        self.data = self.filter_n_minimum(self.agg_df) # TODO NOW here there is a col RMP_mV averaged dont know why or what it is / and there is the sweep_RMP_mV CHECK WHATS HAPPENING
 
         # If dependant_var contains lists or arrays, average them to a single numeric value
         self.data[self.dependant_var] = self.data[self.dependant_var].apply(
             lambda x: np.mean(x) if isinstance(x, (list, np.ndarray, pd.Series)) else x
         )
-        if self.data_type == "APP":
-            self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=self.dependant_var, pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
-        self.order = [t for t in color_dict.keys() if t in self.data['treatment'].unique()]
+        if self.data_type == "APP_IC":
+            self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=f"sweep_{self.dependant_var}", pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
+        self.order = [t for t in color_dict.keys() if t in self.data[self.compare].unique()]
 
         if  self.project_obj.project_type == "application":
-            # self.stats = self.generate_statistics() #DEPRICATED AND NOT GENERIC #TODO
             self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()] #not generic #TODO
         
         self.fig = self.plot_histogram()
         
-    # def generate_statistics(self): DEPRICATED AND NOT GENERIC
-    #     #mixed effects models --> Tukey
-    #     model = mixedlm(f"{self.dependant_var} ~ time * treatment", self.data, groups=self.data["cell_id"])
-    #     result = model.fit()
-    #     interaction_pvalues = {term: result.pvalues[term] for term in result.pvalues.keys() if 'time' in term and 'treatment' in term}
-    #     significant_interactions = {term: pval for term, pval in interaction_pvalues.items() if pval < 0.05}
-
-    #     if significant_interactions:
-    #         print(f"significant interaction/s: {significant_interactions}, performingm tukey post hoc.")
-    #         tukey = pairwise_tukeyhsd(endog=self.data[self.dependant_var], groups=self.data['time'] + self.data['treatment'], alpha=0.05)
-    #         significant_pairs = []
-    #         for row in tukey.summary().data[1:] :
-    #             reject = row[-1]  # The last column indicates whether the null hypothesis was rejected
-    #             if reject == 'True':  #  if the comparison is significant
-    #                 group1, group2 = row[0], row[1]
-    #                 significant_pairs.append((group1, group2))
-    #                 return significant_pairs
-    #     else:
-    #         print("No significant interaction found.")
-    #         return None
-
 
     def specify_markers(self, df, ax):
         """
@@ -1134,9 +1315,9 @@ class Histogram(Figure):
             marker = next(markers)
             subset_to_plot = df[df[self.specify] == value]
             sns.stripplot(
-                x='treatment',
+                x=self.compare,
                 y=self.dependant_var,
-                hue='time' if self.project_obj.project_type == "application" else 'treatment',
+                hue='time' if self.project_obj.project_type == "application" else self.compare,
                 hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
                 order=self.order ,
                 data=subset_to_plot,
@@ -1161,9 +1342,9 @@ class Histogram(Figure):
         fig, ax = plt.subplots(figsize=(15, 10))
         df = self.data
         sns.barplot(
-            x='treatment',
+            x=self.compare,
             y=self.dependant_var,
-            hue='time' if self.project_obj.project_type == "application" else 'treatment',
+            hue='time' if self.project_obj.project_type == "application" else self.compare,
             hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
             order=self.order ,
             data=df,
@@ -1173,9 +1354,9 @@ class Histogram(Figure):
             ax=ax
         )
         sns.swarmplot(
-            x='treatment',
+            x=self.compare,
             y=self.dependant_var,
-            hue='time' if self.project_obj.project_type == "application" else 'treatment',
+            hue='time' if self.project_obj.project_type == "application" else self.compare,
             hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
             order=self.order ,
             data=df,
@@ -1198,12 +1379,38 @@ class Histogram(Figure):
         ax.legend(handles=combined_handles, labels=combined_labels, loc='best', title='Legend')
 
 
-        counts = df.groupby('treatment')['cell_id'].nunique() #count unique cells per treatment #TODO add mouse count 
+        cell_counts = df.groupby(self.compare)['cell_id'].nunique() #count unique cells per treatment #TODO add mouse count 
+        animal_counts = df.groupby(self.compare)['subject_id'].nunique() if 'subject_id' in df.columns else None
+
+        # for tick, treatment in enumerate(self.order):
+        #     count = cell_counts.get(treatment, 0)
+        #     ax.text(tick, -0.1, f'n={count}', ha='center', va='top', fontsize=24, color='black', transform=ax.get_xaxis_transform())
+
         for tick, treatment in enumerate(self.order):
-            count = counts.get(treatment, 0)
-            ax.text(tick, -0.1, f'n={count}', ha='center', va='top', fontsize=24, color='black', transform=ax.get_xaxis_transform())
+            n_cells = cell_counts.get(treatment, 0)
+            n_animals = animal_counts.get(treatment, 0) if animal_counts is not None else None
+
+            # Build multiline label
+            if n_animals is not None:
+                text_label = f"n (cells) = {n_cells}\n n (animals) = {n_animals}"
+            else:
+                text_label = f"n = {n_cells}"
+
+            # Add under each x-tick, relative to axis (not data)
+            ax.text(
+                tick,
+                -0.1,  # vertical offset below x-axis
+                text_label,
+                ha='center',
+                va='top',
+                fontsize=22,
+                color='black',
+                transform=ax.get_xaxis_transform(),
+                linespacing=1.2,
+            )
 
         # Customize plot labels and titles
+        ax.spines[['right', 'top']].set_visible(False)
         ax.set_ylabel(unit_dict[self.dependant_var], fontsize=24)
         ax.set_xlabel('')
         ax.set_title(f'{self.cell_type if self.cell_type is not None else ""} {unit_dict[self.dependant_var]}', fontsize=28)
@@ -1211,8 +1418,6 @@ class Histogram(Figure):
         ax.tick_params(axis='y', labelsize=24)
         plt.tight_layout()
         plt.show()
-        
-        # Save the figure
         self.save_plot(fig, self.filename)
 
 
@@ -1221,7 +1426,7 @@ class Histogram(Figure):
 class AggregateApplication(Figure):
     filename: str = None
     sweep_in_s: float = field(kw_only = True, default = 20)
-    dependant_var: str = field(kw_only=True) #  'RMP', 'inputR', 'RA_count', 'AP_count'
+    dependant_var: str = field(kw_only=True) 
     bin_size: float = field(kw_only = True, default = 3) #sweeps to pool default 3 3x20sec - 1min
     n_minimum: float = field(kw_only = True, default = 3)
     normalise: bool = field(kw_only = True, default = False)
@@ -1476,12 +1681,12 @@ class Application(Figure):
             self.filename = f'{cell_id}_application'
 
             # Fetch folder_file for the specific cell_id
-            cell_sub_df = self.APP_df[self.APP_df['cell_id'] == cell_id]
+            cell_sub_df = self.APP_IC_df[self.APP_IC_df['cell_id'] == cell_id]
             if self.valid_only == True:
                 cell_sub_df = cell_sub_df[cell_sub_df['valid'] != False]
 
-            for folder_file, cell_id, I_set, drug, drug_in, drug_out, application_order, RA_locs in cell_sub_df[['folder_file','cell_id', 'I_set', 'treatment', 'drug_in', 'drug_out', 'application_order', 'RA_locs']].values:
-                self.fig_filename = f"{cell_id}_application{application_order}"
+            for folder_file, cell_id, I_set, drug, drug_in, drug_out, RA_locs in cell_sub_df[['folder_file','cell_id', 'I_set', 'treatment', 'drug_in', 'drug_out', 'RA_locs']].values:
+                self.fig_filename = f"{cell_id} {drug} Application"
                 
                 V_array , I_array, V_list = Project(self.project).load_data(folder_file)
                 if I_array is None:
@@ -1548,10 +1753,10 @@ class Application(Figure):
                 ax1.set_ylabel( "Membrane Potential (mV)", fontsize = 12) #, fontsize = 15
                 ax2.set_xlabel( "Time (s)", fontsize = 10) #, fontsize = 15
                 ax2.set_ylabel( "Current (pA)", fontsize = 10) #, fontsize = 15
-                ax1.set_title(cell_id + ' '+ drug +' '+ " Application" + " (" + str(application_order) + ")", fontsize = 16) # , fontsize = 25
+                ax1.set_title(cell_id + ' '+ drug +' '+ " Application", fontsize = 16) # , fontsize = 25
                 plt.tight_layout()
                 plt.show()
-                self.save_plot(fig, f"{cell_id}_APP_{str(application_order)}")
+                self.save_plot(fig, f"{cell_id}_APP")
                 
 
 
@@ -1564,8 +1769,8 @@ class RA_AP_analysis(Figure):
     '''
     project: str = field(kw_only = True)
     cell_id: str = field(kw_only = True) # single cell ID ONLY 
-    data_type: list = field(kw_only=True, default='APP') # this may need to be corrected it is for the inheretence from Cashable/Dataselector/Figure
-    data_types: list = field(kw_only=True, default='APP') 
+    data_type: list = field(kw_only=True, default='APP_IC') # defaults to this all will be returned in the aggg_df
+    data_types: list = field(kw_only=True, default='APP_IC') 
     pooled: bool = field(kw_only=True, default=False)
 
     color_map: dict = field(default_factory=lambda: {'RA': 'red', 'somatic': 'blue'}, init=False)
@@ -1576,6 +1781,7 @@ class RA_AP_analysis(Figure):
     voltage_min: float = field(default=-120.0, init=False)
 
     def __post_init__(self):
+
         super().__post_init__()
         self.agg_AP_df = self.build_aggregate_AP_df()
         self.plot_AP_traces() # runs all plotters contains pool logic
@@ -1584,17 +1790,17 @@ class RA_AP_analysis(Figure):
         agg_AP_dfs = []
         #fetch valid folder_files for each data_type   #NO pAD hunter and no second application files!! #TODO
         agg_folder_files = []
-        if 'APP' in self.data_types:
-            valid_folder_files = self.cell_df[self.cell_df['cell_id'] == self.cell_id]['APP_folder_files'].iloc[0]
+        if 'APP_IC' in self.data_types:
+            valid_folder_files = self.cell_df[self.cell_df['cell_id'] == self.cell_id]['APP_IC_folder_files'].iloc[0]
             if valid_folder_files is None: 
                  print(f"No valid APP files for cell_id {self.cell_id}, skipping.")
             else:
                 agg_folder_files.append(valid_folder_files)
 
-        if 'FP' in self.data_types:
-            valid_folder_files = self.cell_df[self.cell_df['cell_id'] == self.cell_id]['FP_folder_files'].iloc[0]
+        if 'IF_IC' in self.data_types:
+            valid_folder_files = self.cell_df[self.cell_df['cell_id'] == self.cell_id]['IF_IC_folder_files'].iloc[0]
 
-            if valid_folder_files is None:
+            if valid_folder_files is None or pd.isna(valid_folder_files):
                  print(f"No valid FP files for cell_id {self.cell_id}, skipping.")
             else:
                 agg_folder_files.extend(valid_folder_files)
