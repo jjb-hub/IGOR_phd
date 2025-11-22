@@ -32,6 +32,8 @@ color_dict = {
               "LSD":"purple", 
               "LSD_CNQX_APP5": 'purple',
               "MDL":'blue', 
+              "Vehicle": "#D3D2D3",
+              "5MeO": "#FAAF40" ,
                 #regions
               "aIC":'red',
               "pIC":'blue',
@@ -104,6 +106,10 @@ unit_dict = {
     "I_steady_pA": "Steady-State Current (pA)",
     "RMP_mV": "Resting Membrane Potential (mV)",
     "V_step_steady_mV": "Steady-State Voltage on step (mV)",
+
+    'sEPSP_frequency_Hz': 'sEPSP frequency (Hz)', 
+    'sEPSP_rise_times_ms': 'sEPSP rise time (ms)', 
+    'sEPSP_amplitudes_mV': 'sEPSP amplitude (mV)',
 
     "AP_count": "number of APs",
     "RA_count": "number of retroaxonal APs",
