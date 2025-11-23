@@ -10,6 +10,7 @@ import statsmodels.api as sm
 from statsmodels.formula.api import mixedlm
 import os
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
+from scipy.stats import ttest_ind
 import seaborn as sns
 from typing import Optional
 # from module.utils import  subselectDf, saveFigure, getCache, isCached, cache, cache_excel #should become Cashable class
@@ -95,7 +96,7 @@ class DataSelection (Cachable):
         '''
         Checks for valid data_type and that the cell_type, region cell_subtype and treatment are withing the data_type.columns()
         '''
-        data_types=['APP_IC', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ]
+        data_types=['APP_IC', 'st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC', 'PPR_VC' ]
         if self.data_type not in data_types: #complete list of data types
             raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of {data_types}.")
         
@@ -229,8 +230,8 @@ class DataSelection (Cachable):
                         # Filter out invalid types (not list/array)
                         mask_invalid = filtered_df[sweep_col].apply(lambda x: not isinstance(x, (list, np.ndarray)))
                         dropped_cells = filtered_df.loc[mask_invalid, 'cell_id'].unique()
-                        if len(dropped_cells) > 0:
-                            print(f"Dropping cells with invalid {sweep_col}: {dropped_cells} for {timepoint}")
+                        # if len(dropped_cells) > 0:
+                        #     print(f"Cells with invalid {sweep_col}: {dropped_cells} for {timepoint} set to NaN.")
                         valid_df = filtered_df.loc[~mask_invalid].copy()
 
                         # Align to time window
@@ -488,21 +489,6 @@ class Figure(DataSelection):
             return ", ".join(map(str, x))
         return str(x)
     
-
-    # def filter_n_minimum(self,df): #old 18Sept2025
-    #     df = df.dropna(subset=[self.dependant_var]).reset_index(drop=True)
-    #     group_sizes = df.groupby(['treatment', 'time']).size()
-    #     insufficient_groups = group_sizes[group_sizes < self.n_minimum]
-    #     if not insufficient_groups.empty:
-    #         print(f"Warning: The following groups have less than {self.n_minimum} samples and will be excluded:")
-    #         print(insufficient_groups)
-    #         df = df[~df[['treatment', 'time']].apply(tuple, axis=1).isin(insufficient_groups.index)].reset_index(drop=True)
-    #     if df.empty:
-    #         print("No groups meet the minimum sample size requirement. Statistical analysis will not be performed.")
-    #         return None
-    #     else:
-    #         return df
-    
     def check_valid_dependant_var(self):
         if self.dependant_var not in self.agg_df.columns:
             dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'I_set']]#HARD CODE
@@ -636,8 +622,6 @@ class Figure(DataSelection):
 
         return pd.DataFrame(rows)
 
-
-
     def group_consecutive_responses(self, bin_results: list[dict]) -> list[dict]:
         # Drop NaN responses
         bin_results = [br for br in bin_results if pd.notna(br['response'])]
@@ -692,9 +676,6 @@ class Figure(DataSelection):
             })
 
         return grouped
-
-
-
 
     def get_responses(self, df) -> pd.DataFrame:  #take in pre_post_bins filtered or not but df with just cell_id pre post
         result_rows = []
@@ -804,8 +785,6 @@ class Figure(DataSelection):
             })
 
         return results
-
-
     
     def save_plot(self, fig, filename: str, formats=('png', 'svg')):
         """
@@ -825,7 +804,65 @@ class Figure(DataSelection):
             fig.savefig(filepath, format=fmt, bbox_inches='tight', dpi=300)
         plt.close(fig)
         print(f"Saved figure: {filename} in formats: {formats}")
-   
+
+    def build_name(self, *args, sep="_", titlecase=False):
+        """
+        Build a clean, flattened name string from any mix of strings, lists, tuples, or None.
+
+        Parameters
+        ----------
+        *args : str | list | tuple | None
+            Any number of items to join together. Nested lists/tuples are flattened.
+        sep : str, optional
+            Separator used to join the strings (default: '_').
+        titlecase : bool, optional
+            If True, capitalizes each word (useful for figure titles).
+
+        Returns
+        -------
+        str
+            A single cleaned string joined by the given separator.
+        """
+        def flatten(items):
+            """Recursively flatten nested structures."""
+            for i in items:
+                if i is None:
+                    continue
+                elif isinstance(i, (list, tuple, set)):
+                    yield from flatten(i)
+                else:
+                    yield str(i).strip()
+
+        parts = [p for p in flatten(args) if p]
+        if titlecase:
+            parts = [p.title() for p in parts]
+        return sep.join(parts)
+    
+    def t_test_stats(self, df, group_col, value_col, alpha=0.05):
+        """
+        Compute pairwise t-tests between groups in `group_col`.
+        Returns a list of dicts with (group1, group2, p_val, significant).
+        """
+        import itertools
+        from scipy.stats import ttest_ind
+
+        results = []
+        groups = df[group_col].unique()
+        for g1, g2 in itertools.combinations(groups, 2):
+            vals1 = df[df[group_col] == g1][value_col].dropna()
+            vals2 = df[df[group_col] == g2][value_col].dropna()
+            if len(vals1) < 2 or len(vals2) < 2:
+                continue
+            t_stat, p_val = ttest_ind(vals1, vals2, equal_var=False)
+            results.append({
+                "group1": g1,
+                "group2": g2,
+                "p_val": p_val,
+                "significant": p_val < alpha
+            })
+        return results
+
+    
 
 @dataclass
 class ResponseCharecterisation(Figure):
@@ -983,6 +1020,7 @@ class ResponseCharecterisation(Figure):
 
 
 
+
     
 @dataclass
 class ApplicationResponse(Figure):
@@ -1094,11 +1132,11 @@ class IF_curve(Figure):
     compare: str = field(kw_only = True, default = 'treatment') # should add elsewhere incase you want to compare sex or something other rhan treatment
     I_range_pA: str = field(kw_only = True, default = 'all_cells')
     filename: str = None
-    specify: str = field(kw_only = True, default = None) # specify marker to see subsets e.g. I_set or cell_id
+    specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id if set to None single cells will not be plotted 
     n_minimum: float = field(kw_only = True, default = 3)
-
-    dependant_var: str = 'AP_frequencies_Hz'
-    bin_size: int = field(kw_only=True, default=10)  # 10pA binning
+    show_values: bool = field(kw_only=True, default=False)
+    dependant_var: str = 'AP_frequencies_Hz' 
+    significant_only: bool = field(kw_only=True, default=True)
 
     def __post_init__(self):
         if self.data_type != 'IF_IC':
@@ -1116,11 +1154,12 @@ class IF_curve(Figure):
 
         super().__post_init__()
         self.data = self.filter_n_minimum(self.agg_df)
-        self.df_long =  self.preprocess_IF_data(n_min=self.n_minimum, bin_size=self.bin_size, I_range_pA=self.I_range_pA)
+        self.df_long =  self.preprocess_IF_data(n_min=self.n_minimum, I_range_pA=self.I_range_pA)
         self.fig = self.plot_IF_curve()
+        self.cell_fig = self.plot_cell_id_curves()
 
     
-    def preprocess_IF_data(self, n_min=None, bin_size=None, I_range_pA=None):
+    def preprocess_IF_data(self, n_min=None, I_range_pA=None):
         """
         Build a long-format DataFrame for IF plotting, with optional binning,
         filtering for minimum number of cells per group, and optional I-step range.
@@ -1151,7 +1190,7 @@ class IF_curve(Figure):
         df['AP_frequencies_Hz'] = pd.to_numeric(df['AP_frequencies_Hz'], errors='coerce')
 
         # Create binned current steps
-        df['I_step_bin'] = (np.round(df['I_steps_pA'] / bin_size) * bin_size).astype(int)
+        df['I_step_bin'] =  df['I_steps_pA']
 
         # Filter bins with fewer than n_min cells per compare group
         counts = df.groupby(['I_step_bin', self.compare])['cell_id'].nunique().reset_index(name='n_cells')
@@ -1186,7 +1225,7 @@ class IF_curve(Figure):
             x="I_step_bin",
             y=self.dependant_var,
             hue=self.compare,
-            errorbar="sd",
+            errorbar="se", # sd 
             ax=ax,
             palette=color_dict,
             linewidth=2.5,
@@ -1203,10 +1242,10 @@ class IF_curve(Figure):
         #         capsize=5
         #     )
 
-        if self.specify is not None and self.specify in df.columns:
+        legend_handles_labels = {}
+        if self.show_values and self.specify is not None and self.specify in df.columns:
             markers = cycle(['o', 's', '^', 'D', 'v', '<', '>'])
-            legend_handles_labels = {}
-
+            
             for spec_value in df[self.specify].unique():
                 marker = next(markers)
                 sub_df = df[df[self.specify] == spec_value].copy()
@@ -1247,6 +1286,22 @@ class IF_curve(Figure):
                     markersize=6
                 )
 
+        self.plot_stats_on_ax(ax, stats_func=self.t_test_stats, alpha=0.05)
+        # pvals = self.compute_bin_stats(df)
+        # for b, p in pvals.items():
+        #     if p < 0.05:   # threshold
+        #         y_bin_max = df[df["I_step_bin"] == b][self.dependant_var].max()
+        #         offset = 0.01 * (df[self.dependant_var].max() - df[self.dependant_var].min())
+        #         ax.text(
+        #             b, 
+        #             y_bin_max + offset, 
+        #             "*",
+        #             ha="center",
+        #             va="bottom",
+        #             fontsize=20,
+        #             color="black"
+        #         )
+
         n_mapping = agg.groupby(self.compare)['n'].max().to_dict()
         handles, labels = ax.get_legend_handles_labels()
         # Add n= counts to the compare group labels
@@ -1267,6 +1322,130 @@ class IF_curve(Figure):
         self.save_plot(fig, self.filename)
         
         return fig
+    
+
+    
+    def plot_cell_id_curves(self):
+        """
+        Plot each cell_id's I–F curve with a unique color, separated by self.compare (e.g., treatment group).
+        Each compare group is shown in its own subplot for easier visual inspection.
+        """
+        df = self.df_long.copy()
+
+        if self.compare not in df.columns:
+            raise ValueError(f"'{self.compare}' not found in DataFrame columns: {df.columns.tolist()}")
+
+        compare_groups = df[self.compare].unique()
+        n_groups = len(compare_groups)
+
+        fig, axes = plt.subplots(
+            n_groups, 1,
+            figsize=(12, 6 * n_groups),
+            sharex=True,
+            sharey=True
+        )
+
+        if n_groups == 1:
+            axes = [axes]  # ensure iterable if single axis
+
+        for ax, comp in zip(axes, compare_groups):
+            sub_df = df[df[self.compare] == comp].copy()
+
+            # Reset palette per group so colors don't repeat across groups
+            cell_ids = sub_df["cell_id"].unique()
+            palette = sns.color_palette("husl", len(cell_ids))
+
+            for color, cell_id in zip(palette, cell_ids):
+                cell_df = sub_df[sub_df["cell_id"] == cell_id]
+                ax.plot(
+                    cell_df["I_step_bin"],
+                    cell_df[self.dependant_var],
+                    color=color,
+                    linewidth=1.5,
+                    alpha=0.9,
+                    label=str(cell_id)
+                )
+
+            # Legend (always includes n= count)
+            from matplotlib.lines import Line2D
+            legend_elements = [
+                Line2D([0], [0], color=color, lw=2, label=str(cid))
+                for color, cid in zip(palette, cell_ids)
+            ]
+            leg = ax.legend(
+                handles=legend_elements,
+                title=f"{comp} (n={len(cell_ids)})",
+                fontsize=8,
+                ncol=2 if len(cell_ids) > 20 else 1,
+                frameon=True,
+                loc='best'
+            )
+            leg.get_frame().set_alpha(0.8)
+
+            # Labels (no subplot titles)
+            ax.set_xlabel("Current injection (pA)", fontsize=12)
+            ax.set_ylabel("Firing frequency (Hz)", fontsize=12)
+            sns.despine(ax=ax)
+
+        fig.suptitle("Per-cell I–F curves by group", fontsize=18)
+        plt.tight_layout(rect=[0, 0, 1, 0.97])
+        plt.show()
+
+        self.save_plot(fig, f"{self.filename}_cell_traces_by_{self.compare}")
+
+        return fig
+    
+    def plot_stats_on_ax(self, ax, stats_func=None, alpha=0.05):
+        """
+        Plot significance stars or p-values above each I_step_bin for FI curves.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            Axis to plot on.
+        stats_func : callable, optional
+            Function to compute stats. Should take (df, group_col, value_col, alpha) and return
+            list of dicts with keys 'group1', 'group2', 'p_val', 'significant'.
+            Defaults to self.t_test_stats.
+        alpha : float
+            Significance threshold for the test.
+        """
+        if stats_func is None:
+            stats_func = self.t_test_stats
+
+        df = self.df_long
+
+        for b in df['I_step_bin'].unique():
+            df_bin = df[df['I_step_bin'] == b]
+            stats_results = stats_func(df_bin, group_col=self.compare, value_col=self.dependant_var, alpha=alpha)
+
+            y_max_bin = df_bin[self.dependant_var].max()
+            y_range = df_bin[self.dependant_var].max() - df_bin[self.dependant_var].min()
+            if y_range == 0:
+                y_range = y_max_bin * 0.05 if y_max_bin != 0 else 1
+            offset = 0.01 * (df[self.dependant_var].max() - df[self.dependant_var].min())
+
+            for res in stats_results:
+                if getattr(self, "significant_only", True):
+                    if not res["significant"]:
+                        continue
+                    text = "*"
+                else:
+                    text = "*" if res["significant"] else f"{res['p_val']:.2f}"
+
+                ax.text(
+                    b,
+                    y_max_bin + offset,
+                    text,
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    color="black"
+                )
+
+
+
+
 
 
 
@@ -1280,12 +1459,12 @@ class Histogram(Figure):
     compare: str = field(kw_only=True, default='treatment') #bars to compare on x-axis
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id
     n_minimum: float = field(kw_only = True, default = 3)
-
+    significant_only: bool = field(kw_only=True, default=True)
     pre_sweep_window: int = None # window before and after drug_in
     post_sweep_window: int = None 
 
     def __post_init__(self):
-        self.filename = f"{self.dependant_var}_{self.specify}" 
+        self.filename = self.build_name(self.dependant_var, self.specify, self.region, self.cell_type, sep="_")
         super().__post_init__()
         self.check_valid_dependant_var()
         self.data = self.filter_n_minimum(self.agg_df) # TODO NOW here there is a col RMP_mV averaged dont know why or what it is / and there is the sweep_RMP_mV CHECK WHATS HAPPENING
@@ -1409,16 +1588,64 @@ class Histogram(Figure):
                 linespacing=1.2,
             )
 
+        self.plot_stats_on_ax(ax, stats_func=self.t_test_stats, alpha=0.05)
+        
         # Customize plot labels and titles
         ax.spines[['right', 'top']].set_visible(False)
         ax.set_ylabel(unit_dict[self.dependant_var], fontsize=24)
         ax.set_xlabel('')
-        ax.set_title(f'{self.cell_type if self.cell_type is not None else ""} {unit_dict[self.dependant_var]}', fontsize=28)
+        ax.set_title(
+            self.build_name(
+                unit_dict.get(self.dependant_var, self.dependant_var),
+                self.region,
+                self.cell_type,
+                sep=" "
+            ),
+            fontsize=28
+        )
         ax.tick_params(axis='x', labelsize=24)
         ax.tick_params(axis='y', labelsize=24)
         plt.tight_layout()
         plt.show()
         self.save_plot(fig, self.filename)
+
+
+    def plot_stats_on_ax(self, ax, stats_func=None, alpha=0.05):
+        """
+        Plot stars/p-values above bars for histogram using the provided stats function.
+        
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes
+            Axis to plot on.
+        stats_func : callable, optional
+            Function to compute stats. Should take (df, group_col, value_col, alpha) and return
+            list of dicts with keys 'group1', 'group2', 'p_val', 'significant'.
+            Defaults to self.t_test_stats.
+        alpha : float
+            Significance threshold for the test.
+        """
+        if stats_func is None:
+            stats_func = self.t_test_stats
+
+        df = self.data
+        stats_results = stats_func(df, group_col=self.compare, value_col=self.dependant_var, alpha=alpha)
+
+        y_range = df[self.dependant_var].max() - df[self.dependant_var].min()
+        if y_range == 0:
+            y_range = df[self.dependant_var].max() * 0.1 if df[self.dependant_var].max() > 0 else 1
+        ax.set_ylim(top=ax.get_ylim()[1] * 1.1)
+
+        groups = df[self.compare].unique().tolist()
+        for res in stats_results:
+            if getattr(self, "significant_only", True) and not res["significant"]:
+                continue
+            x1 = groups.index(res["group1"])
+            x2 = groups.index(res["group2"])
+            y_max = df[df[self.compare].isin([res["group1"], res["group2"]])][self.dependant_var].max()
+            y_text = y_max + y_range * 0.05
+            text = "*" if res["significant"] else f"p={res['p_val']:.3f}"
+            ax.text((x1 + x2) / 2, y_text, text, ha="center", va="bottom", fontsize=16, color='black')
 
 
 

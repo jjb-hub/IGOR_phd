@@ -115,13 +115,14 @@ class Project(Cachable):
 
         for col in df.columns: # detect 1/0 True/False columns as boolian
             unique_vals = df[col].dropna().unique()
+
+            if len(unique_vals) == 0: #skip empty columns
+                continue
             if set(unique_vals).issubset({0, 1}):
                 # Only convert non-null values to boolean
                 df[col] = df[col].where(df[col].isna(), df[col].astype(bool))
                 print(f"[INFO] Column '{col}' inferred as boolean (True/False).")
 
-        # if 'cell_subtype' in df.columns:
-        #     df['cell_subtype'].fillna(np.nan, inplace=True)
 
         self.cache(filename, df)
         return df
@@ -134,6 +135,7 @@ class Project(Cachable):
         Returns:
             V_array: 2D numpy array (time x sweeps) of voltage
             I_array: Currently None (or could be second channel if needed)
+            stim_array: 2D numpy array of stimulus channel, or None if not present
             V_list: 1D flattened array (column-major sweep order)
         """
         
@@ -142,22 +144,33 @@ class Project(Cachable):
             raise FileNotFoundError(f"ABF file not found: {path}")
 
         abf = ABF(path)
-        sampling_rate_hz = abf.dataRate
+        num_sweeps = abf.sweepCount
+        num_points = abf.sweepPointCount
+        sampling_rate_hz = abf.dataRate #TODO pass and use
 
         # Identify voltage and current channels by unit
         unit_map = {i: unit for i, unit in enumerate(abf.adcUnits)}
         voltage_ch = next((i for i, unit in unit_map.items() if 'V' in unit.upper()), None)
         current_ch = next((i for i, unit in unit_map.items() if 'A' in unit.upper()), None)
 
+        # check for stimulation channel
+        all_ch = set(range(abf.channelCount))
+        used_ch = {ch for ch in [voltage_ch, current_ch] if ch is not None}
+        remaining_ch = all_ch - used_ch
+        if len(remaining_ch) == 1:
+            stim_ch = remaining_ch.pop()
+            stim_array = np.zeros((num_points, num_sweeps))
+        elif len(remaining_ch) > 1:
+            channel_names = [abf.adcNames[ch] for ch in remaining_ch]
+            print(f"Multiple additional channels found: {channel_names}. No stim channel assigned.")
+            stim_ch = None
+            stim_array = None
+        else:
+            stim_ch = None
+            stim_array = None
+
         if voltage_ch is None or current_ch is None:
             raise ValueError(f"Couldn't identify voltage/current channels from units: {abf.adcUnits}")
-
-        # Channel names (optional, for debug/info)
-        # voltage_name = abf.adcNames[voltage_ch]
-        # current_name = abf.adcNames[current_ch]
-
-        num_sweeps = abf.sweepCount
-        num_points = abf.sweepPointCount
 
         V_array = np.zeros((num_points, num_sweeps))
         I_array = np.zeros((num_points, num_sweeps))
@@ -167,10 +180,13 @@ class Project(Cachable):
             V_array[:, i] = abf.sweepY
             abf.setSweep(i, channel=current_ch)
             I_array[:, i] = abf.sweepY
+            if stim_ch is not None:
+                abf.setSweep(i, channel=stim_ch)
+                stim_array[:, i] = abf.sweepY
 
         V_list = V_array.ravel(order='F')  # Column-major, like IGOR
 
-        return V_array, I_array, V_list
+        return V_array, I_array, stim_array, V_list
             
 
     def IGOR_load(self, folder_file):
@@ -212,7 +228,7 @@ class Project(Cachable):
         feature_df = self.load_feature_xlsx('features')
         display(feature_df[feature_df['folder_file'] == folder_file])  # Show file info
 
-        V_array , I_array, V_list = self.load_data(folder_file)
+        V_array , I_array, stim_array, V_list = self.load_data(folder_file)
         self.quick_line_plot(V_array, f'Voltage trace for {folder_file}', 'Voltage (mV)', n_sweeps=n_sweeps, stacked=stacked )
         try:
             self.quick_line_plot(I_array, f'Current (I) trace for {folder_file}', 'Current (pA)', n_sweeps=n_sweeps,  stacked=stacked) #TODO add if check shape hwen no I 
@@ -270,13 +286,13 @@ class EphysData (Project):
    
     def generate(self):
         ''' generic generator for dfs'''
-        df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns] 
+
+        df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns]   
 
         # df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
         df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
         additional_columns = [col for col in df.columns if col not in self.initial_columns]
         df = df[self.initial_columns + additional_columns]
-        # cache(self.project, self.filename, df)
         self.cache(self.filename, df)
         return df
     
@@ -336,7 +352,7 @@ class st_VC(EphysData):
     
     def process(self, row: pd.Series) -> pd.Series:
         """Extract Rs, Rm, Cm, tau from each voltage step in the st_VC protocol.""" 
-        V_array, I_array, _ = self.load_data(row['folder_file'])
+        V_array, I_array, stim_array, V_list = self.load_data(row['folder_file'])
         V = V_array[:, 0]  # mV
         I = I_array[:, 0]  # pA
         dt = 1 / self.sampling_rate
@@ -456,7 +472,7 @@ class ramp_IC(EphysData):
     
     def process(self, row: pd.Series) -> pd.Series:
         """Extract rheobase (pA), voltage_threshold (mV) and AP_charecteristics of the first AP."""  #HERE TO CHECK AND WORK FOR HFD
-        V_array, I_array, _ = self.load_data(row['folder_file'])
+        V_array, I_array,  stim_array, V_list = self.load_data(row['folder_file'])
         dt = 1 / self.sampling_rate
         t = np.arange(len(I_array)) * dt
 
@@ -493,7 +509,7 @@ class ramp_IC(EphysData):
                 dI = np.diff(I_sweep) 
                 ramp_end_idx = np.argmax(np.abs(dI)) 
                 offset =  5 * round(np.mean(I_sweep[ramp_end_idx+50:]) / 5)     #np.mean(I_sweep[ramp_end_idx+50:])  
-                rheobase = I_sweep[firt_AP_peak_loc]  # pA
+                rheobase = I_sweep[firt_AP_peak_loc] - offset  # pA
                 rmp = np.mean(V_sweep[ramp_end_idx+50:])
             except IndexError:
                 continue  # Skip corrupted index
@@ -537,7 +553,7 @@ class IV_VC(EphysData):
     
     def process(self, row: pd.Series) -> pd.Series:
         """Extract steady-state current (I_steady) for each voltage step (V_inj).""" 
-        V_array, I_array, _ = self.load_data(row['folder_file'])
+        V_array, I_array,  stim_array, V_list = self.load_data(row['folder_file'])
         dt = 1 / self.sampling_rate
         t = np.arange(len(I_array)) * dt
 
@@ -592,13 +608,14 @@ class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairabili
         Extract AP, sEPSP and sIPSP frequency.
         Designed for a gap free recording. 
         """  
-        V_array, I_array, _ = self.load_data(row['folder_file'])
+        V_array, I_array,  stim_array, V_list = self.load_data(row['folder_file'])
         dt = 1 / self.sampling_rate
         t = np.arange(len(I_array)) * dt
 
         # Baseline correction
-        baseline = np.median(V_array)
-        trace = (V_array - baseline).flatten()
+        mean_holding_I = int(np.mean(I_array))
+        median_RMP = np.median(V_array)
+        trace = (V_array - median_RMP).flatten()
 
         #  EPSPs
         peaks, rise_times, amplitudes, frequency = peak_finder(
@@ -627,19 +644,132 @@ class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairabili
         row['sEPSP_frequency_Hz'] = frequency
         row['sEPSP_rise_times_ms'] = rise_times #check units
         row['sEPSP_amplitudes_mV'] = amplitudes #check units
+        row["RMP_mV"] = median_RMP
+        row['holding_I'] = mean_holding_I
         return row
 
+
+@dataclass
+class PPR_VC(EphysData):
+    filename: str = "PPR_VC_df"
+    data_type: str = 'PPR_VC'
+
+    pulse_search_window_ms: float = 15  # ms to search after pulse offset
+
+    def __post_init__(self):
+        self.initial_columns = [
+            'folder_file', 'cell_id', 'data_type',
+            'treatment', 'region', 'cell_subtype', 'cell_type'
+        ]
+        super().__post_init__()
+
+    def process(self, row: pd.Series) -> pd.Series:
+        """
+        Detects two pulses per sweep from stim channel, extracts peak currents,
+        computes ISI and paired-pulse ratio (PPR).
+        Assumes inward (negative) current.
+        """
+        V_array, I_array, stim_array, V_list = self.load_data(row['folder_file'])
+        dt = 1 / self.sampling_rate
+        w_samples = int(self.pulse_search_window_ms / 1000 / dt)
+
+        ISIs, pulse1_amp, pulse2_amp, PPRs, baseline_V, baseline_I = [], [], [], [], [], []
+
+        for sweep in range(stim_array.shape[1]):  # axis 1 = sweeps
+            stim = stim_array[:, sweep]
+            I = I_array[:, sweep]
+            V = V_array[:, sweep] #for AP detection and sweep exclusion
+
+            #detect stim
+            d_stim = np.diff(stim)
+            threshold = 0.5 * np.max(d_stim)  # 50% of the max slope
+            pulse_onsets = np.where(d_stim > threshold)[0] + 1
+            pulse_offsets = np.where(d_stim < -threshold)[0] + 1 
+
+            if len(pulse_onsets) != len(pulse_offsets):
+                min_len = min(len(pulse_onsets), len(pulse_offsets))
+                pulse_onsets = pulse_onsets[:min_len]
+                pulse_offsets = pulse_offsets[:min_len]
+
+            pulses = list(zip(pulse_onsets, pulse_offsets)) # list of tuples [(on1, off1), (on2, off2), ...]
+
+            if len(pulses) != 2:
+                print(f"{len(pulses)} pulses detected, skipping sweep {sweep} for {row['folder_file']}")
+                continue
+
+
+            #check for APs from stim  w_samples
+            V_AP_threshold = 10.0  # mV, spike in voltage
+            I_AP_rate_threshold = 2000.0  # pA/ms, rapid deflection in current 
+            buffer_samples = int(0.0005 / dt)  # 0.5 ms buffer after each pulse
+
+            ap_detected = False
+            for onset, offset in pulses:
+                ap_check_start = offset + buffer_samples
+                ap_check_end = min(len(I), offset + w_samples)
+
+                seg_I = I[ap_check_start:ap_check_end]
+                seg_V = V[ap_check_start:ap_check_end]  # optional if you want to check voltage too
+
+                if np.max(seg_V) > V_AP_threshold or np.max(np.abs(np.diff(seg_I))) > I_AP_rate_threshold:
+                    ap_detected = True
+                    break  
+
+            if ap_detected:
+                print(f"Sweep {sweep} skipped due to potential AP in {row['folder_file']}")
+                continue
+
+            p1, p2 = pulse_offsets[:2]
+            amp1 = np.min(I[p1:p1 + w_samples])
+            amp2 = np.min(I[p2:p2 + w_samples])
+
+            ISIs.append(int((pulse_onsets[1] - p1) * dt * 1000)) #beginning of second to end of first
+            pulse1_amp.append(amp1)
+            pulse2_amp.append(amp2)
+            PPRs.append(amp2 / amp1 if amp1 != 0 else np.nan)
+            baseline_V.append(np.median(V[:p1-5]))
+            baseline_I.append(np.mean(I[:p1-5]))
+
+            #debug plot 
+            # plt.figure(figsize=(8, 3))
+            # plt.plot(I, color='black', label='Current (I)')
+            # plt.axvline(p1, color='blue', linestyle='--', label='Pulse 1 offset')
+            # plt.axvline(p2, color='green', linestyle='--', label='Pulse 2 offset')
+            # plt.plot(p1 + np.argmin(I[p1:p1 + w_samples]), amp1, 'bo', label='Peak 1')
+            # plt.plot(p2 + np.argmin(I[p2:p2 + w_samples]), amp2, 'go', label='Peak 2')
+            # plt.plot(stim * 10, color='red', alpha=0.9, label='Stim x10')  
+            # plt.title(f"Sweep {sweep} - {row['folder_file']}")
+            # plt.xlabel('Sample')
+            # plt.ylabel('Current (pA)')
+            # plt.legend()
+            # plt.show()
+        
+        if len(np.unique(ISIs)) > 1:
+            most_common = np.bincount(ISIs).argmax()
+            print(f"Warning: ISIs vary across sweeps for {row['folder_file']}: {np.unique(ISIs)}, using most common {most_common} ms")
+            row['ISI_ms'] = most_common
+        else:
+            try:
+                row['ISI_ms'] = ISIs[0]
+            except IndexError:
+                row['ISI_ms'] = np.nan  
+
+        row['pulse1_amplitude_pA'] = pulse1_amp
+        row['pulse2_amplitude_pA'] = pulse2_amp
+        row['PPR'] = PPRs
+        row['RMP_mV'] = np.median(baseline_V)
+        row['holding_I'] = np.mean(baseline_I)
+
+        return row
 
 
 @dataclass
 class IF_IC(EphysData):    
     filename: str = "IF_IC_df"
     data_type: str = 'IF_IC'
-
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type', 'R_series'] # R_series is redundant for pCLAMP data #TODO
-        
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type'] #, 'R_series'] # R_series is redundant for pCLAMP data #TODO
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -661,7 +791,7 @@ class IF_IC(EphysData):
                 'off_step_peak_locs'
                 'holding_I', 'RMP_mV'
         """
-        V_array, I_array, _ = self.load_data(row['folder_file'])
+        V_array, I_array,  stim_array, V_list = self.load_data(row['folder_file'])
         dt = 1 / self.sampling_rate
         t = np.arange(len(I_array)) * dt
 
@@ -673,6 +803,11 @@ class IF_IC(EphysData):
         I_array_offset, offset = correct_I_offset_IF(I_array) 
         I_array_adj_clean = denoise_steps(I_array_offset)
         I_steps_pA , AP_frequencies_Hz, V_rest , off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
+        
+        # unirom step size correction
+        step_size = np.round(np.median(np.diff(np.unique(I_steps_pA)))) 
+        I_steps_pA = (np.round(I_steps_pA / step_size) * step_size).astype(int).tolist()
+
         FI_slope, rheobase_threshold, valid_APs = FI_slope_and_rheobase(row['folder_file'], I_steps_pA, AP_frequencies_Hz)
 
         row["%_sag"] = sag_current_analyser(row['folder_file'], V_array, I_array_adj_clean, I_steps_pA, AP_frequencies_Hz)
@@ -692,6 +827,7 @@ class IF_IC(EphysData):
         row['I_steps_pA'] = I_steps_pA
         row['AP_frequencies_Hz'] = AP_frequencies_Hz
         row['max_firing_Hz'] = calculate_max_firing(V_array)
+        row['IF_step_size_pA'] = step_size
 
         row['off_step_peak_locs']=off_step_peak_locs
         row["RMP_mV"]=V_rest
@@ -712,52 +848,55 @@ class IF_IC(EphysData):
         if np.mean(np.array(peak_voltages_all[:10])[~np.isnan(peak_voltages_all[:10])]) < 15: #mean of first 11 AP peaks is less than 15mV the file is marked invalid
             row['valid'] = False 
 
-        return row
-
-
-
-@dataclass
-class IV_IC(EphysData):    
-    filename: str = "IV_IC_df"
-    data_type: str = 'IV_IC'
-
-    
-    def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
-        super().__post_init__()
-    
-    def process(self, row: pd.Series) -> pd.Series:
-        """
-        Designed for a hyperpolarising step protocol of a single step per sweep. 
-        Return:
-            sag: ratio of sag current (* 100 => %)
-            V_steady: steady state V during I step
-            I_injected: I injection of step
-            RMP:  restimg membrane potential (off step - check for holding current)
-        
-        """  
-        V_array, I_array, _ = self.load_data(row['folder_file'])
-        dt = 1 / self.sampling_rate
-        t = np.arange(len(I_array)) * dt
-
-        
-        I_array_offset, offset = correct_I_offset_IF(I_array) # pCLAMP data with holding_I attached to steps | not IGOR data
-        I_array_adj_clean = denoise_steps(I_array_offset)
-
-        step_current_values, AP_frequencies_Hz, V_rest_FI, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
-        if any(x < 0 for x in step_current_values):
-            sag_ratio, asym_current, step_current, V_rest_sag =sag_current_analyser(row['folder_file'], V_array, I_array_adj_clean, step_current_values, AP_frequencies_Hz)
-        else:
-            print (f"No negative I steps for {row['folder_file']}, unable to calculate sag")
-            sag_ratio, asym_current, step_current, V_rest_sag = np.nan, np.nan, np.nan, np.nan
-
-        row['%_sag']=sag_ratio
-        row['V_step_steady_mV']=asym_current
-        row['I_steps_pA']=step_current
-        row['RMP_mV']= V_rest_sag
-        row['holding_I']=offset
+        freq = np.array(AP_frequencies_Hz) # at least 4 consecutive non-zero firing frequencies
+        if freq.size == 0 or np.max(np.diff(np.flatnonzero(np.concatenate(([0], freq > 0, [0])) == 0)) - 1) < 4:
+            row['valid'] = False
 
         return row
+
+
+
+# @dataclass. #REMOVE i dont thin we will ever use this
+# class IV_IC(EphysData):    
+#     filename: str = "IV_IC_df"
+#     data_type: str = 'IV_IC'
+    
+#     def __post_init__(self):
+#         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
+#         super().__post_init__()
+    
+#     def process(self, row: pd.Series) -> pd.Series:
+#         """
+#         Designed for a hyperpolarising step protocol of a single step per sweep. 
+#         Return:
+#             sag: ratio of sag current (* 100 => %)
+#             V_steady: steady state V during I step
+#             I_injected: I injection of step
+#             RMP:  restimg membrane potential (off step - check for holding current)
+        
+#         """  
+#         V_array, I_array,  stim_array, V_list = self.load_data(row['folder_file'])
+#         dt = 1 / self.sampling_rate
+#         t = np.arange(len(I_array)) * dt
+
+        
+#         I_array_offset, offset = correct_I_offset_IF(I_array) # pCLAMP data with holding_I attached to steps | not IGOR data
+#         I_array_adj_clean = denoise_steps(I_array_offset)
+
+#         step_current_values, AP_frequencies_Hz, V_rest_FI, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
+#         if any(x < 0 for x in step_current_values):
+#             sag_ratio, asym_current, step_current, V_rest_sag =sag_current_analyser(row['folder_file'], V_array, I_array_adj_clean, step_current_values, AP_frequencies_Hz)
+#         else:
+#             print (f"No negative I steps for {row['folder_file']}, unable to calculate sag")
+#             sag_ratio, asym_current, step_current, V_rest_sag = np.nan, np.nan, np.nan, np.nan
+
+#         row['%_sag']=sag_ratio
+#         row['V_step_steady_mV']=asym_current
+#         row['I_steps_pA']=step_current
+#         row['RMP_mV']= V_rest_sag
+#         row['holding_I']=offset
+
+#         return row
 
 @dataclass
 class APP_IC(EphysData):
@@ -772,7 +911,7 @@ class APP_IC(EphysData):
     def process(self, row: pd.Series) -> pd.Series:
         """Generate APP_IC_df from scratch, 
         Processing logic specific to APP data type."""
-        V_array , I_array, V_list = self.load_data(row['folder_file'])
+        V_array , I_array,  stim_array, V_list = self.load_data(row['folder_file'])
 
         if I_array is not None and (I_array[:, 0] != 0).any():
             row['sweep_inputR_MOhm']=sweep_mean_inputR_calculator(V_array, I_array)
@@ -928,7 +1067,7 @@ class Hunter(EphysData):
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
-        V_array , I_array, V_list = self.load_data(row['folder_file'])
+        V_array , I_array,  stim_array, V_list = self.load_data(row['folder_file'])
 
 
         peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(row.folder_file, V_array)
@@ -976,6 +1115,7 @@ class Ephys(EphysData):
             self.ramp_IC_df = ramp_IC(self.project).df
             self.IF_IC_df = IF_IC(self.project).df
             self.spont_IC_df = spont_IC(self.project).df
+            self.PPR_VC_df = PPR_VC(self.project).df
             
         super().__post_init__() # initiales all parent calsses including EphysData which will run generate()
         
@@ -1004,13 +1144,11 @@ class Ephys(EphysData):
             rs_values = group["Rs_MOhm"].values
             folder_files = group["folder_file"].tolist()
 
-            if len(group)<2:
+            if len(group)<2: #this should take the first and last instead of returning nan and say it in the print
                 print(f"Warning: cell_id {cell_id} has < 2 st_VC enteries, unable to calculate access change.")
                 rs_changes.append((cell_id, np.nan, np.nan, []))
                 continue
 
-            # if len(group) != 2:
-            #     print(f"Warning: cell_id {cell_id} has {len(group)} st_VC entries (expected 2)") 
 
             first_val, last_val = rs_values[0], rs_values[-1]
             rs_values = group["Rs_MOhm"].values
@@ -1029,18 +1167,20 @@ class Ephys(EphysData):
 
         # df , columns to reduce, data_type, average
         reductions = [
-            (self.IF_IC_df, ["I_steps_pA", "AP_frequencies_Hz"], "IF_IC", False),
+            (self.IF_IC_df, ["I_steps_pA", "AP_frequencies_Hz"], "IF_IC", False), #this is not helpful and should be kept as a whole list both
             (self.ramp_IC_df, ["ramp_rheobase_pA", "ramp_voltage_threshold_mV", "AP_height_mV",
                             "AP_rise_mV_ms", "AP_decay_mV_ms", "AP_width_ms"], "ramp_IC", True),
-            (self.IV_VC_df, ["I_step_steady_mV", "V_steps_mV"], "IV_VC", False)
-            #(self.spont_IC_df, ["sEPSP_frequency_Hz", "sEPSP_rise_times_ms", "sEPSP_amplitudes_mV"], "spont_IC", True), #currently not used
+            (self.IV_VC_df, ["I_step_steady_mV", "V_steps_mV"], "IV_VC", False), #this is not helpful and should be kept as a whole list both
+            # (self.PPR_VC_df, ["PPR"], "PPR_VC", True), # check
+            # (self.PPR_VC_df, ["ISI_ms"], "PPR_VC", False), # this is a single int but should bekept to be able to have each ISI grouped seperatly
+            (self.spont_IC_df, ["sEPSP_frequency_Hz", "sEPSP_rise_times_ms", "sEPSP_amplitudes_mV"], "spont_IC", True), #averaging here fine
         ]
 
         for df_src, cols, data_type, avg in reductions:
             reduced = self.reduce_cellwise(df_src, cols, average=avg) # columns per cell
             cell_df = cell_df.merge(reduced, on="cell_id", how="left")
 
-            # select best folder_file per cell based on RMP and holding current
+            # select best folder_file per cell based on RMP and holding current. #not valid for data_type == 'PPR_VC' as is needs to be grouped beyond data_type by ISI also so for each ISI chose and chose the files by this pram and that the lists of PPR are not all nan as if there are APs that would be the case
             folder_col = self.folder_files_col(data_type)
             df_best = df_src.copy()
             df_best['rmp_score'] = -abs(df_best['RMP_mV'] + 70)  # closer to -70 is higher
@@ -1214,6 +1354,7 @@ class Ephys(EphysData):
                 return unique_values[0]
             else:
                 raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
+            
 
         aggregated_data = group.agg({
             col: lambda series: check_unique(series, cell_id) for col in unique_cols
