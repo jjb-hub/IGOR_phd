@@ -57,6 +57,7 @@ class DataSelection (Cachable):
     region: str | list  = field(kw_only=True, default=None)
     treatment: str | list  = field(kw_only=True, default=None)
     I_set: str | list  = field(kw_only=True, default=None)
+    behaviour: str | list  = field(kw_only=True, default=None)
     threshold_access_change: float = field(kw_only = True, default=30) # Rs % change threshold
 
 
@@ -74,7 +75,7 @@ class DataSelection (Cachable):
 
         self.validate_inputs() #except dv
         self.valid_files, self.valid_cell_ids = self.get_valid_folder_files()
-        self.agg_df = self.biild_agg_df() #validates dv
+        self.agg_df = self.build_agg_df() #validates dv
         if  self.project_obj.project_type == "application":
             self.treatment_count_df = self.generate_treatment_count_df() # not generic enpough yet #TODO
         # elif self.project_obj.project_type == ""
@@ -100,8 +101,10 @@ class DataSelection (Cachable):
         if self.data_type not in data_types: #complete list of data types
             raise ValueError(f"Invalid data_type: {self.data_type}. Must be one of {data_types}.")
         
-        # if self.data_type in ["FP", "APP"]: #TODO file validator inbuild fo project_type = application only needs to be cleaned
-        valid_df = self.cell_df[self.cell_df[f'{self.data_type}_folder_files'].notna()] 
+        #handel subgroup prefix
+        folder_file_cols = [c for c in self.cell_df.columns if c.endswith(f"{self.data_type}_folder_files")]
+        valid_df = self.cell_df[self.cell_df[folder_file_cols].notna().any(axis=1)]
+
         # else:
         #     valid_df = self.cell_df
 
@@ -125,9 +128,15 @@ class DataSelection (Cachable):
         Filters the cell_df based on the input parameters including threshold_access_change if not None.
         Returns a list of valid folder_files and cell_ids.
         """
-        valid_column = f'{self.data_type}_folder_files'
-        if valid_column not in self.cell_df.columns:
-            raise ValueError(f"{valid_column} column does not exist in cell_df.")
+        # valid_column = f'{self.data_type}_folder_files'
+        # if valid_column not in self.cell_df.columns:
+        #     raise ValueError(f"{valid_column} column does not exist in cell_df.")
+        
+        # find all relevant folder_files columns for this data_type
+        folder_file_cols = [c for c in self.cell_df.columns if c.endswith(f"{self.data_type}_folder_files")]
+        if not folder_file_cols:
+            raise ValueError(f"No columns found for {self.data_type}_folder_files in cell_df.")
+
         
         filtered_cell_df = self.cell_df.copy()
 
@@ -144,17 +153,46 @@ class DataSelection (Cachable):
             filtered_cell_df = filtered_cell_df[filtered_cell_df['Rs_pct_change'].abs() <= self.threshold_access_change]
         if self.region is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['region'].isin([self.region] if isinstance(self.region, str) else self.region)]
+        if self.behaviour is not None:
+            filtered_cell_df = filtered_cell_df[filtered_cell_df['behaviour'].isin([self.behaviour] if isinstance(self.behaviour, str) else self.behaviour)]
 
         valid_cell_ids = filtered_cell_df['cell_id'].tolist()
-        valid_files = filtered_cell_df[valid_column].dropna().tolist()
+        # valid_files = filtered_cell_df[folder_file_cols].dropna().tolist()
+        valid_files = [
+            f
+            for row in filtered_cell_df[folder_file_cols].dropna().values.tolist()
+            for cell in row
+            for f in (cell if isinstance(cell, list) else [cell])
+        ]
+
         if not valid_files:
             print("No valid files found for data selection.")
             return [],[]
-        valid_files = [item for sublist in valid_files for item in sublist] if isinstance(valid_files[0], list) else valid_files
+        # valid_files = [item for sublist in valid_files for item in sublist] if isinstance(valid_files[0], list) else valid_files
 
         return valid_files, valid_cell_ids
     
-    def biild_agg_df(self):
+    def reduce_series(s):
+            vals = s.dropna()
+            if len(vals) == 0:
+                return np.nan
+            # flatten nested lists
+            if any(isinstance(v, list) for v in vals):
+                out = []
+                for v in vals:
+                    if isinstance(v, list):
+                        out.extend(v)
+                    else:
+                        out.append(v)
+                return out
+            uniq = vals.unique()
+            # collapse if identical
+            if len(uniq) == 1:
+                return uniq[0]
+            # otherwise preserve structure
+            return vals.tolist()
+    
+    def build_agg_df(self):
         """
         Filters self.{data_type}_df for foler_files in cell_df["f{data_type}_folder_files"] and restructures it to a long format for plotting.
         
@@ -165,14 +203,34 @@ class DataSelection (Cachable):
         data_type_df = getattr(self, f"{self.data_type}_df")
 
         
-        independant_vairables = ['cell_id', 'folder_file', 'treatment', 'cell_type', 'cell_subtype', 'I_set', 'region', 'error', 'traceback'] #region and I_set are project specific this need to be generalised
+        independant_vairables = ['cell_id', 'folder_file', 'treatment', 'cell_type', 'cell_subtype', 'I_set', 'region', 'error', 'traceback', 'sex', 'behaviour'] # I_set are project specific this need to be generalised
 
         # Determine which dependent variables exist for this data_type
         valid_dvs_for_data_type = [col for col in data_type_df.columns if col not in independant_vairables]
 
         # Filter only valid folder_files
         filtered_df = data_type_df[data_type_df['folder_file'].isin(self.valid_files)].copy()
-        
+
+        # DATA TYPE SPECIFIC AGGREGATION #
+        if self.data_type == "PPR_VC": # combine all sweeps per cell_id + ISI + treatment
+            rows = []
+            for keys, sub in filtered_df.groupby(["cell_id", "treatment", "ISI_ms"]):
+                if not isinstance(keys, tuple):
+                    keys = (keys,)
+                row = dict(zip(["cell_id", "treatment", "ISI_ms"], keys))
+                for col in sub.columns:
+                    if col in row or col in {"error", "traceback"}:
+                        continue
+                    row[col] = DataSelection.reduce_series(sub[col])
+                row["folder_files"] = sub["folder_file"].tolist()
+                if "PPR" in row and isinstance(row["PPR"], list): # seperate raw values and average first 8
+                    row["PPR_raw"] = row["PPR"]
+                    # row["PPR"] = row["PPR"][:8] if len(row["PPR"]) >= 8 else np.nan # HARD CODE
+                    row["PPR"] = np.nanmean(row["PPR"][:8]) if len(row["PPR"]) >= 6 else np.nan
+                rows.append(row)
+            filtered_df = pd.DataFrame(rows)
+
+        # ACCOUNTING FOR TWO PROJECT TYPES #
         if  self.project_obj.project_type == "intrinsic_properties":
             # Intrinsic properties: no time, just keep cell_id, folder_file, and dependent variables
             cols_to_keep = ['cell_id', 'folder_file'] + valid_dvs_for_data_type
@@ -840,7 +898,7 @@ class Figure(DataSelection):
     
     def t_test_stats(self, df, group_col, value_col, alpha=0.05):
         """
-        Compute pairwise t-tests between groups in `group_col`.
+        Compute independant t-tests between groups in `group_col`.
         Returns a list of dicts with (group1, group2, p_val, significant).
         """
         import itertools
@@ -1315,7 +1373,7 @@ class IF_curve(Figure):
 
         ax.set_xlabel("Current injection (pA)", fontsize=16)
         ax.set_ylabel("Firing frequency (Hz)", fontsize=16)
-        ax.set_title(f"FI curve across {self.compare}", fontsize=18)
+        ax.set_title(f"FI curve across {self.compare}" + (f" - {', '.join(self.region)}" if getattr(self, "region", None) else ""), fontsize=18)
         sns.despine(ax=ax)
         plt.tight_layout()
         plt.show()
@@ -1462,6 +1520,7 @@ class Histogram(Figure):
     significant_only: bool = field(kw_only=True, default=True)
     pre_sweep_window: int = None # window before and after drug_in
     post_sweep_window: int = None 
+    subgroup_key: str = field(kw_only=True, default=None) # if specified, will plot separate histograms for each subgroup in this column
 
     def __post_init__(self):
         self.filename = self.build_name(self.dependant_var, self.specify, self.region, self.cell_type, sep="_")
@@ -1470,9 +1529,12 @@ class Histogram(Figure):
         self.data = self.filter_n_minimum(self.agg_df) # TODO NOW here there is a col RMP_mV averaged dont know why or what it is / and there is the sweep_RMP_mV CHECK WHATS HAPPENING
 
         # If dependant_var contains lists or arrays, average them to a single numeric value
+        if self.data[self.dependant_var].apply(lambda x: isinstance(x, (list, np.ndarray, pd.Series))).any(): #phasing this out
+            print(f"[Histogram DEBUG] collapsing lists in {self.dependant_var}")
         self.data[self.dependant_var] = self.data[self.dependant_var].apply(
             lambda x: np.mean(x) if isinstance(x, (list, np.ndarray, pd.Series)) else x
         )
+
         if self.data_type == "APP_IC":
             self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=f"sweep_{self.dependant_var}", pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
         self.order = [t for t in color_dict.keys() if t in self.data[self.compare].unique()]
@@ -1481,7 +1543,11 @@ class Histogram(Figure):
             self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()] #not generic #TODO
         
         self.fig = self.plot_histogram()
-        
+        if self.subgroup_key is not None and self.subgroup_key in self.data.columns:
+            for subgroup in self.data[self.subgroup_key].unique():
+                self.filename = self.build_name(self.dependant_var, self.specify, self.region, self.cell_type, subgroup, sep="_")
+                subgroup_data = self.data[self.data[self.subgroup_key] == subgroup]
+                self.fig = self.plot_histogram(subgroup_data, subgroup_name=subgroup)
 
     def specify_markers(self, df, ax):
         """
@@ -1517,9 +1583,11 @@ class Histogram(Figure):
         return legend_handles_labels
 
 
-    def plot_histogram(self):
+    def plot_histogram(self, df=None, subgroup_name=None):
+        if df is None:
+            df = self.data
+
         fig, ax = plt.subplots(figsize=(15, 10))
-        df = self.data
         sns.barplot(
             x=self.compare,
             y=self.dependant_var,
@@ -1588,7 +1656,7 @@ class Histogram(Figure):
                 linespacing=1.2,
             )
 
-        self.plot_stats_on_ax(ax, stats_func=self.t_test_stats, alpha=0.05)
+        self.plot_stats_on_ax(ax, stats_func=self.t_test_stats, df=df, alpha=0.05)
         
         # Customize plot labels and titles
         ax.spines[['right', 'top']].set_visible(False)
@@ -1599,6 +1667,7 @@ class Histogram(Figure):
                 unit_dict.get(self.dependant_var, self.dependant_var),
                 self.region,
                 self.cell_type,
+                subgroup_name if subgroup_name else None,
                 sep=" "
             ),
             fontsize=28
@@ -1610,7 +1679,7 @@ class Histogram(Figure):
         self.save_plot(fig, self.filename)
 
 
-    def plot_stats_on_ax(self, ax, stats_func=None, alpha=0.05):
+    def plot_stats_on_ax(self, ax, stats_func=None, df=None, alpha=0.05):
         """
         Plot stars/p-values above bars for histogram using the provided stats function.
         
@@ -1627,8 +1696,8 @@ class Histogram(Figure):
         """
         if stats_func is None:
             stats_func = self.t_test_stats
-
-        df = self.data
+        if df is None:
+            df = self.data
         stats_results = stats_func(df, group_col=self.compare, value_col=self.dependant_var, alpha=alpha)
 
         y_range = df[self.dependant_var].max() - df[self.dependant_var].min()
@@ -1640,6 +1709,10 @@ class Histogram(Figure):
         for res in stats_results:
             if getattr(self, "significant_only", True) and not res["significant"]:
                 continue
+
+            if res["significant"]:
+                print(f"{res['group1']} vs {res['group2']}: p={res['p_val']:.4f}", flush=True)
+
             x1 = groups.index(res["group1"])
             x2 = groups.index(res["group2"])
             y_max = df[df[self.compare].isin([res["group1"], res["group2"]])][self.dependant_var].max()

@@ -114,7 +114,9 @@ unit_dict = {
     "AP_count": "number of APs",
     "RA_count": "number of retroaxonal APs",
     "SAP_count": "number of somatic APs",
-    "inputR_MOhm": "Input resistance (MΩ)"
+    "inputR_MOhm": "Input resistance (MΩ)",
+
+    "PPR": "Paired Pulse Ratio",
 
 }
 

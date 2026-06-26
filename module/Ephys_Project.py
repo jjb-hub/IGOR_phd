@@ -16,6 +16,7 @@ from scipy.signal import find_peaks
 from module.action_potential_functions import calculate_max_firing, sweep_mean_RMP_calculator, sweep_mean_inputR_calculator, ap_characteristics_extractor_main, extract_FI_x_y, sag_current_analyser, mean_RMP_APP_calculator, spike_remover_nan, peak_finder,correct_I_offset_IF, denoise_steps, FI_slope_and_rheobase
 from scipy.stats import ttest_ind
 from module.Stats import Stats
+from scipy.signal import savgol_filter
 tqdm.pandas()
 
 # Root directory for projects
@@ -220,7 +221,7 @@ class Project(Cachable):
         return point_list, V_array_2d
     
 
-    def inspect_folder_file(self, folder_file, stacked=False, n_sweeps=None):
+    def inspect_folder_file(self, folder_file, stacked=False, n_sweeps=None, filename=None):
         '''
         Plots any waveform based off folder_file.
         Stacked will plot each column on top of each other, defaults to False.
@@ -229,9 +230,34 @@ class Project(Cachable):
         display(feature_df[feature_df['folder_file'] == folder_file])  # Show file info
 
         V_array , I_array, stim_array, V_list = self.load_data(folder_file)
-        self.quick_line_plot(V_array, f'Voltage trace for {folder_file}', 'Voltage (mV)', n_sweeps=n_sweeps, stacked=stacked )
+        # self.quick_line_plot(V_array, f'Voltage trace for {folder_file}', 'Voltage (mV)', n_sweeps=n_sweeps, stacked=stacked )
+        fig_v = self.quick_line_plot(
+            V_array,
+            f'Voltage trace for {folder_file}',
+            'Voltage (mV)',
+            n_sweeps=n_sweeps,
+            stacked=stacked
+        )
+
+        if filename: # should actualy be able to use save function from Figure class need to build interface #TODO
+            safe_name = self.sanitize_filename(f"{filename}_voltage")
+            fig_v.savefig(os.path.join(self.figure_output_dir, f"{safe_name}.svg"))
+            fig_v.savefig(os.path.join(self.figure_output_dir, f"{safe_name}.png"))
+
         try:
-            self.quick_line_plot(I_array, f'Current (I) trace for {folder_file}', 'Current (pA)', n_sweeps=n_sweeps,  stacked=stacked) #TODO add if check shape hwen no I 
+            # self.quick_line_plot(I_array, f'Current (I) trace for {folder_file}', 'Current (pA)', n_sweeps=n_sweeps,  stacked=stacked) #TODO add if check shape hwen no I 
+            fig_I = self.quick_line_plot(
+                I_array,
+                f'Current (I) trace for {folder_file}',
+                'Current (pA)',
+                n_sweeps=n_sweeps,
+                stacked=stacked
+            )
+            if filename:
+                safe_name = self.sanitize_filename(f"{filename}_current")
+                fig_I.savefig(os.path.join(self.figure_output_dir, f"{safe_name}.svg"))
+                fig_I.savefig(os.path.join(self.figure_output_dir, f"{safe_name}.png"))
+                
         except FileNotFoundError:
             print(f'No I file found for {folder_file}')
 
@@ -244,24 +270,26 @@ class Project(Cachable):
             plottitle (str): Title for the plot.
             stacked (bool): If True, plots each sweep stacked. If False, concatenates sweeps.
         '''
-        plt.figure()
+        fig, ax = plt.subplots()
         num_sweeps = plot_array.shape[1]
         if n_sweeps is None or n_sweeps > num_sweeps:
             n_sweeps = num_sweeps 
         
         if stacked:
             for i in range(n_sweeps):
-                plt.plot(plot_array[:, i])  # Plot each sweep
+                ax.plot(plot_array[:, i])  # Plot each sweep
         else:
             # Concatenate sweeps for continuous plotting
             cropped_array = plot_array[:, :n_sweeps] 
             continuous_plot = cropped_array.ravel(order='F')  # Flatten array in column-major order
-            plt.plot(continuous_plot)  # Plot continuous
+            ax.plot(continuous_plot)  # Plot continuous
         
-        plt.title(plottitle)
-        plt.xlabel('Time (no samples)')
-        plt.ylabel(y_label)
+        ax.set_title(plottitle)
+        ax.set_xlabel('Time (no samples)')
+        ax.set_ylabel(y_label)
+        fig.tight_layout() 
         plt.show()
+        return fig
 
 
 
@@ -347,7 +375,7 @@ class st_VC(EphysData):
     data_type: str = 'st_VC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -357,10 +385,18 @@ class st_VC(EphysData):
         I = I_array[:, 0]  # pA
         dt = 1 / self.sampling_rate
         t = np.arange(len(I)) * dt
+        min_step_separation = int(0.005 / dt)  # 5 ms
 
         # Detect voltage steps 
         dV = np.diff(V)
-        step_indices = np.where(np.abs(dV) > 0.5)[0]  # threshold in mV
+        step_indices = np.where(np.abs(dV) > 0.4)[0]  # threshold in mV #adj 0.5-->0.4 to capture high resistance neurons
+        
+        # Merge detections < min_step_separation 
+        if len(step_indices) > 0:
+            keep = np.concatenate(([True],
+                                np.diff(step_indices) > min_step_separation))
+            step_indices = step_indices[keep]
+
         if len(step_indices) < 1:
             raise ValueError("No voltage steps detected.")
 
@@ -458,6 +494,12 @@ class st_VC(EphysData):
         row['tau_ms'] = np.nanmean(tau_list)
         row['Cm_pF'] = np.nanmean(Cm_list)
 
+        # Baseline RMP: before the first step
+        baseline_end = step_indices[0]  # first step index
+        baseline_window = int(0.01 / dt)  # 10 ms window
+        row['RMP_mV'] = np.mean(V[max(0, baseline_end - baseline_window):baseline_end])
+        row['holding_I'] = np.mean(I[max(0, baseline_end - baseline_window):baseline_end])
+
         return row
 
 
@@ -467,7 +509,7 @@ class ramp_IC(EphysData):
     data_type: str = 'ramp_IC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -548,7 +590,7 @@ class IV_VC(EphysData):
     data_type: str = 'IV_VC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -600,7 +642,7 @@ class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairabili
     decay_time_range: tuple = (2e-3, 20e-3) # 2 - 20 ms
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -650,17 +692,14 @@ class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairabili
 
 
 @dataclass
-class PPR_VC(EphysData):
+class PPR_VC(EphysData):                    
     filename: str = "PPR_VC_df"
     data_type: str = 'PPR_VC'
 
-    pulse_search_window_ms: float = 15  # ms to search after pulse offset
+    pulse_search_window_ms: float = 16  # ms to search after pulse offset
 
     def __post_init__(self):
-        self.initial_columns = [
-            'folder_file', 'cell_id', 'data_type',
-            'treatment', 'region', 'cell_subtype', 'cell_type'
-        ]
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
@@ -678,13 +717,14 @@ class PPR_VC(EphysData):
         for sweep in range(stim_array.shape[1]):  # axis 1 = sweeps
             stim = stim_array[:, sweep]
             I = I_array[:, sweep]
-            V = V_array[:, sweep] #for AP detection and sweep exclusion
-
+            I_smooth = savgol_filter(I, window_length=11, polyorder=2) # could change for Butterworth / Bessel / Chebyshev filter los pass filters
+            V = V_array[:, sweep] # for holding voltage
+            
             #detect stim
             d_stim = np.diff(stim)
-            threshold = 0.5 * np.max(d_stim)  # 50% of the max slope
-            pulse_onsets = np.where(d_stim > threshold)[0] + 1
-            pulse_offsets = np.where(d_stim < -threshold)[0] + 1 
+            stim_threshold = 0.5 * np.max(d_stim)  # 50% of the max slope
+            pulse_onsets = np.where(d_stim > stim_threshold)[0] + 1
+            pulse_offsets = np.where(d_stim < -stim_threshold)[0] + 1 
 
             if len(pulse_onsets) != len(pulse_offsets):
                 min_len = min(len(pulse_onsets), len(pulse_offsets))
@@ -697,52 +737,113 @@ class PPR_VC(EphysData):
                 print(f"{len(pulses)} pulses detected, skipping sweep {sweep} for {row['folder_file']}")
                 continue
 
+            #  CHECK FOR APs  #
+            I_AP_rate_threshold = 200  # pA/ms, rapid deflection in current (AP in F4693/2025_11_07_0009 5MeO7j 684 pA/ms, F4832/2025_12_12_0050 236pA/ms, M5098/2026_04_29_0023 114 pA/ms)
+            buffer_samples = int(0.001 / dt)  # 1 ms buffer after each pulse
+            min_peak_latency_samples = int(1 / 1000 / dt) # 1.5 ms minimum physiological latency
+            baseline = I_smooth[:pulse_onsets[0] - buffer_samples]
+            noise_level = np.mean(baseline) - 3 * np.std(baseline)  # HARD CODE thrshold 3SD          
+            valid_sweep = True
 
-            #check for APs from stim  w_samples
-            V_AP_threshold = 10.0  # mV, spike in voltage
-            I_AP_rate_threshold = 2000.0  # pA/ms, rapid deflection in current 
-            buffer_samples = int(0.0005 / dt)  # 0.5 ms buffer after each pulse
+            # LOOP ON PULSES #
+            peak_amplitudes = []
+            peak_values =[]
+            peak_sweep_idxs = [] # peak index in sweep
+            for offset in pulse_offsets[:2]:
+                start_window = offset + buffer_samples
+                end_window = min(len(I), offset + w_samples)
 
-            ap_detected = False
-            for onset, offset in pulses:
-                ap_check_start = offset + buffer_samples
-                ap_check_end = min(len(I), offset + w_samples)
+                I_window = I[start_window:end_window]
+                I_window_smooth = I_smooth[start_window:end_window]
 
-                seg_I = I[ap_check_start:ap_check_end]
-                seg_V = V[ap_check_start:ap_check_end]  # optional if you want to check voltage too
+                # FIND PEAK #
+                peaks, props = find_peaks(-I_window_smooth, prominence=(3*np.std(baseline)))  
+                if len(peaks) == 0:
+                    valid_sweep = False
+                    break
+                # strongest negative peak
+                peak_idx = peaks[np.argmax(-I_window_smooth[peaks])]  
+                peak_val = I_window_smooth[peak_idx]
+                peak_sweep_idx = start_window + peak_idx 
+                peak_amplitude = peak_val - np.mean(baseline) 
 
-                if np.max(seg_V) > V_AP_threshold or np.max(np.abs(np.diff(seg_I))) > I_AP_rate_threshold:
-                    ap_detected = True
+                # max rate of change to detect APs /l atency occurance of peak from end of stim physiological threshold
+                if  np.max(np.abs(np.diff(I_window))) > I_AP_rate_threshold or peak_idx < min_peak_latency_samples or np.mean(peak_amplitude)<-1000: 
+                    print(f"Sweep {sweep} skipped due to potential AP in {row['folder_file']}")
+                    valid_sweep = False
+                    # DEBUG PLOT 
+                    # plt.figure(figsize=(6, 2))
+                    # x = np.arange(len(I_window))
+                    # plt.plot(x, I_window, color='lightgrey', label='I window')
+                    # plt.plot(x, I_window_smooth, color='black', label='I smooth')
+                    # # show detected peak if it exists
+                    # if 'peak_idx' in locals():
+                    #     plt.plot(peak_idx, I_window_smooth[peak_idx], 'ro', label='peak')
+                    # plt.title(f"AP reject - {row['folder_file']} sweep {sweep}")
+                    # plt.legend()
+                    # plt.tight_layout()
+                    # plt.show()
                     break  
 
-            if ap_detected:
+                valid_peak = peak_amplitude < noise_level 
+                if valid_peak:
+                    peak_amplitudes.append(peak_amplitude)
+                    peak_values.append(peak_val)
+                    peak_sweep_idxs.append(peak_sweep_idx)
+                else:
+                    valid_sweep = False
+                    break
+
+            if not valid_sweep:
                 print(f"Sweep {sweep} skipped due to potential AP in {row['folder_file']}")
                 continue
 
             p1, p2 = pulse_offsets[:2]
-            amp1 = np.min(I[p1:p1 + w_samples])
-            amp2 = np.min(I[p2:p2 + w_samples])
+            amp1=peak_amplitudes[0]
+            amp2=peak_amplitudes[1]
+            peak_val1= peak_values[0]
+            peak_val2=peak_values[1]
+            peak1_sweep_idx = peak_sweep_idxs[0]
+            peak2_sweep_idx = peak_sweep_idxs[1]
 
-            ISIs.append(int((pulse_onsets[1] - p1) * dt * 1000)) #beginning of second to end of first
-            pulse1_amp.append(amp1)
-            pulse2_amp.append(amp2)
+            if (amp2 / amp1) < 0 or (amp2 / amp1) > 4.2: #physiological catch often polysynaptic or slow AP ie 'F5104/2026_05_05_0007' <10 bad peak detection
+                print(f"High PPR ({amp2/amp1:.2f}) in sweep {sweep} for {row['folder_file']}")
+                continue
+                # PPRs.append(np.nan) #TODO revisit if this shouldbe done
+            
             PPRs.append(amp2 / amp1 if amp1 != 0 else np.nan)
             baseline_V.append(np.median(V[:p1-5]))
             baseline_I.append(np.mean(I[:p1-5]))
+            ISIs.append(int((pulse_onsets[1] - p1) * dt * 1000)) #beginning of second to end of first
+            pulse1_amp.append(amp1)
+            pulse2_amp.append(amp2)
 
-            #debug plot 
-            # plt.figure(figsize=(8, 3))
-            # plt.plot(I, color='black', label='Current (I)')
-            # plt.axvline(p1, color='blue', linestyle='--', label='Pulse 1 offset')
-            # plt.axvline(p2, color='green', linestyle='--', label='Pulse 2 offset')
-            # plt.plot(p1 + np.argmin(I[p1:p1 + w_samples]), amp1, 'bo', label='Peak 1')
-            # plt.plot(p2 + np.argmin(I[p2:p2 + w_samples]), amp2, 'go', label='Peak 2')
-            # plt.plot(stim * 10, color='red', alpha=0.9, label='Stim x10')  
-            # plt.title(f"Sweep {sweep} - {row['folder_file']}")
-            # plt.xlabel('Sample')
-            # plt.ylabel('Current (pA)')
-            # plt.legend()
-            # plt.show()
+        # DEBUG PLOT
+        # plt.figure(figsize=(9, 3))
+        # plt.plot(I, color='lightgrey', label='I raw')
+        # plt.plot(I_smooth, color='black', label='I smooth')
+        # plt.plot(stim * 10, color='red', alpha=0.6, label='stim x10')
+        # # pulses + windows
+        # for i, offset in enumerate(pulse_offsets[:2]):
+        #     c = 'blue' if i == 0 else 'green'
+        #     start = offset + buffer_samples
+        #     end = min(len(I), offset + w_samples)
+        #     plt.axvline(offset, color=c, linestyle='--')
+        #     plt.axvspan(start, end, color=c, alpha=0.12)
+        # # PEAKS (THIS is the correct way using your computed indices)
+        # p1 = pulse_offsets[0] + buffer_samples + np.where(I_smooth[pulse_offsets[0]+buffer_samples : pulse_offsets[0]+w_samples] == np.min(I_smooth[pulse_offsets[0]+buffer_samples : pulse_offsets[0]+w_samples]))[0][0]
+        # p2 = pulse_offsets[1] + buffer_samples + np.where(I_smooth[pulse_offsets[1]+buffer_samples : pulse_offsets[1]+w_samples] == np.min(I_smooth[pulse_offsets[1]+buffer_samples : pulse_offsets[1]+w_samples]))[0][0]
+        # plt.plot(peak1_sweep_idx, peak_val1, 'bo', ms=8, label='Peak 1')
+        # plt.plot(peak2_sweep_idx, peak_val2, 'go', ms=8, label='Peak 2')
+        # plt.axhline(noise_level, color='grey', linestyle='--', alpha=0.6, label='noise')
+        # plt.title(f"Sweep {sweep} - {row['folder_file']}")
+        # plt.xlabel("Samples")
+        # plt.ylabel("Current (pA)")
+        # plt.legend()
+        # plt.tight_layout()
+        # plt.show()
+        # path = f"/Users/jasminebutler/Desktop/PPR_exampleplot_{row['treatment']}_{row['cell_id']}.svg"
+        # plt.savefig(path, format='svg', dpi=300)
         
         if len(np.unique(ISIs)) > 1:
             most_common = np.bincount(ISIs).argmax()
@@ -769,7 +870,7 @@ class IF_IC(EphysData):
     data_type: str = 'IF_IC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type'] #, 'R_series'] # R_series is redundant for pCLAMP data #TODO
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type', 'sex', 'hemisphere', 'behaviour'] #, 'R_series'] # R_series is redundant for pCLAMP data #TODO
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -855,49 +956,6 @@ class IF_IC(EphysData):
         return row
 
 
-
-# @dataclass. #REMOVE i dont thin we will ever use this
-# class IV_IC(EphysData):    
-#     filename: str = "IV_IC_df"
-#     data_type: str = 'IV_IC'
-    
-#     def __post_init__(self):
-#         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment']
-#         super().__post_init__()
-    
-#     def process(self, row: pd.Series) -> pd.Series:
-#         """
-#         Designed for a hyperpolarising step protocol of a single step per sweep. 
-#         Return:
-#             sag: ratio of sag current (* 100 => %)
-#             V_steady: steady state V during I step
-#             I_injected: I injection of step
-#             RMP:  restimg membrane potential (off step - check for holding current)
-        
-#         """  
-#         V_array, I_array,  stim_array, V_list = self.load_data(row['folder_file'])
-#         dt = 1 / self.sampling_rate
-#         t = np.arange(len(I_array)) * dt
-
-        
-#         I_array_offset, offset = correct_I_offset_IF(I_array) # pCLAMP data with holding_I attached to steps | not IGOR data
-#         I_array_adj_clean = denoise_steps(I_array_offset)
-
-#         step_current_values, AP_frequencies_Hz, V_rest_FI, off_step_peak_locs = extract_FI_x_y(row['folder_file'], V_array, I_array_adj_clean, self.sampling_rate)
-#         if any(x < 0 for x in step_current_values):
-#             sag_ratio, asym_current, step_current, V_rest_sag =sag_current_analyser(row['folder_file'], V_array, I_array_adj_clean, step_current_values, AP_frequencies_Hz)
-#         else:
-#             print (f"No negative I steps for {row['folder_file']}, unable to calculate sag")
-#             sag_ratio, asym_current, step_current, V_rest_sag = np.nan, np.nan, np.nan, np.nan
-
-#         row['%_sag']=sag_ratio
-#         row['V_step_steady_mV']=asym_current
-#         row['I_steps_pA']=step_current
-#         row['RMP_mV']= V_rest_sag
-#         row['holding_I']=offset
-
-#         return row
-
 @dataclass
 class APP_IC(EphysData):
     
@@ -905,7 +963,7 @@ class APP_IC(EphysData):
     data_type: str = 'APP_IC'
 
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'treatment', 'drug_in', 'drug_out', 'cell_type', 'cell_subtype']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'treatment', 'drug_in', 'drug_out', 'cell_type', 'cell_subtype', 'region', 'hemisphere','sex']
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
@@ -1084,7 +1142,7 @@ class Hunter(EphysData):
 class Ephys(EphysData):
     ''' 
     Buiilding aggregate df with cell info based off extracted data from each data type in either : 
-        application  ['APP_IC', 'IF_IC']         or       intrinsic_properties ['st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC' ] +AMPA?NMDA + PPR to come #TODO
+        application  ['APP_IC', 'IF_IC']         or       intrinsic_properties ['st_VC', 'ramp_IC', 'IV_VC', 'spont_IC', 'IF_IC', 'PPR' ] +AMPA/NMDA #TODO
         
         feature_df: excel input mapping folder_files to features
         
@@ -1131,7 +1189,7 @@ class Ephys(EphysData):
 
     def generate_intrinsic_cell_df(self):
         df = self.feature_df.copy()
-        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region', 'sex', 'subject_id'] 
+        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region', 'sex', 'subject_id', 'behaviour'] 
         cell_df = (df.groupby('cell_id')
                     .apply(lambda g: self.apply_check_unique(g, unique_cols=cell_wise_columns))
                     .reset_index()
@@ -1160,46 +1218,42 @@ class Ephys(EphysData):
 
         rs_df = pd.DataFrame(
             rs_changes, 
-            columns=["cell_id", "Rs_abs_change", "Rs_pct_change", self.folder_files_col("st_VC")]
+            columns=["cell_id", "Rs_abs_change", "Rs_pct_change", self.folder_files_col("Rs_MOhm")]
         )
         cell_df = cell_df.merge(rs_df, on="cell_id", how="left")
     
-
-        # df , columns to reduce, data_type, average
-        reductions = [
-            (self.IF_IC_df, ["I_steps_pA", "AP_frequencies_Hz"], "IF_IC", False), #this is not helpful and should be kept as a whole list both
-            (self.ramp_IC_df, ["ramp_rheobase_pA", "ramp_voltage_threshold_mV", "AP_height_mV",
-                            "AP_rise_mV_ms", "AP_decay_mV_ms", "AP_width_ms"], "ramp_IC", True),
-            (self.IV_VC_df, ["I_step_steady_mV", "V_steps_mV"], "IV_VC", False), #this is not helpful and should be kept as a whole list both
-            # (self.PPR_VC_df, ["PPR"], "PPR_VC", True), # check
-            # (self.PPR_VC_df, ["ISI_ms"], "PPR_VC", False), # this is a single int but should bekept to be able to have each ISI grouped seperatly
-            (self.spont_IC_df, ["sEPSP_frequency_Hz", "sEPSP_rise_times_ms", "sEPSP_amplitudes_mV"], "spont_IC", True), #averaging here fine
+        # df , columns to reduce, data_type, average, n_files, sub_grouping
+        reductions_spec = [
+            (self.st_VC_df, ['Rm_MOhm', 'tau_ms', 'Cm_pF'], "st_VC", True, 1, None),
+            (self.IF_IC_df, ["I_steps_pA", "AP_frequencies_Hz"], "IF_IC", False, 1, None),
+            (self.ramp_IC_df, ["ramp_rheobase_pA", 
+                               "ramp_voltage_threshold_mV", 
+                               "AP_height_mV", "AP_rise_mV_ms", 
+                               "AP_decay_mV_ms", "AP_width_ms"],  "ramp_IC", True, 1, None),
+            (self.IV_VC_df, ["I_step_steady_mV", "V_steps_mV"], "IV_VC", False, 1, None),
+            (self.PPR_VC_df, ["PPR"], "PPR_VC", True, 2, ["ISI_ms"]),
+            (self.spont_IC_df, ["sEPSP_frequency_Hz", 
+                                "sEPSP_rise_times_ms", 
+                                "sEPSP_amplitudes_mV"],  "spont_IC", True, 1, None)
         ]
 
-        for df_src, cols, data_type, avg in reductions:
-            reduced = self.reduce_cellwise(df_src, cols, average=avg) # columns per cell
-            cell_df = cell_df.merge(reduced, on="cell_id", how="left")
+        reductions = [
+            dict(zip(["df", "cols", "data_type", "avg", "n_files", "sub_grouping"], spec))
+            for spec in reductions_spec
+        ]
 
-            # select best folder_file per cell based on RMP and holding current. #not valid for data_type == 'PPR_VC' as is needs to be grouped beyond data_type by ISI also so for each ISI chose and chose the files by this pram and that the lists of PPR are not all nan as if there are APs that would be the case
-            folder_col = self.folder_files_col(data_type)
-            df_best = df_src.copy()
-            df_best['rmp_score'] = -abs(df_best['RMP_mV'] + 70)  # closer to -70 is higher
-            df_best['holding_score'] = -df_best['holding_I']      # smaller holding_I is higher
-            df_best['total_score'] = df_best[['rmp_score', 'holding_score']].mean(axis=1)
-            best_files = (
-                df_best.sort_values(['cell_id', 'total_score'], ascending=[True, False])
-                .groupby('cell_id')
-                .first()
-                .reset_index()
+        for spec in reductions:
+            merged = self.reduce_cellwise(
+                spec['data_type'],
+                spec["df"],
+                spec["cols"],
+                spec["avg"],
+                spec["n_files"],
+                spec["sub_grouping"]
             )
 
-            cell_df = cell_df.drop(columns=[folder_col], errors='ignore')
-            cell_df = cell_df.merge(
-                best_files[['cell_id', 'folder_file']],
-                on='cell_id',
-                how='left'
-            ).rename(columns={'folder_file': folder_col})
-        
+            cell_df = cell_df.merge(merged, on="cell_id", how="left")
+
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)
         return cell_df
@@ -1341,7 +1395,6 @@ class Ephys(EphysData):
         self.cache("cell_df", cell_df)
         self.save_excel("cell_df", cell_df)
         return cell_df
-    
 
     def apply_check_unique(self, group: pd.DataFrame, unique_cols: list, extra_logic=None):
         cell_id = group.name
@@ -1355,7 +1408,6 @@ class Ephys(EphysData):
             else:
                 raise ValueError(f"Non-unique values found for cell_id: {cell_id} with values: {unique_values}")
             
-
         aggregated_data = group.agg({
             col: lambda series: check_unique(series, cell_id) for col in unique_cols
         })
@@ -1365,26 +1417,138 @@ class Ephys(EphysData):
 
         return aggregated_data
     
-    def reduce_cellwise(self, df: pd.DataFrame, cols: list, average: bool = False) -> pd.DataFrame:
-        """
-        Reduce a df to one row per cell_id for selected columns.
+    def folder_files_col(self, data_type: str, group_value: str | int | None = None) -> str:
+        """Return standardized column name for valid folder files of a given data_type and optional group."""
+        if group_value is not None:
+            return f"{group_value}_{data_type}_folder_files"
+        return f"{data_type}_folder_files"
 
-        Args:
-            df: DataFrame with a 'cell_id' column.
-            cols: List of columns to reduce.
-            average: If True, average values per cell_id. If False, take the first value.
+    def select_folder_files(self, df: pd.DataFrame, n_files=1, subgroup_key=None) -> list:
+        """
+        Select best folder_file(s) based on RMP near -70mV & minimal holding current.
 
         Returns:
-            DataFrame with columns: ['cell_id'] + cols
+            selected_folder_files: list of folder files 
         """
-        if average:
-            reduced = df.groupby("cell_id")[cols].mean().reset_index()
-        else:
-            reduced = df.groupby("cell_id")[cols].first().reset_index()
-        return reduced
+        df = df.copy() 
+        #expand feature df to include scoring columns 
+        df["rmp_score"] = -abs(df["RMP_mV"] + 70)
+        df["holding_score"] = -df["holding_I"]
+        df["total_score"] = df[["rmp_score", "holding_score"]].mean(axis=1)
 
-    def folder_files_col(self, data_type: str) -> str:
-        """Return standardized column name for valid folder files of a given data_type."""
-        return f"{data_type}_folder_files"
+        #sort based on total score and select top n_files
+        df = df.sort_values(by="total_score", ascending=False)
+        if n_files == "all":
+            selected_folder_files = df["folder_file"].tolist()
+        else:
+            selected_folder_files = df["folder_file"].head(min(n_files, len(df))).tolist()
+        return selected_folder_files
+
+
+    def reduce_cellwise(
+        self, 
+        data_type: str,
+        df: pd.DataFrame, 
+        cols: list, 
+        avg: bool = False, 
+        n_files: int | str = 1, 
+        subgroup_key: list | None = None
+    ) -> pd.DataFrame:
+        
+        if df is None or df.empty:
+            folder_col = self.folder_files_col(data_type, group_value=subgroup_key)
+            expected_output_cols = ["cell_id"] + ([subgroup_key] if subgroup_key else []) + cols + [folder_col]
+            return pd.DataFrame(columns=expected_output_cols) # return empty dummy df with expected columns
+        
+        if not subgroup_key:
+            rows = []
+            for cell_id, sub in df.groupby("cell_id"):
+                folder_files_list = self.select_folder_files(sub, n_files=n_files)
+                sub_filtered = sub[sub["folder_file"].isin(folder_files_list)]
+                # vals = sub_filtered[cols].mean().to_dict() if avg else sub_filtered.iloc[0][cols].to_dict()
+                if avg:
+                    numeric_df = sub_filtered[cols].select_dtypes(include="number")
+                    vals = numeric_df.mean().to_dict()
+                else:
+                    vals = sub_filtered.iloc[0][cols].to_dict()
+
+                row = {"cell_id": cell_id}
+                row.update(vals)
+                row[self.folder_files_col(data_type)] = folder_files_list
+                rows.append(row)
+            return pd.DataFrame(rows)
+        
+        cell_rows = {}
+        for cell_id, sub in df.groupby("cell_id"):
+            cell_rows[cell_id] = {}
+
+            #ensure string to avoid warning?
+            if isinstance(subgroup_key, list) and len(subgroup_key) == 1:
+                subgroup_key = subgroup_key[0]
+
+            for subgroup_value, grp in sub.groupby(subgroup_key):
+                folder_files_list = self.select_folder_files(grp, n_files=n_files)
+                sub_filtered = grp[grp["folder_file"].isin(folder_files_list)]
+                if avg:
+                    vals = {}
+                    for col in cols:
+                        lists = sub_filtered[col].dropna().tolist()   # get lists in col, drop NaN
+                        flat = [v for l in lists for v in (l if isinstance(l, list) else [l])]
+                        vals[col] = np.mean(flat) if flat else np.nan
+                else:
+                    vals = {}
+                    for col in cols:
+                        first_row = sub_filtered.iloc[0][col]
+                        if isinstance(first_row, list):
+                            vals[col] = np.nan if len(first_row) == 0 else first_row[0]
+                        else:
+                            vals[col] = first_row
+
+                for col, val in vals.items():
+                    flat_col = f"{subgroup_value}_{col}"
+                    cell_rows[cell_id][flat_col] = val
+
+                folder_col = self.folder_files_col(data_type, group_value=subgroup_value)
+                cell_rows[cell_id][folder_col] = folder_files_list
+
+        df_rows = []
+        for cell_id, values in cell_rows.items():
+            row = {"cell_id": cell_id}
+            row.update(values)
+            df_rows.append(row)
+
+        return pd.DataFrame(df_rows)
+        
+        # gcols = ["cell_id"]
+        # if subgroup_key:
+        #     if isinstance(subgroup_key, list):
+        #         gcols.extend(subgroup_key)
+        #     else:
+        #         gcols.append(subgroup_key)
+
+        # rows = []
+        # for keys, sub in df.groupby(gcols):
+        #     if not isinstance(keys, tuple):
+        #         keys = (keys,)
+                
+        #     folder_files_list = self.select_folder_files(sub, n_files=n_files, subgroup_key=subgroup_key)
+        #     sub_filtered = sub[sub["folder_file"].isin(folder_files_list)]
+
+        #     if avg:
+        #         vals = sub_filtered[cols].mean().to_dict()
+        #     else:
+        #         vals = sub_filtered.iloc[0][cols].to_dict()
+
+        #     row = {col: key for col, key in zip(gcols, keys)}
+        #     row.update(vals)
+        #     folder_col_name = self.folder_files_col(data_type, group_value=keys[1] if subgroup_key else None)
+        #     row[folder_col_name] = folder_files_list
+        #     rows.append(row)
+
+        # return pd.DataFrame(rows)
+
+
+
+
 
 
