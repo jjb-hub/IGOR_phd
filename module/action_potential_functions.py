@@ -30,7 +30,7 @@ from scipy.signal import find_peaks
 # GENERIC HANDELING 
 
 
-def spike_remover_nan(array, threshold_sd=2):
+def spike_remover_nan(array, threshold_sd=2): #not an elegant spike remover see mask_ap_regions #TODO replace in code
     """
     Identifies spikes (> threshold_sd * std from the mean of entire array) and replaces them with np.nan.
     
@@ -60,6 +60,31 @@ def spike_remover_nan(array, threshold_sd=2):
         raise ValueError("Input array must be 1D or 2D.")
 
     return array_cleaned
+
+def mask_ap_regions(trace, peak_locs, dt, threshold_sd=2):
+    mask = np.ones(len(trace), dtype=bool)
+    baseline = np.nanmedian(trace)
+    noise_sd = np.nanstd(trace)
+    tol = threshold_sd * noise_sd
+    stable = int(2e-3 / dt)
+    i = 0
+    n = len(peak_locs)
+    while i < n:
+        p = peak_locs[i]
+        start = p
+        end = p
+        while start > 0 and np.abs(trace[start] - baseline) > tol:
+            start -= 1
+        while end < len(trace):
+            if np.all(np.abs(trace[end:end+stable] - baseline) < tol):
+                break
+            end += 1
+            if end - p > int(100e-3 / dt):
+                break
+        mask[start:end] = False
+        while i < n and peak_locs[i] <= end:
+            i += 1
+    return mask
 
 def plot_ap_window(
     folder_file,
@@ -385,7 +410,7 @@ def plot_sag(folder_file, voltage_trace, time_trace, RMP, steady_state_voltage, 
     plt.show()
 
 
-########## ACTION POTENTIAL
+########## ACTION POTENTIAL / SPIKE DETECTION
 
 def ap_finder(voltage_trace, smoothing_kernel = 10):
     '''
@@ -429,11 +454,13 @@ def num_ap_finder(voltage_array): #not so sure why we nee dthis fun maybe DJ exp
 
 
 
-########## ACTION POTENTIAL RETROAXONAL / ANTIDROMIC
+
+########## ACTION POTENTIAL CHARECTERISTICS ie RETROAXONAL / ANTIDROMIC
 
 
-def peak_finder(
+def peak_finder(   # TODO remove rise time logic here its not modular 
     voltage_trace: np.ndarray,
+    raw_trace=None, # optional trace to pull values from after detection
     smoothing_kernel: int = 5,
     height: float = None,
     prominence: tuple = None,
@@ -446,7 +473,7 @@ def peak_finder(
     correction_window_s: int = 0.001  # to refine peak/upshoot location from smoothed trace to raw default 1ms
     ):
     """
-    Detect EPSP/IPSP peaks in voltage_trace, refine peak positions on raw trace,
+    Detect peaks in voltage_trace, refine peak positions on raw trace if provided,
     calculate rise times for all peaks, and optionally filter by rise time.
 
     Returns:
@@ -455,70 +482,62 @@ def peak_finder(
     - amplitudes: np.ndarray of absolute peak amplitudes
     - frequency: float, peak count / total recording time (Hz)
     """
-    
-    if voltage_trace.ndim == 2:     # ensure 1D array
+    if raw_trace is None:
+        raw_trace = voltage_trace.copy()
+    # ensure 1D array
+    if voltage_trace.ndim == 2:    
         voltage_trace = voltage_trace.flatten(order='F')
+    if raw_trace.ndim == 2:    
+        raw_trace = raw_trace.flatten(order='F')
+    # invert if negative
+    signal = -voltage_trace if polarity == 'negative' else voltage_trace.copy()     
+    raw_signal = -raw_trace if polarity == 'negative' else raw_trace.copy()
 
-    signal = -voltage_trace if polarity == 'negative' else voltage_trace.copy()     # invert if negative
     v_smooth = gaussian_filter1d(signal, smoothing_kernel)
     peak_locs, _ = find_peaks(v_smooth, height=height, prominence=prominence, distance=distance, width=width)
 
     correction_window = int(correction_window_s / dt)
     backward_window = int(backward_window_s / dt)
 
-    rise_times = []
-    amplitudes = []
-
+    aprox_amplitudes = []
     for peak in peak_locs:
+        start_idx = max(0, peak - backward_window) # upshoot detection doesnt work for EPSPs in the same way 
+        peak_val = max(raw_signal[peak-correction_window:peak+correction_window])
 
-        start_idx = max(0, peak - backward_window)
-        end_idx = min(len(signal), peak+10)
-        segment = signal[start_idx:end_idx]
-        smooth_segment = v_smooth[start_idx:end_idx]
-        
-        # Derivative-based upshoot detection on smoothed segment
-        v_derivative = np.diff(smooth_segment) * (1 / dt)
-        v_derivative_binary = np.heaviside(v_derivative, 0)  # 1 = increasing, 0 = flat or decreasing
-        transition_points = np.diff(v_derivative_binary)
+        baseline_start = max(0, start_idx-(4*backward_window))
+        baseline = np.nanmedian(raw_signal[baseline_start:start_idx]) 
 
-        # last upward transition before peak 
-        upshoot_candidates = np.where(transition_points > 0)[0]
-        if len(upshoot_candidates) > 0:
-            upshoot_idx = upshoot_candidates[-1]            
-        else:
-            print(f"No clear upshoot detected, skipping event {peak}.")
-            continue
-        
-        # get raw values
-        peak_val = signal[peak]
-        baseline = np.median(segment[:upshoot_idx]) # median of raw trace before upshoot
-        amp = peak_val - baseline
+        aprox_amplitudes.append(peak_val - baseline)
 
-        # Calculate 20% and 80% rise targets
-        target_low = baseline + 0.2 * amp
-        target_high = baseline + 0.8 * amp
-
-        low_idx = high_idx = None
-        for i, val in enumerate(segment):
-            if low_idx is None and val >= target_low:
-                low_idx = i
-            if high_idx is None and val >= target_high:
-                high_idx = i
-                break
-
-        if low_idx is not None and high_idx is not None:
-            rise_time = (high_idx - low_idx) * dt
-            if rise_time_range is None or (rise_time_range[0] <= rise_time <= rise_time_range[1]):
-                rise_times.append(rise_time)
-                amplitudes.append(amp)
-
-        rise_times.append(rise_time)
-        amplitudes.append(amp)
+        # # DEBUG PLOT
+        # fig, ax = plt.subplots(figsize=(12,4))
+        # x = np.arange(len(raw_signal)) * dt * 1000
+        # ax.plot(x, raw_signal, color='lightgray', linewidth=0.6)
+        # z_pre = int(0.2 / dt)
+        # z_post = int(0.2 / dt)
+        # z_start = max(0, peak - z_pre)
+        # z_end = min(len(raw_signal), peak + z_post)
+        # x_zoom = np.arange(z_start, z_end) * dt * 1000
+        # ax.plot(x_zoom, raw_signal[z_start:z_end], color='black', linewidth=1.2)
+        # ax.axhline(baseline, color='gray', linestyle='--', linewidth=0.8)
+        # ax.vlines(
+        #     peak * dt * 1000,
+        #     baseline,
+        #     raw_signal[peak],
+        #     color='red',
+        #     linewidth=1
+        # )
+        # ax.plot(peak * dt * 1000, raw_signal[peak], 'ro')
+        # ax.set_title(f'Peak {peak} | Amp ~ {amp:.2f}')
+        # ax.set_xlabel('Time (ms)')
+        # ax.set_ylabel('mV')
+        # plt.tight_layout()
+        # plt.show()
 
     total_time = len(voltage_trace) * dt
     frequency = len(peak_locs) / total_time if total_time > 0 else 0
-    return peak_locs, rise_times, amplitudes, frequency
-
+    return peak_locs, aprox_amplitudes, frequency
+    
 
 
 

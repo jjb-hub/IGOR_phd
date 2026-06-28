@@ -13,10 +13,11 @@ import igor2 as igor
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
-from module.action_potential_functions import calculate_max_firing, sweep_mean_RMP_calculator, sweep_mean_inputR_calculator, ap_characteristics_extractor_main, extract_FI_x_y, sag_current_analyser, mean_RMP_APP_calculator, spike_remover_nan, peak_finder,correct_I_offset_IF, denoise_steps, FI_slope_and_rheobase
+from module.action_potential_functions import ap_finder, mask_ap_regions, calculate_max_firing, sweep_mean_RMP_calculator, sweep_mean_inputR_calculator, ap_characteristics_extractor_main, extract_FI_x_y, sag_current_analyser, mean_RMP_APP_calculator, spike_remover_nan, peak_finder,correct_I_offset_IF, denoise_steps, FI_slope_and_rheobase
 from scipy.stats import ttest_ind
 from module.Stats import Stats
 from scipy.signal import savgol_filter
+from scipy.ndimage import median_filter
 tqdm.pandas()
 
 # Root directory for projects
@@ -637,7 +638,8 @@ class IV_VC(EphysData):
 class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairability of baseline and remove APs
     filename: str = "spont_IC_df"
     data_type: str = 'spont_IC'
-    amplitude_threshold: float = 0.9 # mV
+    # amplitude_threshold: float = 0.9 # mV #REMOVE to define by trace
+    noise_multiplier: float = 4 # multiplier for noise SD to set amplitude threshold
     rise_time_range: tuple = (0.5e-3, 5e-3) # 0.5 - 5 ms
     decay_time_range: tuple = (2e-3, 20e-3) # 2 - 20 ms
     
@@ -654,40 +656,117 @@ class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairabili
         dt = 1 / self.sampling_rate
         t = np.arange(len(I_array)) * dt
 
-        # Baseline correction
-        mean_holding_I = int(np.mean(I_array))
-        median_RMP = np.median(V_array)
-        trace = (V_array - median_RMP).flatten()
+       
+        V_raw = V_array.flatten()
+        v_smooth, ap_peak_locs, _, _ = ap_finder(V_raw)  # detect AP locs
+
+        # MASK APs WITH NAN
+        mask = mask_ap_regions(V_raw, ap_peak_locs, dt)
+        V_ap_masked = V_raw.copy()
+        V_ap_masked[~mask] = np.nan 
+        
+
+        # # SLOW DRIFT CORRECTION 
+        # A
+        # baseline = median_filter(np.where(np.isnan(V_raw), np.nanmedian(V_raw), V_raw),
+        #                   size=int(0.05 / dt))   # 50 ms window try 10ms its faster?
+        # B
+        drifting_baseline = pd.Series(V_raw).rolling(int(0.1 / dt), center=True, min_periods=1).median().to_numpy()
+        # C
+        # step = int(0.1 / dt)  # 100 ms bins #overestimation
+        # coarse_idx = np.arange(0, len(V_raw), step)
+        # coarse_baseline = np.nanmedian(V_raw[:len(V_raw)//step*step].reshape(-1, step), axis=1)
+        # baseline = np.interp(np.arange(len(V_raw)), coarse_idx[:len(coarse_baseline)], coarse_baseline)
+
+        # EXCLUDE DRIFTING BASELINE
+        # baseline_drift = np.nanmax(drifting_baseline) - np.nanmin(drifting_baseline)
+        # if baseline_drift > 10:
+        #     print(f"Baseline drift is {baseline_drift} > 10mV, spont_IC recording excluded {row['folder_file']}.")
+        #     row['sEPSP_frequency_Hz'] = np.nan
+        #     row['sEPSP_amplitudes_mV'] = np.nan #amplitudes_raw 
+        #     row["RMP_mV"] =  np.nan # median of AP-masked trace
+        #     row['holding_I'] = np.nan # mean holding I
+        #     return row
+
+        V_vairability_trace = V_ap_masked - drifting_baseline # vairability without APs  
+        V_analysis_trace = V_raw - drifting_baseline 
+        
+        # GLOBAL OFFSET CORRECTION 
+        global_baseline = np.nanmedian(V_ap_masked) 
+        # IF YOU DONT USE DRIFT CORRECTION 
+        # V_vairability_trace = V_ap_masked - global_baseline # vairability without APs  
+        # V_analysis_trace = V_detrended - global_baseline 
+
+        # AMPLITUDE THRESHOLD BASED OFF NOISE
+        median_val = np.nanmedian(V_vairability_trace)
+        mad = np.nanmedian(np.abs(V_vairability_trace - median_val)) #median absolute deviation
+        noise_sd = mad / 0.6745
+        amplitude_threshold = max(0.25, self.noise_multiplier * noise_sd)
+        if amplitude_threshold>1.25:
+            print(f"Amplitude threshold is {amplitude_threshold}, highly vairable trace, perhapds exclude. Set to 1.")
+            amplitude_threshold = 1.25
+        # amplitude_threshold=0.9
 
         #  EPSPs
-        peaks, rise_times, amplitudes, frequency = peak_finder(
-            trace,
-            height=self.amplitude_threshold,
+        peak_locs, aprox_amplitudes, frequency = peak_finder(
+            V_analysis_trace, 
+            raw_trace=V_raw,
+            height=amplitude_threshold,
             smoothing_kernel = 10,
-            prominence=(self.amplitude_threshold / 2, None), 
+            prominence=(amplitude_threshold / 2, None), 
             rise_time_range =  (0.2e-3, 10e-3),
             width=None, #(self.decay_time_range[0] / dt, self.decay_time_range[1] / dt),
             dt=dt,
             distance=None, #int(self.rise_time_range[0] / dt),
-            polarity='positive'  # avoid clustering
+            polarity='positive',  # avoid clustering
+            backward_window_s = 0.02 #20 ms
         )  
 
-        # # PLOT TO CHECK 
-        # plt.figure(figsize=(12, 4))
-        # plt.plot(trace, label='Voltage trace', color='black', linewidth=0.5)
-        # plt.plot(peaks, trace[peaks], 'r.', label='sEPSPs', markersize=10)
-        # plt.xlabel('Time (samples)')
-        # plt.ylabel('Voltage (mV)')
-        # plt.title(f"Detected sEPSPs in {row['folder_file']}")
-        # plt.legend()
+        if len(peak_locs) == 0:
+            print(f"No sEPSPs detected in {row['folder_file']}. Setting frequency to 0 and empty lists for rise times and amplitudes.")
+            row['sEPSP_frequency_Hz'] = 0
+            # row['sEPSP_rise_times_ms'] = []
+            row['sEPSP_amplitudes_mV'] = []
+            return row
+
+        # EPSP FILTERING OUT APs
+        valid_mask = ~np.isnan(V_ap_masked[peak_locs])#only keep events not in AP masked regions
+        epsp_peak_locs = np.array(peak_locs)[valid_mask]
+        epsp_amplitudes = V_analysis_trace[epsp_peak_locs] - median_val # use detrended trace to estimate amplitude
+        
+        # EPSP frequency
+        valid_samples = np.sum(~np.isnan(V_ap_masked))# effective recording time (exclude AP-masked sections)
+        valid_time = valid_samples * dt
+        epsp_frequency = len(epsp_peak_locs) / valid_time if valid_time > 0 else 0
+
+        # DEBUG PLOT
+        # fig, ax = plt.subplots(3, 1, figsize=(14, 8), sharex=True)
+        # # 1. RAW TRACE + AP MASK VISUALISATION
+        # ax[0].plot(V_raw, color='lightgray', linewidth=0.5)
+        # ax[0].plot(V_ap_masked, color='black', linewidth=0.6)
+        # ax[0].axhline(global_baseline, color='gray', linestyle='--', linewidth=0.8)
+        # for p in ap_peak_locs:
+        #     ax[0].vlines(p, global_baseline, V_raw[p], color='red', linewidth=1)
+        # ax[0].set_title(f"{row['folder_file']}\n Raw + AP masking")
+        # # 2. PROCESSED TRACE (EPSP DETECTION SPACE)
+        # ax[1].plot(V_analysis_trace, color='blue', linewidth=0.5)
+        # ax[1].plot(peak_locs, V_analysis_trace[peak_locs], 'r.', markersize=4, label="all peaks")
+        # ax[1].set_title("Processed trace (detection space)")
+        # ax[1].legend()
+        # # 3. FINAL EPSPs AFTER AP REMOVAL
+        # ax[2].plot(V_analysis_trace, color='blue', linewidth=0.5)
+        # ax[2].plot(epsp_peak_locs, V_analysis_trace[epsp_peak_locs], 'go', markersize=3, label="EPSPs only")
+        # for p, a in zip(epsp_peak_locs, epsp_amplitudes):
+        #      ax[2].vlines(p, 0, V_analysis_trace[p], color='green', linewidth=0.8, alpha=0.6)
+        # ax[2].set_title("Final EPSPs (AP removed)")
+        # ax[2].legend()
         # plt.tight_layout()
         # plt.show()
 
-        row['sEPSP_frequency_Hz'] = frequency
-        row['sEPSP_rise_times_ms'] = rise_times #check units
-        row['sEPSP_amplitudes_mV'] = amplitudes #check units
-        row["RMP_mV"] = median_RMP
-        row['holding_I'] = mean_holding_I
+        row['sEPSP_frequency_Hz'] = epsp_frequency
+        row['sEPSP_amplitudes_mV'] = epsp_amplitudes #amplitudes_raw 
+        row["RMP_mV"] =  global_baseline # median of AP-masked trace
+        row['holding_I'] = float(np.mean(I_array)) # mean holding I
         return row
 
 
