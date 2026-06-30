@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from module.action_potential_functions import ap_finder, mask_ap_regions, calculate_max_firing, sweep_mean_RMP_calculator, sweep_mean_inputR_calculator, ap_characteristics_extractor_main, extract_FI_x_y, sag_current_analyser, mean_RMP_APP_calculator, spike_remover_nan, peak_finder,correct_I_offset_IF, denoise_steps, FI_slope_and_rheobase
 from scipy.stats import ttest_ind
-from module.Stats import Stats
 from scipy.signal import savgol_filter
 from scipy.ndimage import median_filter
 tqdm.pandas()
@@ -376,7 +375,7 @@ class st_VC(EphysData):
     data_type: str = 'st_VC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour', 'subject_id']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -510,7 +509,7 @@ class ramp_IC(EphysData):
     data_type: str = 'ramp_IC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour', 'subject_id']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -591,7 +590,7 @@ class IV_VC(EphysData):
     data_type: str = 'IV_VC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour', 'subject_id']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -644,7 +643,7 @@ class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairabili
     decay_time_range: tuple = (2e-3, 20e-3) # 2 - 20 ms
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour', 'subject_id']
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -679,7 +678,7 @@ class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairabili
         # baseline = np.interp(np.arange(len(V_raw)), coarse_idx[:len(coarse_baseline)], coarse_baseline)
 
         # EXCLUDE DRIFTING BASELINE
-        # baseline_drift = np.nanmax(drifting_baseline) - np.nanmin(drifting_baseline)
+        baseline_drift = np.nanmax(drifting_baseline) - np.nanmin(drifting_baseline)
         # if baseline_drift > 10:
         #     print(f"Baseline drift is {baseline_drift} > 10mV, spont_IC recording excluded {row['folder_file']}.")
         #     row['sEPSP_frequency_Hz'] = np.nan
@@ -767,6 +766,7 @@ class spont_IC(EphysData):    #TODO BUILD EXCLUSION - traces with high vairabili
         row['sEPSP_amplitudes_mV'] = epsp_amplitudes #amplitudes_raw 
         row["RMP_mV"] =  global_baseline # median of AP-masked trace
         row['holding_I'] = float(np.mean(I_array)) # mean holding I
+        row['baseline_drift'] = baseline_drift #mV
         return row
 
 
@@ -778,7 +778,7 @@ class PPR_VC(EphysData):
     pulse_search_window_ms: float = 16  # ms to search after pulse offset
 
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour']
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'hemisphere', 'cell_type', 'cell_subtype', 'sex', 'behaviour', 'subject_id'] # some wont exist in all projects check functionality
         super().__post_init__()
 
     def process(self, row: pd.Series) -> pd.Series:
@@ -949,7 +949,7 @@ class IF_IC(EphysData):
     data_type: str = 'IF_IC'
     
     def __post_init__(self):
-        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type', 'sex', 'hemisphere', 'behaviour'] #, 'R_series'] # R_series is redundant for pCLAMP data #TODO
+        self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'treatment', 'region', 'cell_subtype', 'cell_type', 'sex', 'hemisphere', 'behaviour', 'subject_id'] #, 'R_series'] # R_series is redundant for pCLAMP data #TODO
         super().__post_init__()
     
     def process(self, row: pd.Series) -> pd.Series:
@@ -1268,7 +1268,7 @@ class Ephys(EphysData):
 
     def generate_intrinsic_cell_df(self):
         df = self.feature_df.copy()
-        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region', 'sex', 'subject_id', 'behaviour'] 
+        cell_wise_columns = ['cell_type', 'cell_subtype', 'p_age', 'treatment', 'region', 'sex', 'subject_id', 'behaviour', 'subject_id'] 
         cell_df = (df.groupby('cell_id')
                     .apply(lambda g: self.apply_check_unique(g, unique_cols=cell_wise_columns))
                     .reset_index()
@@ -1312,7 +1312,6 @@ class Ephys(EphysData):
             (self.IV_VC_df, ["I_step_steady_mV", "V_steps_mV"], "IV_VC", False, 1, None),
             (self.PPR_VC_df, ["PPR"], "PPR_VC", True, 2, ["ISI_ms"]),
             (self.spont_IC_df, ["sEPSP_frequency_Hz", 
-                                "sEPSP_rise_times_ms", 
                                 "sEPSP_amplitudes_mV"],  "spont_IC", True, 1, None)
         ]
 

@@ -33,7 +33,7 @@ color_dict = {
               "LSD_CNQX_APP5": 'purple',
               "MDL":'blue', 
               "Vehicle": "#D3D2D3",
-              "5MeO": "#FAAF40" ,
+              "5MeO": "#FAAF40" , 
                 #regions
               "aIC":'red',
               "pIC":'blue',
@@ -44,7 +44,10 @@ color_dict = {
               "PRE":"azure",
               "APP": "teal",
               "WASH":"cadetblue", 
-              'I_display':'cornflowerblue'} 
+              'I_display':'cornflowerblue',
+              #behaviour
+              'none':"#E3E3E3",
+              'EPM':"#FA6B40" } 
 
 # unit_dict = {'max_firing': 'Firing_(Hz)', 
 #             'voltage_threshold':'Voltage_Threshold_(mV)', 
@@ -108,7 +111,7 @@ unit_dict = {
     "V_step_steady_mV": "Steady-State Voltage on step (mV)",
 
     'sEPSP_frequency_Hz': 'sEPSP frequency (Hz)', 
-    'sEPSP_rise_times_ms': 'sEPSP rise time (ms)', 
+    # 'sEPSP_rise_times_ms': 'sEPSP rise time (ms)', 
     'sEPSP_amplitudes_mV': 'sEPSP amplitude (mV)',
 
     "AP_count": "number of APs",

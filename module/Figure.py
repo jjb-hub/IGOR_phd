@@ -23,7 +23,16 @@ from collections import defaultdict
 from module.action_potential_functions import ap_characteristics_extractor_main, normalise_array_length #should become ActionPotential class
 from sklearn.cluster import KMeans
 from matplotlib.lines import Line2D
-from module.Stats import Stats
+import matplotlib.colors as mcolors
+
+# from module.Stats import Stats
+from statsmodels.formula.api import ols
+from statsmodels.stats.anova import anova_lm
+from statsmodels.stats.multicomp import pairwise_tukeyhsd
+from statsmodels.formula.api import mixedlm
+import itertools
+from patsy import build_design_matrices
+from statsmodels.stats.multitest import multipletests
 import importlib
 
 
@@ -155,7 +164,7 @@ class DataSelection (Cachable):
             filtered_cell_df = filtered_cell_df[filtered_cell_df['region'].isin([self.region] if isinstance(self.region, str) else self.region)]
         if self.behaviour is not None:
             filtered_cell_df = filtered_cell_df[filtered_cell_df['behaviour'].isin([self.behaviour] if isinstance(self.behaviour, str) else self.behaviour)]
-
+       
         valid_cell_ids = filtered_cell_df['cell_id'].tolist()
         # valid_files = filtered_cell_df[folder_file_cols].dropna().tolist()
         valid_files = [
@@ -203,7 +212,7 @@ class DataSelection (Cachable):
         data_type_df = getattr(self, f"{self.data_type}_df")
 
         
-        independant_vairables = ['cell_id', 'folder_file', 'treatment', 'cell_type', 'cell_subtype', 'I_set', 'region', 'error', 'traceback', 'sex', 'behaviour'] # I_set are project specific this need to be generalised
+        independant_vairables = ['cell_id', 'folder_file', 'treatment', 'cell_type', 'cell_subtype', 'I_set', 'region', 'error', 'traceback', 'sex', 'behaviour', 'subject_id'] # I_set are project specific this need to be generalised
 
         # Determine which dependent variables exist for this data_type
         valid_dvs_for_data_type = [col for col in data_type_df.columns if col not in independant_vairables]
@@ -333,7 +342,7 @@ class DataSelection (Cachable):
             raise ValueError("Both DataFrames must have 'cell_id' column.")
 
         # Always include these base columns
-        columns_to_map = ['cell_id', 'treatment', 'cell_type', 'cell_subtype', 'region', 'sex', 'subject_id']
+        columns_to_map = ['cell_id', 'treatment', 'cell_type', 'cell_subtype', 'region', 'sex', 'subject_id', 'behaviour']
 
         # Add any extra columns specified by the caller
         if additional_cols:
@@ -348,7 +357,6 @@ class DataSelection (Cachable):
 
         return df.merge(self.cell_df[columns_to_map].drop_duplicates(), on='cell_id', how='left')
 
-    
 
 
     def generate_treatment_count_df(self) -> pd.DataFrame:
@@ -485,7 +493,129 @@ class DataSelection (Cachable):
 
         return AP_df
 
+class MixedLMStatsMixin:
+    def clean_mixedlm_df(self, df, group_col, value_col):
+        needed = [group_col, value_col, "subject_id"]
+        missing = [col for col in needed if col not in df.columns]
+        if missing:
+            raise ValueError(f"MixedLM requires missing columns: {missing}")
 
+        model_df = df.dropna(subset=needed).copy()
+        model_df[value_col] = pd.to_numeric(model_df[value_col], errors="coerce")
+        model_df = model_df.dropna(subset=[value_col])
+
+        if model_df["subject_id"].nunique() < 2:
+            raise ValueError("MixedLM needs at least 2 animals in subject_id.")
+
+        if model_df[group_col].nunique() < 2:
+            raise ValueError(f"MixedLM needs at least 2 groups in {group_col}.")
+
+        return model_df
+
+    def fixed_effect_row(self, mixedlm_result, group_col, group_value):
+        design_info = mixedlm_result.model.data.design_info
+        new_df = pd.DataFrame({group_col: [group_value]})
+        row = build_design_matrices([design_info], new_df)[0]
+        return np.asarray(row)[0]
+
+    def p_to_star(self, p_val):
+        if p_val < 0.001:
+            return "***"
+        if p_val < 0.01:
+            return "**"
+        if p_val < 0.05:
+            return "*"
+        return "ns"
+
+    def mixedlm_pairwise_stats(
+        self,
+        df,
+        group_col=None,
+        value_col=None,
+        alpha=None,
+        group_order=None,
+        p_adjust="holm",
+    ):
+        if alpha is None:
+            alpha = getattr(self, "alpha", 0.05)
+
+        if group_col is None:
+            group_col = self.stats_group_col
+
+        if value_col is None:
+            value_col = self.dependant_var
+
+        model_df = self.clean_mixedlm_df(df, group_col, value_col)
+
+        if group_order is None:
+            group_order = list(model_df[group_col].dropna().unique())
+
+        available_groups = set(model_df[group_col].dropna().unique())
+        group_order = [g for g in group_order if g in available_groups]
+
+        if len(group_order) < 2:
+            raise ValueError(f"Need at least 2 valid groups for pairwise MixedLM: {group_order}")
+
+        reference = group_order[0]
+        formula = f"{value_col} ~ C({group_col}, Treatment(reference='{reference}'))"
+
+        posthoc_model = mixedlm(
+            formula,
+            data=model_df,
+            groups=model_df["subject_id"],
+        ).fit(reml=True, method="powell")
+
+        raw_results = []
+
+        for g1, g2 in itertools.combinations(group_order, 2):
+            row1 = self.fixed_effect_row(posthoc_model, group_col, g1)
+            row2 = self.fixed_effect_row(posthoc_model, group_col, g2)
+
+            contrast = np.asarray(row1 - row2, dtype=float)[None, :]
+            test = posthoc_model.t_test(contrast)
+
+            raw_results.append({
+                "group1": g1,
+                "group2": g2,
+                "p_uncorrected": float(np.ravel(test.pvalue)[0]),
+                "effect": float(np.ravel(test.effect)[0]),
+            })
+
+        reject, pvals_adj, _, _ = multipletests(
+            [res["p_uncorrected"] for res in raw_results],
+            alpha=alpha,
+            method=p_adjust,
+        )
+
+        results = []
+        for res, p_adj, is_sig in zip(raw_results, pvals_adj, reject):
+            results.append({
+                "group1": res["group1"],
+                "group2": res["group2"],
+                "p_val": float(p_adj),
+                "p_uncorrected": res["p_uncorrected"],
+                "effect": res["effect"],
+                "significant": bool(is_sig),
+            })
+        
+        # print("\n" + "=" * 60)
+        # print(f"POSTHOC MIXEDLM - group_col = {group_col}, p_adjust = {p_adjust}")
+        # print("=" * 60)
+        # for res in results:
+        #     sig = "SIGNIFICANT" if res["significant"] else "ns"
+        #     print(
+        #         f"{res['group1']:20s} vs {res['group2']:20s} | "
+        #         f"effect = {res['effect']:.4g} | "
+        #         f"p_unc = {res['p_uncorrected']:.4g} | "
+        #         f"p_adj = {res['p_val']:.4g} | {sig}"
+        #     )
+        # print("=" * 60 + "\n")
+
+        self.posthoc_results = results
+        self.posthoc_mixedlm_result = posthoc_model
+
+        return results
+    
 @dataclass
 class Figure(DataSelection):
     
@@ -517,8 +647,8 @@ class Figure(DataSelection):
         """
         df = df.dropna(subset=[self.dependant_var]).reset_index(drop=True)
 
-        if hasattr(self, 'compare'):
-            group_cols = [self.compare]
+        if hasattr(self, 'first_factor'):
+            group_cols = [self.first_factor]
         else:
             group_cols = ['treatment'] # some classes sont have compare like ApplicationResponse
 
@@ -549,7 +679,7 @@ class Figure(DataSelection):
     
     def check_valid_dependant_var(self):
         if self.dependant_var not in self.agg_df.columns:
-            dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'I_set']]#HARD CODE
+            dvs = [col for col in self.agg_df.columns if col not in ['cell_id', 'time', 'treatment', 'cell_type', 'cell_subtype', 'behaviour', 'I_set', 'subject_id']]#TODO centralise independant vairables
             raise ValueError(f"Invalid dependant variable: {self.dependant_var}. Valid dv's : {dvs}")
             
     def get_pre_post_sweep_windows(self,
@@ -794,6 +924,48 @@ class Figure(DataSelection):
 
         return pd.DataFrame(result_rows)
     
+    def get_plot_param(self, key, default=None):
+        """
+        Read optional plotting parameters from self.plot_params.
+
+        Child classes can define:
+            plot_params: dict = field(default_factory=dict)
+        """
+        return getattr(self, "plot_params", {}).get(key, default)
+
+
+    def format_param_label(self, name, value, for_filename=False):
+        """
+        Format one optional parameter for a filename or title.
+        """
+        if value is None:
+            return None
+
+        if isinstance(value, (list, tuple)):
+            value = "-".join(map(str, value)) if for_filename else ", ".join(map(str, value))
+
+        if for_filename:
+            return f"{name}_{value}"
+
+        return f"{name} = {value}"
+
+
+    def optional_param_labels(self, params, for_filename=False):
+        """
+        Build labels for optional parameters.
+
+        params should be:
+            {"I_range_pA": self.I_range_pA, "n_minimum": self.n_minimum}
+        """
+        labels = []
+        for name, value in params.items():
+            label = self.format_param_label(name, value, for_filename=for_filename)
+            if label is not None:
+                labels.append(label)
+        return labels
+    
+    
+    
     def get_unit(self): 
         if self.dependant_var == 'sweep_inputR_mOhm':
             return '%'
@@ -919,6 +1091,12 @@ class Figure(DataSelection):
                 "significant": p_val < alpha
             })
         return results
+    
+    def rgba_color(self, color, alpha=1.0):
+        """
+        Convert a matplotlib color name/hex/RGB to RGBA with custom alpha.
+        """
+        return mcolors.to_rgba(color, alpha=alpha)
 
     
 
@@ -1182,14 +1360,18 @@ class ApplicationResponse(Figure):
 
         
 @dataclass
-class IF_curve(Figure):
+class IF_curve(MixedLMStatsMixin, Figure):
     '''
     Plotting IF_IC data between compare which defaults to treatment. 
     Dependant vairables will be I_steps_pA AND AP_frequencies_Hz, not an input pram.
     '''
-    compare: str = field(kw_only = True, default = 'treatment') # should add elsewhere incase you want to compare sex or something other rhan treatment
-    I_range_pA: str = field(kw_only = True, default = 'all_cells')
     filename: str = None
+    alpha: float = 0.05
+    plot_params: dict = field(default_factory=dict)
+    first_factor: str = field(kw_only = True, default = 'treatment') 
+
+    I_range_pA: str = field(kw_only = True, default = 'all_cells')
+    
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id if set to None single cells will not be plotted 
     n_minimum: float = field(kw_only = True, default = 3)
     show_values: bool = field(kw_only=True, default=False)
@@ -1201,14 +1383,7 @@ class IF_curve(Figure):
             print(f"IF curve is only possible with data_type IF_IC. ")
             return
         
-        #Build filename #TODO make generic in Figure class
-        parts = [self.safe_str(self.compare)]
-        for attr in [self.specify, getattr(self, "cell_type", None), getattr(self, "region", None)]:
-            val = self.safe_str(attr)
-            if val:
-                parts.append(val)
-        raw_name = "IF_curve between " + " - ".join(parts)
-        self.filename = self.sanitize_filename(raw_name)
+        self.filename = self.build_IF_filename()
 
         super().__post_init__()
         self.data = self.filter_n_minimum(self.agg_df)
@@ -1235,8 +1410,8 @@ class IF_curve(Figure):
         """
 
         df = self.data.copy()
-        keep_cols = ['cell_id', self.compare, 'I_steps_pA', 'AP_frequencies_Hz']
-        if self.specify is not None and self.specify != self.compare:
+        keep_cols = ['cell_id', 'subject_id', self.first_factor, 'I_steps_pA', 'AP_frequencies_Hz']        
+        if self.specify is not None and self.specify != self.first_factor:
             keep_cols.append(self.specify)
         df = df[keep_cols]
 
@@ -1251,7 +1426,7 @@ class IF_curve(Figure):
         df['I_step_bin'] =  df['I_steps_pA']
 
         # Filter bins with fewer than n_min cells per compare group
-        counts = df.groupby(['I_step_bin', self.compare])['cell_id'].nunique().reset_index(name='n_cells')
+        counts = df.groupby(['I_step_bin', self.first_factor])['cell_id'].nunique().reset_index(name='n_cells')
         valid_bins = counts.groupby('I_step_bin').filter(lambda g: (g['n_cells'] >= n_min).all())['I_step_bin'].unique()
         df = df[df['I_step_bin'].isin(valid_bins)]
 
@@ -1267,122 +1442,159 @@ class IF_curve(Figure):
             else:
                 raise ValueError("I_range_pA must be None, a tuple/list (min,max), or 'all_cells'")
         return df
-
+    
     def plot_IF_curve(self):
         df = self.df_long.copy()
-        agg = df.groupby(['I_step_bin', self.compare])[self.dependant_var].agg(
-                mean='mean',
-                sd='std',
-                n='count'
-            ).reset_index()
-        fig, ax = plt.subplots(figsize=(12, 8))
+        agg = self.aggregate_IF_data(df)
 
-        # lineplot mean_IF between self.compare
+        fig, ax = self.draw_IF_curve(df)
+        legend_handles_labels = self.draw_IF_points(ax, df)
+
+        bin_stats = self.run_IF_bin_stats(df)
+        self.annotate_IF_bin_stats(ax, df, bin_stats)
+
+        self.finalize_IF_curve(ax, fig, agg, legend_handles_labels)
+
+        return fig
+    
+    def aggregate_IF_data(self, df):
+        return (
+            df.groupby(["I_step_bin", self.first_factor])[self.dependant_var]
+            .agg(mean="mean", sd="std", n="count")
+            .reset_index()
+        )
+
+    def draw_IF_curve(self, df):
+        """
+        Draw the main mean IF curve.
+
+        This creates the figure/axis and plots the group-level IF curve with SE error.
+        Optional individual points are handled separately by draw_IF_points().
+        """
+        fig, ax = plt.subplots(
+            figsize=(
+                self.get_plot_param("figwidth", 12),
+                self.get_plot_param("figheight", 8),
+            )
+        )
+
         sns.lineplot(
             data=df,
             x="I_step_bin",
             y=self.dependant_var,
-            hue=self.compare,
-            errorbar="se", # sd 
+            hue=self.first_factor,
+            errorbar=self.get_plot_param("errorbar", "se"),
             ax=ax,
             palette=color_dict,
-            linewidth=2.5,
-            marker="o"
+            linewidth=self.get_plot_param("line_width", 2.5),
+            marker=self.get_plot_param("line_marker", "o"),
+            markersize=self.get_plot_param("line_markersize", 6),
         )
-        # for grp, sub in agg.groupby(self.compare): #plot errorbar
-        #     ax.errorbar(
-        #         x=sub['I_step_bin'],
-        #         y=sub['mean'],
-        #         yerr=sub['sd'],
-        #         fmt='none',        # don't re-plot the marker
-        #         ecolor=color_dict[grp],
-        #         elinewidth=1.5,
-        #         capsize=5
-        #     )
 
+        return fig, ax
+    
+    def draw_IF_points(self, ax, df):
+        """
+        Optionally draw individual cell/value points on top of the mean IF curve.
+
+        Points are grouped by self.specify using different marker shapes, while
+        edge color follows self.first_factor.
+        """
         legend_handles_labels = {}
-        if self.show_values and self.specify is not None and self.specify in df.columns:
-            markers = cycle(['o', 's', '^', 'D', 'v', '<', '>'])
-            
-            for spec_value in df[self.specify].unique():
-                marker = next(markers)
-                sub_df = df[df[self.specify] == spec_value].copy()
-                # sns.scatterplot(
-                #     data=sub_df,
-                #     x="I_step_bin",
-                #     y=self.dependant_var,
-                #     facecolors='none', 
-                #     hue=self.compare,
-                #     ax=ax,
-                #     palette=color_dict,
-                #     legend=False,
-                #     marker=marker,
-                #     s=10,              
-                #     # edgecolor='',   
-                #     alpha=0.9,         
-                #     zorder=10,         
-                # )
-                for comp in sub_df[self.compare].unique():
-                    comp_df = sub_df[sub_df[self.compare] == comp]
-                    ax.scatter(
-                        comp_df["I_step_bin"],
-                        comp_df[self.dependant_var],
-                        marker=marker,
-                        s=10,
-                        facecolors='none',                   
-                        edgecolors=color_dict.get(comp, 'k'), 
-                        linewidths=1.2,
-                        alpha=0.9,
-                        zorder=10
-                    )
-                legend_handles_labels[spec_value] = plt.Line2D(
-                    [0], [0],
+
+        if not self.show_values:
+            return legend_handles_labels
+
+        if self.specify is None:
+            return legend_handles_labels
+
+        if self.specify not in df.columns:
+            return legend_handles_labels
+
+        marker_df = df.copy()
+        marker_df[self.specify] = marker_df[self.specify].fillna("none")
+
+        markers = cycle(["o", "s", "^", "D", "v", "<", ">"])
+
+        for spec_value in marker_df[self.specify].unique():
+            marker = next(markers)
+            sub_df = marker_df[marker_df[self.specify] == spec_value].copy()
+
+            for comp in sub_df[self.first_factor].unique():
+                comp_df = sub_df[sub_df[self.first_factor] == comp]
+
+                ax.scatter(
+                    comp_df["I_step_bin"],
+                    comp_df[self.dependant_var],
                     marker=marker,
-                    label=str(spec_value),
-                    color='black',
-                    linestyle='',
-                    markersize=6
+                    s=self.get_plot_param("raw_point_size", 10),
+                    facecolors="none",
+                    edgecolors=color_dict.get(comp, "k"),
+                    linewidths=self.get_plot_param("raw_point_linewidth", 1.2),
+                    alpha=self.get_plot_param("raw_point_alpha", 0.9),
+                    zorder=10,
                 )
 
-        self.plot_stats_on_ax(ax, stats_func=self.t_test_stats, alpha=0.05)
-        # pvals = self.compute_bin_stats(df)
-        # for b, p in pvals.items():
-        #     if p < 0.05:   # threshold
-        #         y_bin_max = df[df["I_step_bin"] == b][self.dependant_var].max()
-        #         offset = 0.01 * (df[self.dependant_var].max() - df[self.dependant_var].min())
-        #         ax.text(
-        #             b, 
-        #             y_bin_max + offset, 
-        #             "*",
-        #             ha="center",
-        #             va="bottom",
-        #             fontsize=20,
-        #             color="black"
-        #         )
+            legend_handles_labels[spec_value] = plt.Line2D(
+                [0],
+                [0],
+                marker=marker,
+                label=str(spec_value),
+                color="black",
+                linestyle="",
+                markersize=self.get_plot_param("raw_marker_legend_size", 6),
+            )
 
-        n_mapping = agg.groupby(self.compare)['n'].max().to_dict()
+        return legend_handles_labels
+
+    def finalize_IF_curve(self, ax, fig, agg, legend_handles_labels):
+        """
+        Apply legend, labels, title, layout, and save the main IF curve figure.
+        """
+        n_mapping = agg.groupby(self.first_factor)["n"].max().to_dict()
+
         handles, labels = ax.get_legend_handles_labels()
-        # Add n= counts to the compare group labels
-        new_labels = [f"{lbl} (n={n_mapping[lbl]})" if lbl in n_mapping else lbl for lbl in labels]
-        # Combine scatter marker legend handles
+
+        new_labels = [
+            f"{label} (n={n_mapping[label]})"
+            if label in n_mapping
+            else label
+            for label in labels
+        ]
+
         scatter_handles = list(legend_handles_labels.values())
-        scatter_labels = [h.get_label() for h in scatter_handles]
+        scatter_labels = [handle.get_label() for handle in scatter_handles]
+
         combined_handles = handles + scatter_handles
         combined_labels = new_labels + scatter_labels
-        ax.legend(combined_handles, combined_labels, loc='best', title='Legend')
 
-        ax.set_xlabel("Current injection (pA)", fontsize=16)
-        ax.set_ylabel("Firing frequency (Hz)", fontsize=16)
-        ax.set_title(f"FI curve across {self.compare}" + (f" - {', '.join(self.region)}" if getattr(self, "region", None) else ""), fontsize=18)
+        ax.legend(
+            combined_handles,
+            combined_labels,
+            loc=self.get_plot_param("legend_loc", "best"),
+            title="Legend",
+            fontsize=self.get_plot_param("legend_fontsize", None),
+        )
+
+        ax.set_xlabel(
+            "Current injection (pA)",
+            fontsize=self.get_plot_param("xlabel_fontsize", 16),
+        )
+        ax.set_ylabel(
+            "Firing frequency (Hz)",
+            fontsize=self.get_plot_param("ylabel_fontsize", 16),
+        )
+
+        ax.set_title(
+            self.build_IF_title(),
+            fontsize=self.get_plot_param("title_fontsize", 18),
+        )
         sns.despine(ax=ax)
         plt.tight_layout()
         plt.show()
-        self.save_plot(fig, self.filename)
-        
-        return fig
-    
 
-    
+        self.save_plot(fig, self.filename)
+
     def plot_cell_id_curves(self):
         """
         Plot each cell_id's I–F curve with a unique color, separated by self.compare (e.g., treatment group).
@@ -1390,10 +1602,10 @@ class IF_curve(Figure):
         """
         df = self.df_long.copy()
 
-        if self.compare not in df.columns:
-            raise ValueError(f"'{self.compare}' not found in DataFrame columns: {df.columns.tolist()}")
+        if self.first_factor not in df.columns:
+            raise ValueError(f"'{self.first_factor}' not found in DataFrame columns: {df.columns.tolist()}")
 
-        compare_groups = df[self.compare].unique()
+        compare_groups = df[self.first_factor].unique()
         n_groups = len(compare_groups)
 
         fig, axes = plt.subplots(
@@ -1407,7 +1619,7 @@ class IF_curve(Figure):
             axes = [axes]  # ensure iterable if single axis
 
         for ax, comp in zip(axes, compare_groups):
-            sub_df = df[df[self.compare] == comp].copy()
+            sub_df = df[df[self.first_factor] == comp].copy()
 
             # Reset palette per group so colors don't repeat across groups
             cell_ids = sub_df["cell_id"].unique()
@@ -1448,279 +1660,1030 @@ class IF_curve(Figure):
         fig.suptitle("Per-cell I–F curves by group", fontsize=18)
         plt.tight_layout(rect=[0, 0, 1, 0.97])
         plt.show()
-
-        self.save_plot(fig, f"{self.filename}_cell_traces_by_{self.compare}")
-
+        self.save_plot(fig, self.build_IF_filename(suffix="cell_traces"))
         return fig
+
+    def IF_bin_is_testable(self, df_bin):
+        """
+        Decide whether one I_step_bin has enough information for MixedLM.
+
+        Skip bins where:
+        - fewer than 2 compare groups exist
+        - fewer than 2 animals exist
+        - the dependent variable has no variation, e.g. all AP frequencies are 0
+
+        If some values are 0 and some are not, the bin is still testable.
+        """
+        values = pd.to_numeric(df_bin[self.dependant_var], errors="coerce").dropna()
+
+        if df_bin[self.first_factor].nunique() < 2:
+            return False
+
+        if df_bin["subject_id"].nunique() < 2:
+            return False
+
+        if values.nunique() < 2:
+            return False
+
+        if np.isclose(values.var(ddof=0), 0):
+            return False
+
+        return True
     
-    def plot_stats_on_ax(self, ax, stats_func=None, alpha=0.05):
+    def run_IF_bin_stats(self, df):
         """
-        Plot significance stars or p-values above each I_step_bin for FI curves.
+        Run mixed-model pairwise stats separately at each current step.
 
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes
-            Axis to plot on.
-        stats_func : callable, optional
-            Function to compute stats. Should take (df, group_col, value_col, alpha) and return
-            list of dicts with keys 'group1', 'group2', 'p_val', 'significant'.
-            Defaults to self.t_test_stats.
-        alpha : float
-            Significance threshold for the test.
+        Skips untestable bins, especially early IF steps where every cell is 0 Hz.
         """
-        if stats_func is None:
-            stats_func = self.t_test_stats
+        all_results = {}
+        skipped_bins = []
 
-        df = self.df_long
+        for i_step, df_bin in df.groupby("I_step_bin"):
+            if not self.IF_bin_is_testable(df_bin):
+                skipped_bins.append(i_step)
+                continue
 
-        for b in df['I_step_bin'].unique():
-            df_bin = df[df['I_step_bin'] == b]
-            stats_results = stats_func(df_bin, group_col=self.compare, value_col=self.dependant_var, alpha=alpha)
-
-            y_max_bin = df_bin[self.dependant_var].max()
-            y_range = df_bin[self.dependant_var].max() - df_bin[self.dependant_var].min()
-            if y_range == 0:
-                y_range = y_max_bin * 0.05 if y_max_bin != 0 else 1
-            offset = 0.01 * (df[self.dependant_var].max() - df[self.dependant_var].min())
-
-            for res in stats_results:
-                if getattr(self, "significant_only", True):
-                    if not res["significant"]:
-                        continue
-                    text = "*"
-                else:
-                    text = "*" if res["significant"] else f"{res['p_val']:.2f}"
-
-                ax.text(
-                    b,
-                    y_max_bin + offset,
-                    text,
-                    ha="center",
-                    va="bottom",
-                    fontsize=8,
-                    color="black"
+            try:
+                results = self.mixedlm_pairwise_stats(
+                    df_bin,
+                    group_col=self.first_factor,
+                    value_col=self.dependant_var,
+                    alpha=self.alpha,
                 )
 
+                results = [
+                    res for res in results
+                    if np.isfinite(res["p_val"])
+                ]
 
+                if results:
+                    all_results[i_step] = results
+                else:
+                    skipped_bins.append(i_step)
 
+            except Exception as e:
+                skipped_bins.append(i_step)
+                print(f"[IF_curve stats skipped] I_step_bin={i_step}: {e}")
+
+        if skipped_bins:
+            print(f"[IF_curve stats skipped bins] {skipped_bins}")
+
+        self.IF_bin_stats = all_results
+        self.IF_skipped_bins = skipped_bins
+
+        return all_results
+
+    def annotate_IF_bin_stats(self, ax, df, bin_stats):
+        """
+        Add significance annotation above each current step.
+
+        Places labels close to the data using the current axis range, not the full
+        data range. This keeps stars from floating too high above the curve.
+        """
+        if not bin_stats:
+            return
+
+        y0, y1 = ax.get_ylim()
+        axis_range = y1 - y0
+        offset = axis_range * self.get_plot_param("stats_offset_frac", 0.015)
+
+        used_labels = []
+
+        for i_step, results in bin_stats.items():
+            visible = [
+                res for res in results
+                if res["significant"] or not self.significant_only
+            ]
+
+            if not visible:
+                continue
+
+            df_bin = df[df["I_step_bin"] == i_step]
+            # y = df_bin[self.dependant_var].max() + offset # based off the highest value
+            y_base = (
+                df_bin
+                .groupby(self.first_factor)[self.dependant_var]
+                .mean()
+                .max()
+            )
+            y = y_base + offset # based off the mean
+
+            best_p = min(res["p_val"] for res in visible)
+            label = self.p_to_star(best_p)
+
+            if not any(res["significant"] for res in visible):
+                label = f"p={best_p:.2f}"
+
+            ax.text(
+                i_step,
+                y,
+                label,
+                ha="center",
+                va="bottom",
+                fontsize=self.get_plot_param("stats_fontsize", 10),
+                color="black",
+            )
+
+            used_labels.append(y)
+
+            for res in visible:
+                print(
+                    f"I={i_step}: {res['group1']} vs {res['group2']} "
+                    f"p={res['p_val']:.4g}"
+                )
+
+        if used_labels:
+            current_top = ax.get_ylim()[1]
+            needed_top = max(used_labels) + axis_range * 0.04
+            if needed_top > current_top:
+                ax.set_ylim(top=needed_top)
+
+    def IF_optional_params(self, for_filename=False):
+        """
+        Optional IF-curve parameters to show in filenames/titles.
+        """
+        params = {
+            "I_range_pA": self.I_range_pA,
+            "n_minimum": self.n_minimum,
+        }
+
+        labels = self.optional_param_labels(params, for_filename=for_filename)
+
+        if self.show_values:
+            labels.append("show_values" if for_filename else "show values")
+
+        if self.specify is not None:
+            labels.append(
+                f"markers_{self.specify}" if for_filename else f"markers = {self.specify}"
+            )
+
+        return labels
+
+    def build_IF_filename(self, suffix=None):
+        """
+        Build saved filename for IF curve figures.
+        """
+        parts = [
+            "IF_curve",
+            self.data_type,
+            self.first_factor,
+            self.region,
+            self.cell_type,
+        ]
+
+        parts.extend(self.IF_optional_params(for_filename=True))
+
+        if suffix is not None:
+            parts.append(suffix)
+
+        return self.sanitize_filename(
+            self.build_name(*parts, sep="_")
+        )
+
+    def build_IF_title(self):
+        """
+        Build visible IF curve title.
+        """
+        parts = [
+            "IF curve",
+            self.region,
+            self.cell_type,
+        ]
+
+        parts.extend(self.IF_optional_params(for_filename=False))
+
+        return self.build_name(*parts, sep=" ")
 
 
 
 
 @dataclass
-class Histogram(Figure):
+class Histogram(MixedLMStatsMixin, Figure):
     '''
     Generic histogram class for plotting histograms of a specified dependant variable across treatments (and timepoints if project == application).
     '''
     filename: str = None
     dependant_var: str = field(kw_only=True)
-    compare: str = field(kw_only=True, default='treatment') #bars to compare on x-axis
+    first_factor: str = field(kw_only=True, default='treatment') #bars to compare on x-axis
+    second_factor: str | None = None
+    plot_params: dict = field(default_factory=dict)
+    alpha: float = 0.05 # p value threshold
     specify: str = field(kw_only = True, default = 'treatment') # specify marker to see subsets e.g. I_set or cell_id
     n_minimum: float = field(kw_only = True, default = 3)
     significant_only: bool = field(kw_only=True, default=True)
+
     pre_sweep_window: int = None # window before and after drug_in
     post_sweep_window: int = None 
     subgroup_key: str = field(kw_only=True, default=None) # if specified, will plot separate histograms for each subgroup in this column
+    I_steps_pA: int = None  # only for plotting IF_IC AP_frequencies_Hz
+    ISI_ms: int = None # only for plotting PPR_VC PPR
+
 
     def __post_init__(self):
-        self.filename = self.build_name(self.dependant_var, self.specify, self.region, self.cell_type, sep="_")
+        self.filename = self.build_histogram_filename()
         super().__post_init__()
         self.check_valid_dependant_var()
         self.data = self.filter_n_minimum(self.agg_df) # TODO NOW here there is a col RMP_mV averaged dont know why or what it is / and there is the sweep_RMP_mV CHECK WHATS HAPPENING
 
-        # If dependant_var contains lists or arrays, average them to a single numeric value
-        if self.data[self.dependant_var].apply(lambda x: isinstance(x, (list, np.ndarray, pd.Series))).any(): #phasing this out
-            print(f"[Histogram DEBUG] collapsing lists in {self.dependant_var}")
-        self.data[self.dependant_var] = self.data[self.dependant_var].apply(
-            lambda x: np.mean(x) if isinstance(x, (list, np.ndarray, pd.Series)) else x
-        )
+            # REDUNDANT?
+            # If dependant_var contains lists or arrays, average them to a single numeric value
+            # if self.data[self.dependant_var].apply(lambda x: isinstance(x, (list, np.ndarray, pd.Series))).any(): #phasing this out
+            #     print(f"[Histogram DEBUG] collapsing lists in {self.dependant_var}")
+            # self.data[self.dependant_var] = self.data[self.dependant_var].apply(
+            #     lambda x: np.mean(x) if isinstance(x, (list, np.ndarray, pd.Series)) else x
+            # )
+
 
         if self.data_type == "APP_IC":
             self.data, pre_sweep_window, post_sweep_window = self.get_pre_post_sweep_windows(self.data, dependant_var=f"sweep_{self.dependant_var}", pre_sweep_window=self.pre_sweep_window, post_sweep_window=self.post_sweep_window)
-        self.order = [t for t in color_dict.keys() if t in self.data[self.compare].unique()]
-
+      
         if  self.project_obj.project_type == "application":
             self.hue_order = [t for t in ['PRE', 'APP', 'WASH'] if t in self.data['time'].unique()] #not generic #TODO
         
-        self.fig = self.plot_histogram()
-        if self.subgroup_key is not None and self.subgroup_key in self.data.columns:
+        self.fig = self.plot_histogram() 
+        if self.subgroup_key is not None and self.subgroup_key in self.data.columns: # REDUNDANT?
             for subgroup in self.data[self.subgroup_key].unique():
-                self.filename = self.build_name(self.dependant_var, self.specify, self.region, self.cell_type, subgroup, sep="_")
                 subgroup_data = self.data[self.data[self.subgroup_key] == subgroup]
                 self.fig = self.plot_histogram(subgroup_data, subgroup_name=subgroup)
 
-    def specify_markers(self, df, ax):
-        """
-        Adds a marker legend to the plot based on the `specify` attribute.
-        """
-        unique_values = df[self.specify].unique()
-        markers = cycle(['o', 's', '^', 'D', 'v', '<', '>'])  # Define markers to use
-        legend_handles_labels = {}
-        for i, value in enumerate(unique_values):
-            marker = next(markers)
-            subset_to_plot = df[df[self.specify] == value]
-            sns.stripplot(
-                x=self.compare,
-                y=self.dependant_var,
-                hue='time' if self.project_obj.project_type == "application" else self.compare,
-                hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
-                order=self.order ,
-                data=subset_to_plot,
-                palette=color_dict,
-                edgecolor="k",
-                linewidth=1,
-                linestyle="-",
-                dodge=True,
-                ax=ax, 
-                legend=False,
-                marker=marker,
-            )
-
-            # Add value to legend dictionary
-            legend_handles_labels[value] = plt.Line2D(
-                [0], [0], marker=marker, label=value, color='black'
-            )
-        return legend_handles_labels
-
 
     def plot_histogram(self, df=None, subgroup_name=None):
-        if df is None:
-            df = self.data
+        plot_df = self.prepare_histogram_df(df)
+        self.plot_df = plot_df.copy()
+        self.filename = self.build_histogram_filename(subgroup_name=subgroup_name)
 
-        fig, ax = plt.subplots(figsize=(15, 10))
-        sns.barplot(
-            x=self.compare,
-            y=self.dependant_var,
-            hue='time' if self.project_obj.project_type == "application" else self.compare,
-            hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
-            order=self.order ,
-            data=df,
-            errorbar = 'sd',
-            palette=color_dict,
-            edgecolor="k",
-            ax=ax
+        self.configure_plot_groups(plot_df)
+
+        fig, ax = self.draw_histogram(plot_df)
+
+        stats_results = self.run_histogram_stats(plot_df)
+        self.annotate_stats(ax, plot_df, stats_results)
+
+        self.finalize_histogram(ax, fig, subgroup_name=subgroup_name)
+
+        return fig
+    
+    def configure_plot_groups(self, df):
+        """
+        Configure x/hue/stat grouping for plotting and stats.
+
+        Sets:
+        - self.order
+        - self.hue_order
+        - self.x_axis
+        - self.hue
+        - self.stats_group_col
+        - self.stats_group_order
+        """
+        self.order = [
+            t for t in color_dict.keys()
+            if t in df[self.first_factor].unique()
+        ]
+
+        if self.second_factor is None:
+            self.hue_order = None
+            self.x_axis = self.first_factor
+            self.hue = (
+                "time"
+                if self.project_obj.project_type == "application"
+                else self.first_factor
+            )
+            self.stats_group_col = self.first_factor
+            self.stats_group_order = self.order
+
+        else:
+            self.hue_order = [
+                t for t in color_dict.keys()
+                if t in df[self.second_factor].unique()
+            ]
+            self.x_axis = self.first_factor
+            self.hue = self.second_factor
+            self.stats_group_col = "plot_group"
+            self.stats_group_order = [
+                f"{a}_{b}"
+                for a in self.order
+                for b in self.hue_order
+                if f"{a}_{b}" in set(df["plot_group"])
+            ]
+
+    def draw_histogram(self, df):
+        """
+        Draw bars, hidden base swarm, marker overlay, legend, and n labels.
+        """
+        fig, ax = plt.subplots(
+            figsize=(
+                self.get_plot_param("figwidth", 15),
+                self.get_plot_param("figheight", 10),
+            )
         )
-        sns.swarmplot(
-            x=self.compare,
+
+        sns.barplot(
+            x=self.x_axis,
             y=self.dependant_var,
-            hue='time' if self.project_obj.project_type == "application" else self.compare,
-            hue_order=self.hue_order if hasattr(self, 'hue_order') else None,
-            order=self.order ,
+            hue=self.hue,
+            hue_order=self.hue_order,
+            order=self.order,
+            data=df,
+            errorbar=self.get_plot_param("errorbar", "se"),
+            palette=color_dict,
+            edgecolor=self.get_plot_param("bar_edgecolor", "k"),
+            ax=ax,
+            alpha=self.get_plot_param("bar_alpha", 1.0),
+        )
+
+        sns.swarmplot(
+            x=self.x_axis,
+            y=self.dependant_var,
+            hue=self.hue,
+            hue_order=self.hue_order,
+            order=self.order,
             data=df,
             palette=color_dict,
             edgecolor="k",
             linewidth=0.5,
-            ax=ax, 
+            ax=ax,
             legend=False,
             marker="o",
-            size=0.05, #small as will be plotted over by specify_markers
-            alpha = 0.7,
+            size=0.05,
+            alpha=0.7,
             dodge=True,
         )
- 
-        legend_handles_labels = self.specify_markers(df, ax)
-    
+
+        legend_handles_labels = self.specify_markers(df, ax, self.x_axis, self.hue)
+
         current_handles, current_labels = ax.get_legend_handles_labels()
         combined_handles = current_handles + list(legend_handles_labels.values())
-        combined_labels = current_labels + [handle.get_label() for handle in legend_handles_labels.values()]
-        ax.legend(handles=combined_handles, labels=combined_labels, loc='best', title='Legend')
+        combined_labels = current_labels + [
+            handle.get_label()
+            for handle in legend_handles_labels.values()
+        ]
 
+        ax.legend(
+            handles=combined_handles,
+            labels=combined_labels,
+            loc=self.get_plot_param("legend_loc", "best"),
+            title="Legend",
+        )
 
-        cell_counts = df.groupby(self.compare)['cell_id'].nunique() #count unique cells per treatment #TODO add mouse count 
-        animal_counts = df.groupby(self.compare)['subject_id'].nunique() if 'subject_id' in df.columns else None
+        self.add_sample_size_labels(ax, df)
 
-        # for tick, treatment in enumerate(self.order):
-        #     count = cell_counts.get(treatment, 0)
-        #     ax.text(tick, -0.1, f'n={count}', ha='center', va='top', fontsize=24, color='black', transform=ax.get_xaxis_transform())
+        return fig, ax
+    
+
+    def specify_markers(self, df, ax, x_axis, hue):
+        """
+        Adds marker overlay based on self.specify, including missing/None values.
+
+        Default behavior:
+        - marker color follows color_dict
+        - marker shape follows self.specify
+
+        Optional plot_params:
+        - marker_by_specify: False makes all markers circles and hides marker legend
+        - marker_facecolor: "none", "white", etc.
+        - marker_facealpha: alpha for marker facecolor
+        - marker_edgecolor: fixed edge color fallback
+        - marker_jitter: stripplot jitter
+        """
+        marker_df = df.copy()
+        marker_col = self.specify
+
+        if marker_col is None:
+            return {}
+
+        if marker_col not in marker_df.columns:
+            return {}
+
+        marker_df[marker_col] = marker_df[marker_col].fillna("none")
+
+        unique_values = marker_df[marker_col].unique()
+
+        if self.get_plot_param("marker_by_specify", True):
+            markers = cycle(["o", "D", "s", "^", "v", "<", ">"])
+        else:
+            markers = cycle(["o"])
+
+        legend_handles_labels = {}
+
+        for value in unique_values:
+            marker = next(markers)
+            subset_to_plot = marker_df[marker_df[marker_col] == value]
+
+            before_collections = len(ax.collections)
+
+            sns.stripplot(
+                x=x_axis,
+                y=self.dependant_var,
+                hue=hue,
+                hue_order=self.hue_order,
+                order=self.order,
+                data=subset_to_plot,
+                palette=self.get_plot_param("marker_color", color_dict),
+                edgecolor=self.get_plot_param("marker_edgecolor", "k"),
+                linewidth=self.get_plot_param("marker_linewidth", 1),
+                linestyle="-",
+                dodge=True,
+                jitter=self.get_plot_param("marker_jitter", 0.15),
+                ax=ax,
+                legend=False,
+                marker=marker,
+                size=self.get_plot_param("markersize", 7),
+                alpha=self.get_plot_param("marker_alpha", 1.0),
+            )
+
+            new_collections = ax.collections[before_collections:]
+
+            for collection in new_collections:
+                edgecolors = collection.get_facecolors()
+                collection.set_edgecolors(edgecolors)
+
+                marker_facecolor = self.get_plot_param("marker_facecolor", None)
+
+                if marker_facecolor == "none":
+                    collection.set_facecolors("none")
+                elif marker_facecolor is not None:
+                    face_color = self.rgba_color(
+                        marker_facecolor,
+                        self.get_plot_param("marker_facealpha", 1.0),
+                    )
+                    n_points = len(collection.get_offsets())
+                    facecolors = np.tile(face_color, (n_points, 1))
+                    collection.set_facecolors(facecolors)
+                    collection.set_alpha(None)
+
+            if self.get_plot_param("marker_by_specify", True):
+                legend_facecolor = self.get_plot_param("marker_facecolor", None)
+
+                if legend_facecolor == "none":
+                    markerfacecolor = "none"
+                elif legend_facecolor is not None:
+                    markerfacecolor = self.rgba_color(
+                        legend_facecolor,
+                        self.get_plot_param("marker_facealpha", 1.0),
+                    )
+                else:
+                    markerfacecolor = "white"
+
+                legend_handles_labels[value] = plt.Line2D(
+                    [0],
+                    [0],
+                    marker=marker,
+                    label=value,
+                    markerfacecolor=markerfacecolor,
+                    markeredgecolor="black",
+                    color="black",
+                    linestyle="None",
+                )
+
+        return legend_handles_labels
+        
+    def add_sample_size_labels(self, ax, df):
+        """
+        Add cell/animal counts under each first_factor x tick.
+        """
+        cell_counts = df.groupby(self.first_factor)["cell_id"].nunique()
+        animal_counts = (
+            df.groupby(self.first_factor)["subject_id"].nunique()
+            if "subject_id" in df.columns
+            else None
+        )
 
         for tick, treatment in enumerate(self.order):
             n_cells = cell_counts.get(treatment, 0)
             n_animals = animal_counts.get(treatment, 0) if animal_counts is not None else None
 
-            # Build multiline label
             if n_animals is not None:
                 text_label = f"n (cells) = {n_cells}\n n (animals) = {n_animals}"
             else:
                 text_label = f"n = {n_cells}"
 
-            # Add under each x-tick, relative to axis (not data)
             ax.text(
                 tick,
-                -0.1,  # vertical offset below x-axis
+                -0.1,
                 text_label,
-                ha='center',
-                va='top',
+                ha="center",
+                va="top",
                 fontsize=22,
-                color='black',
+                color="black",
                 transform=ax.get_xaxis_transform(),
                 linespacing=1.2,
             )
+    
+    def run_histogram_stats(self, df):
+        """
+        Run the appropriate mixed-model stats and return pairwise results.
 
-        self.plot_stats_on_ax(ax, stats_func=self.t_test_stats, df=df, alpha=0.05)
-        
-        # Customize plot labels and titles
-        ax.spines[['right', 'top']].set_visible(False)
-        ax.set_ylabel(unit_dict[self.dependant_var], fontsize=24)
-        ax.set_xlabel('')
-        ax.set_title(
-            self.build_name(
-                unit_dict.get(self.dependant_var, self.dependant_var),
-                self.region,
-                self.cell_type,
-                subgroup_name if subgroup_name else None,
-                sep=" "
-            ),
-            fontsize=28
+        One-factor:
+            pairwise MixedLM over first_factor
+
+        Two-factor:
+            two-way MixedLM for main effects/interaction
+            plus pairwise MixedLM over plot_group
+        """
+        if self.second_factor is None:
+            return self.mixedlm_pairwise_stats(
+                df,
+                group_col=self.stats_group_col,
+                value_col=self.dependant_var,
+                group_order=self.stats_group_order,
+            )
+
+        print("\n=== TWO-WAY MIXED MODEL ===")
+        self.two_way_mixed_model(df)
+
+        return self.mixedlm_pairwise_stats(
+            df,
+            group_col=self.stats_group_col,
+            value_col=self.dependant_var,
+            group_order=self.stats_group_order,
         )
-        ax.tick_params(axis='x', labelsize=24)
-        ax.tick_params(axis='y', labelsize=24)
-        plt.tight_layout()
-        plt.show()
-        self.save_plot(fig, self.filename)
 
+    def get_selector_for_dependant_var(self):
+        """
+        Return the selector column/value needed for special dependent variables.
 
-    def plot_stats_on_ax(self, ax, stats_func=None, df=None, alpha=0.05):
+        Examples:
+        - IF_IC AP_frequencies_Hz needs I_steps_pA
+        - PPR_VC PPR needs ISI_ms
+
+        Returns:
+            (selector_col, selector_value) or (None, None)
         """
-        Plot stars/p-values above bars for histogram using the provided stats function.
-        
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes
-            Axis to plot on.
-        stats_func : callable, optional
-            Function to compute stats. Should take (df, group_col, value_col, alpha) and return
-            list of dicts with keys 'group1', 'group2', 'p_val', 'significant'.
-            Defaults to self.t_test_stats.
-        alpha : float
-            Significance threshold for the test.
+        selector_map = {
+            ("IF_IC", "AP_frequencies_Hz"): ("I_steps_pA", self.I_steps_pA),
+            ("PPR_VC", "PPR"): ("ISI_ms", self.ISI_ms),
+        }
+
+        return selector_map.get(
+            (self.data_type, self.dependant_var),
+            (None, None)
+        )
+
+    def is_list_like_value(self, value):
         """
-        if stats_func is None:
-            stats_func = self.t_test_stats
+        True for row values that store multiple measurements.
+        """
+        return isinstance(value, (list, np.ndarray, pd.Series))
+
+    def apply_selector_filter(self, df, selector_col, selector_value):
+        """
+        Filter/extract rows for selector-specific variables.
+
+        Handles two cases:
+
+        1. selector_col is scalar per row:
+            keep rows where df[selector_col] == selector_value
+
+        2. selector_col is list-like per row:
+            find selector_value inside that list and extract the matching item from
+            self.dependant_var.
+
+        Returns a copy of df.
+        """
+        if selector_col is None:
+            return df.copy()
+
+        if selector_value is None:
+            raise ValueError(
+                f"{self.dependant_var} requires {selector_col}. "
+                f"Please pass {selector_col}=..."
+            )
+
+        if selector_col not in df.columns:
+            raise ValueError(f"Selector column {selector_col} not found in dataframe.")
+
+        if self.dependant_var not in df.columns:
+            raise ValueError(f"Dependent variable {self.dependant_var} not found in dataframe.")
+
+        df = df.copy()
+
+        selector_is_list = df[selector_col].apply(self.is_list_like_value).any()
+
+        if not selector_is_list:
+            df = df[df[selector_col] == selector_value].copy()
+            return df
+
+        def extract_selected_value(row):
+            selectors = row[selector_col]
+            values = row[self.dependant_var]
+
+            if not self.is_list_like_value(selectors):
+                return pd.Series({
+                    self.dependant_var: np.nan,
+                    selector_col: np.nan,
+                })
+
+            if not self.is_list_like_value(values):
+                return pd.Series({
+                    self.dependant_var: np.nan,
+                    selector_col: np.nan,
+                })
+
+            selectors = list(selectors)
+            values = list(values)
+
+            try:
+                idx = selectors.index(selector_value)
+            except ValueError:
+                return pd.Series({
+                    self.dependant_var: np.nan,
+                    selector_col: np.nan,
+                })
+
+            if idx >= len(values):
+                return pd.Series({
+                    self.dependant_var: np.nan,
+                    selector_col: np.nan,
+                })
+
+            return pd.Series({
+                self.dependant_var: values[idx],
+                selector_col: selector_value,
+            })
+
+        df[[self.dependant_var, selector_col]] = df.apply(extract_selected_value, axis=1)
+        df = df.dropna(subset=[self.dependant_var, selector_col]).copy()
+
+        return df
+
+    def collapse_unselected_lists(self, df):
+        """
+        Collapse list-like dependent variable values only when no selector is needed.
+
+        This preserves your old behavior for variables where a list should simply
+        become its mean, but avoids averaging variables like AP_frequencies_Hz before
+        selecting I_steps_pA.
+        """
+        df = df.copy()
+
+        has_lists = df[self.dependant_var].apply(self.is_list_like_value).any()
+        if has_lists:
+            print(f"[Histogram DEBUG] collapsing lists in {self.dependant_var}")
+            df[self.dependant_var] = df[self.dependant_var].apply(
+                lambda x: np.mean(x) if self.is_list_like_value(x) else x
+            )
+
+        return df
+
+    def prepare_histogram_df(self, df=None):
+        """
+        Build the dataframe used for plotting and stats.
+
+        self.data remains the base data.
+        This method returns a transformed plot_df with:
+        - missing factor rows removed
+        - selector-specific variables extracted/filtered
+        - remaining list-like dependent values collapsed
+        - plot_group added for two-factor designs
+        """
         if df is None:
-            df = self.data
-        stats_results = stats_func(df, group_col=self.compare, value_col=self.dependant_var, alpha=alpha)
+            plot_df = self.data.copy()
+        else:
+            plot_df = df.copy()
 
-        y_range = df[self.dependant_var].max() - df[self.dependant_var].min()
+        group_cols = [self.first_factor]
+        if self.second_factor is not None:
+            group_cols.append(self.second_factor)
+
+        plot_df = plot_df.dropna(subset=group_cols).copy()
+
+        selector_col, selector_value = self.get_selector_for_dependant_var()
+        plot_df = self.apply_selector_filter(plot_df, selector_col, selector_value)
+
+        if selector_col is None:
+            plot_df = self.collapse_unselected_lists(plot_df)
+
+        plot_df[self.dependant_var] = pd.to_numeric(
+            plot_df[self.dependant_var],
+            errors="coerce"
+        )
+        plot_df = plot_df.dropna(subset=[self.dependant_var]).copy()
+
+        if self.second_factor is not None:
+            plot_df["plot_group"] = (
+                plot_df[self.first_factor].astype(str) + "_" +
+                plot_df[self.second_factor].astype(str)
+            )
+
+        return plot_df
+
+    def two_way_mixed_model(self, df):
+        """
+        Fit the main two-factor mixed-effects model.
+
+        Model:
+            dependent_variable ~ first_factor * second_factor + (1 | subject_id)
+
+        This tests main effects and interaction while accounting for multiple cells
+        from the same animal.
+        """
+        model_df = self.clean_mixedlm_df(
+            df,
+            group_col=self.stats_group_col,
+            value_col=self.dependant_var
+        )
+
+        combo_table = pd.crosstab(model_df[self.first_factor], model_df[self.second_factor])
+        has_empty_combinations = (combo_table == 0).any().any()
+
+        if has_empty_combinations:
+            print(
+                "\nWARNING: Some first_factor x second_factor combinations are missing. "
+                "Cannot fit a full two-way interaction model. "
+                "Fitting combined plot_group model instead.\n"
+            )
+
+            formula = f"{self.dependant_var} ~ C({self.stats_group_col})"
+
+        else:
+            formula = (
+                f"{self.dependant_var} ~ "
+                f"C({self.first_factor}, Treatment(reference='{self.order[0]}')) * "
+                f"C({self.second_factor}, Treatment(reference='{self.hue_order[0]}'))"
+            )
+
+        self.mixedlm_result = mixedlm(
+            formula,
+            data=model_df,
+            groups=model_df["subject_id"],
+        ).fit(reml=True, method="powell")   
+        
+        pvals = self.mixedlm_result.pvalues
+        p_first = [pvals[k] for k in pvals.index if f"C({self.first_factor}" in k and ":" not in k]
+        p_second = [pvals[k] for k in pvals.index if f"C({self.second_factor}" in k and ":" not in k]
+        p_interaction = [pvals[k] for k in pvals.index if ":" in k]
+        self.two_way_pvals = {
+            self.first_factor: p_first[0] if p_first else np.nan,
+            self.second_factor: p_second[0] if p_second else np.nan,
+            "interaction": p_interaction[0] if p_interaction else np.nan,
+        }
+        for label, p_val in self.two_way_pvals.items():
+            print(f"{label:15s}: p = {p_val:.4g}")
+        print("=" * 35)
+
+        return self.mixedlm_result
+
+    def add_two_way_stats_box(self, ax):
+        """
+        Add main-effect/intervention p-values from the two-way MixedLM to the plot.
+        """
+        if self.second_factor is None:
+            return
+
+        if not hasattr(self, "two_way_pvals"):
+            return
+
+        lines = ["MixedLM"]
+        for label, p_val in self.two_way_pvals.items():
+            if np.isnan(p_val):
+                lines.append(f"{label}: p = NA")
+            else:
+                lines.append(f"{label}: p = {p_val:.3g}")
+
+        ax.text(
+            0.98,
+            0.98,
+            "\n".join(lines),
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=self.get_plot_param("stats_box_fontsize", 14),           
+            bbox={
+                "boxstyle": "round,pad=0.3",
+                "facecolor": "white",
+                "edgecolor": "black",
+                "alpha": 0.8,
+            },
+        )
+    
+    def histogram_optional_labels(self, subgroup_name=None, for_filename=False):
+        """
+        Return optional parameter labels for filenames/titles.
+
+        Includes only parameters that are actually being used.
+        """
+        parts = []
+
+        selector = self.selector_label(sep="_" if for_filename else " = ")
+        if selector is not None:
+            parts.append(selector)
+
+        if subgroup_name is not None:
+            if for_filename:
+                parts.append(f"subgroup_{subgroup_name}")
+            else:
+                parts.append(str(subgroup_name))
+
+        if self.pre_sweep_window is not None:
+            if for_filename:
+                parts.append(f"pre_sweep_window_{self.pre_sweep_window}")
+            else:
+                parts.append(f"pre sweep window = {self.pre_sweep_window}")
+
+        if self.post_sweep_window is not None:
+            if for_filename:
+                parts.append(f"post_sweep_window_{self.post_sweep_window}")
+            else:
+                parts.append(f"post sweep window = {self.post_sweep_window}")
+
+        return parts
+
+    def selector_label(self, sep=" = "):
+        """
+        Return a readable selector label for variables that need one.
+
+        Examples:
+            I_steps_pA = 100
+            ISI_ms = 50
+        """
+        selector_col, selector_value = self.get_selector_for_dependant_var()
+
+        if selector_col is None:
+            return None
+
+        return f"{selector_col}{sep}{selector_value}"
+
+    def build_histogram_filename(self, subgroup_name=None):
+        """
+        Build the saved plot filename from the current histogram parameters.
+        """
+        return self.build_name(
+            *self.histogram_name_parts(subgroup_name=subgroup_name, for_filename=True),
+            sep="_"
+        )
+
+    def histogram_name_parts(self, subgroup_name=None, for_filename=False):
+        """
+        Build consistent filename parts for histogram outputs.
+
+        Filenames include factors because they help distinguish saved plots.
+        Titles are handled separately by build_histogram_title().
+        """
+        factor_label = self.first_factor
+        if self.second_factor is not None:
+            factor_label = f"{self.first_factor}_by_{self.second_factor}"
+
+        parts = [
+            self.dependant_var,
+            self.data_type,
+            self.region,
+            self.cell_type,
+            factor_label,
+        ]
+
+        parts.extend(
+            self.histogram_optional_labels(
+                subgroup_name=subgroup_name,
+                for_filename=for_filename
+            )
+        )
+
+        if self.specify is not None:
+            parts.append(f"markers_{self.specify}")
+
+        return [p for p in parts if p is not None]
+    
+    def build_histogram_title(self, subgroup_name=None):
+        """
+        Build the visible plot title.
+
+        Keep the title clean: no factor labels, only biological context and optional
+        parameters like I_steps_pA, ISI_ms, sweep windows, or subgroup.
+        """
+        y_label = unit_dict.get(self.dependant_var, self.dependant_var)
+
+        parts = [
+            y_label,
+            self.region,
+            self.cell_type,
+        ]
+
+        parts.extend(
+            self.histogram_optional_labels(
+                subgroup_name=subgroup_name,
+                for_filename=False
+            )
+        )
+
+        return self.build_name(*parts, sep=" ")
+
+    def group_x_position(self, df, group):
+        """
+        Return x position for a stats group.
+
+        One-factor:
+            group is a first_factor value.
+
+        Two-factor:
+            group is plot_group, and the x position is the dodged bar center.
+        """
+        if self.second_factor is None:
+            return self.order.index(group)
+
+        row = df[df[self.stats_group_col] == group].iloc[0]
+        first_value = row[self.first_factor]
+        second_value = row[self.second_factor]
+
+        x_index = self.order.index(first_value)
+        hue_index = self.hue_order.index(second_value)
+
+        n_hue = len(self.hue_order)
+        total_width = 0.8
+        hue_width = total_width / n_hue
+
+        return x_index - total_width / 2 + hue_width * (hue_index + 0.5)
+
+    def annotate_stats(self, ax, df, stats_results, alpha=None):
+        """
+        Annotate pairwise stats on the histogram.
+
+        Works for:
+        - one-factor bars
+        - two-factor dodged bars using plot_group
+        """
+        if not stats_results:
+            return
+        if alpha is None:
+            alpha = self.alpha
+
+        y_min = df[self.dependant_var].min()
+        y_max = df[self.dependant_var].max()
+        y_range = y_max - y_min
+
         if y_range == 0:
-            y_range = df[self.dependant_var].max() * 0.1 if df[self.dependant_var].max() > 0 else 1
-        ax.set_ylim(top=ax.get_ylim()[1] * 1.1)
+            y_range = abs(y_max) * 0.1 if y_max != 0 else 1
 
-        groups = df[self.compare].unique().tolist()
+        visible_results = []
         for res in stats_results:
             if getattr(self, "significant_only", True) and not res["significant"]:
                 continue
+            visible_results.append(res)
 
-            if res["significant"]:
-                print(f"{res['group1']} vs {res['group2']}: p={res['p_val']:.4f}", flush=True)
+        if not visible_results:
+            return
 
-            x1 = groups.index(res["group1"])
-            x2 = groups.index(res["group2"])
-            y_max = df[df[self.compare].isin([res["group1"], res["group2"]])][self.dependant_var].max()
-            y_text = y_max + y_range * 0.05
-            text = "*" if res["significant"] else f"p={res['p_val']:.3f}"
-            ax.text((x1 + x2) / 2, y_text, text, ha="center", va="bottom", fontsize=16, color='black')
+        base_y = y_max + y_range * 0.08
+        step_y = y_range * 0.08
+        tick_y = y_range * 0.02
 
+        for i, res in enumerate(visible_results):
+            group1 = res["group1"]
+            group2 = res["group2"]
 
+            try:
+                x1 = self.group_x_position(df, group1)
+                x2 = self.group_x_position(df, group2)
+            except (ValueError, IndexError):
+                print(f"[annotate_stats] could not place {group1} vs {group2}")
+                continue
+
+            y = base_y + i * step_y
+
+            ax.plot(
+                [x1, x1, x2, x2],
+                [y, y + tick_y, y + tick_y, y],
+                lw=1.5,
+                color="black",
+            )
+
+            label = self.p_to_star(res["p_val"])
+            if not res["significant"]:
+                label = f"p={res['p_val']:.3f}"
+
+            ax.text(
+                (x1 + x2) / 2,
+                y + tick_y,
+                label,
+                ha="center",
+                va="bottom",
+                fontsize=16,
+                color="black",
+            )
+
+            print(f"{group1} vs {group2}: p={res['p_val']:.4f}")
+
+        ax.set_ylim(top=base_y + len(visible_results) * step_y + y_range * 0.12)
+
+    def finalize_histogram(self, ax, fig, subgroup_name=None):
+        """
+        Apply final labels/layout and save the figure.
+        """
+        ax.spines[["right", "top"]].set_visible(False)
+        ax.set_ylabel(unit_dict[self.dependant_var], fontsize=24)
+        ax.set_xlabel("")
+        ax.set_title(
+            self.build_histogram_title(subgroup_name=subgroup_name),
+            fontsize=28,
+        )
+        ax.tick_params(axis="x", labelsize=24)
+        ax.tick_params(axis="y", labelsize=24)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        self.add_two_way_stats_box(ax)
+        plt.tight_layout()
+        plt.show()
+        self.save_plot(fig, self.filename)
 
 @dataclass
 class AggregateApplication(Figure):
