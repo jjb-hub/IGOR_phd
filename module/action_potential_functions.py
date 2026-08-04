@@ -4,7 +4,7 @@
 import warnings
 import numpy as np 
 import matplotlib.pyplot as plt 
-from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d, median_filter
 import scipy.signal as sg
 from scipy import stats
 from collections import namedtuple
@@ -273,12 +273,12 @@ def fit_sigmoid(xdata, ydata, maxfev = 5000, visualise = False):
 
 def steady_state_value(V_sweep, I_sweep, step_current_val=None, avg_window=0.5):
     """
-    Calculates the steady state value of a voltage trace during a current injection step.
+    Calculates the steady state value of a voltage trace during a protocol step.
 
     Parameters:
     - V_sweep (array-like): Voltage trace for a single sweep.
-    - I_sweep (array-like): Current trace corresponding to the voltage sweep.
-    - step_current_val (float, optional): The value of the step current injection in pA. If None, it's derived from I_sweep.
+    - I_sweep (array-like): Protocol/command trace corresponding to the voltage sweep.
+    - step_current_val (float, optional): The command step value. If None, it is derived from I_sweep.
     - avg_window (float, optional): Fraction of the step current duration used for averaging. Default is 0.5 (50%).
 
     Returns:
@@ -290,31 +290,38 @@ def steady_state_value(V_sweep, I_sweep, step_current_val=None, avg_window=0.5):
     The function calculates the steady state value ('asym_current') by averaging the voltage trace over a window at the end of the current injection step.
     """
 
+    V_sweep = np.asarray(V_sweep, dtype=float).flatten()
+    I_sweep = np.asarray(I_sweep, dtype=float).flatten()
+
     # Check for empty inputs
     if len(V_sweep) == 0 or len(I_sweep) == 0:
         return np.nan, False, None, None
 
-    # Determine the step current value if not provided
-    if step_current_val is None:
-        non_zero_I = I_sweep[I_sweep != 0]
-        if len(non_zero_I) > 0:
-            step_current_val = np.unique(non_zero_I)[0]
-        else:
-            return np.nan, False, None, None
+    step_indices, detected_step_value, _ = _step_indices_from_command_trace(I_sweep)
+    if step_indices is None:
+        # Legacy fallback for already-baseline-corrected square steps.
+        if step_current_val is None:
+            non_zero_I = I_sweep[I_sweep != 0]
+            if len(non_zero_I) > 0:
+                step_current_val = np.unique(non_zero_I)[0]
+            else:
+                return np.nan, False, None, None
+        hyper = step_current_val < 0
+        step_indices = np.where(I_sweep == (np.min(I_sweep) if hyper else np.max(I_sweep)))[0]
+    elif step_current_val is None:
+        step_current_val = detected_step_value
 
     # Determine if the current step is hyperpolarizing
     hyper = step_current_val < 0
-    # Find the indices where the current equals its maximum (or minimum for hyper)
-    current_points = np.where(I_sweep == (np.min(I_sweep) if hyper else np.max(I_sweep)))[0]
     
     # Check if there are no current points found
-    if len(current_points) <= 1:
+    if len(step_indices) <= 1:
         print(f"No I step detected.")
         return np.nan, hyper, None, None
 
     # Calculate the first and last points of the current injection
-    first_current_point = current_points[0]
-    last_current_point = current_points[-1]
+    first_current_point = step_indices[0]
+    last_current_point = step_indices[-1]
 
     # Calculate the duration for averaging, ensuring it does not exceed array bounds
     current_avg_duration = int(avg_window * (last_current_point - first_current_point))
@@ -348,13 +355,13 @@ def calculate_max_firing(voltage_array, input_sampling_rate=2e4):
 #SAG LOGIC
 
 
-def sag_current_analyser(folder_file, V_array, I_array, step_current_values, AP_frequency_Hz, avg_window=0.5, visualise=False):
+def sag_current_analyser(folder_file, V_array, protocol_array, step_current_values, AP_frequency_Hz, avg_window=0.5, visualise=False):
     """
-    Function to calculate and plot the sag current from voltage and current traces under the first hyperpolarizing current step without action potentials.
+    Calculate sag from voltage traces under the first hyperpolarizing protocol step without action potentials.
     
     Parameters:
     - V_array (2D array): 2D array containing voltage recordings for different current steps.
-    - I_array (2D array): 2D array containing current recordings for different current steps.
+    - protocol_array (2D array): command/protocol trace used for step timing.
     - step_current_values (list): List of injected current values for each sweep.
     - AP_frequency_Hz (list): List of action potential frequency Hz for each sweep.
     - avg_window (float): Fraction of the step current duration used for averaging.
@@ -362,15 +369,26 @@ def sag_current_analyser(folder_file, V_array, I_array, step_current_values, AP_
     Returns:
     - List containing [sag ratio, step_V_steady, I_step, RMP].
     """
+    if protocol_array is None:
+        return [np.nan, np.nan, np.nan, np.nan]
+
+    V_array, protocol_array = protocol_array_to_match_V(V_array, protocol_array)
+    if protocol_array is None:
+        return [np.nan, np.nan, np.nan, np.nan]
+
     for sweep_index, ap_frequency in enumerate(AP_frequency_Hz):
+        if sweep_index >= V_array.shape[1] or sweep_index >= protocol_array.shape[1]:
+            continue
         if ap_frequency == 0 and step_current_values[sweep_index] < 0:  # Check for no APs and negative current
             V_sweep = V_array[:, sweep_index]
-            I_sweep = I_array[:, sweep_index]
+            protocol_sweep = protocol_array[:, sweep_index]
             step_current = step_current_values[sweep_index]
 
 
             # Calculate steady state value using the steady_state_value function
-            step_V_steady, hyper, first_current_point, last_current_point = steady_state_value(V_sweep, I_sweep, step_current, avg_window)
+            step_V_steady, hyper, first_current_point, last_current_point = steady_state_value(V_sweep, protocol_sweep, step_current, avg_window)
+            if first_current_point is None or last_current_point is None:
+                continue
             
             # Calculate RMP before current injection
             RMP = np.mean(V_sweep[:first_current_point])
@@ -378,6 +396,8 @@ def sag_current_analyser(folder_file, V_array, I_array, step_current_values, AP_
             # Calculat minimum on I step 
             sorted_voltages = np.sort(V_sweep[first_current_point:last_current_point])
             num_points = int(len(sorted_voltages) * 0.1)  # Take the lowest 10% of points
+            if num_points < 1:
+                continue
             min_sag_voltage = np.mean(sorted_voltages[:num_points])  # Average them to get a robust minimum
         
             # Calculate sag ratio
@@ -473,13 +493,11 @@ def peak_finder(   # TODO remove rise time logic here its not modular
     correction_window_s: int = 0.001  # to refine peak/upshoot location from smoothed trace to raw default 1ms
     ):
     """
-    Detect peaks in voltage_trace, refine peak positions on raw trace if provided,
-    calculate rise times for all peaks, and optionally filter by rise time.
+    Detect peaks in voltage_trace and estimate amplitudes from raw_trace if provided.
 
     Returns:
-    - peaks: np.ndarray of peak indices in raw trace after refinement and optional filtering
-    - rise_times: list of rise times (seconds) corresponding to returned peaks
-    - amplitudes: np.ndarray of absolute peak amplitudes
+    - peaks: np.ndarray of peak indices
+    - amplitudes: list of approximate peak amplitudes
     - frequency: float, peak count / total recording time (Hz)
     """
     if raw_trace is None:
@@ -499,14 +517,23 @@ def peak_finder(   # TODO remove rise time logic here its not modular
     correction_window = int(correction_window_s / dt)
     backward_window = int(backward_window_s / dt)
 
+    valid_peak_locs = []
     aprox_amplitudes = []
     for peak in peak_locs:
         start_idx = max(0, peak - backward_window) # upshoot detection doesnt work for EPSPs in the same way 
-        peak_val = max(raw_signal[peak-correction_window:peak+correction_window])
+        correction_start = max(0, peak - correction_window)
+        correction_end = min(len(raw_signal), peak + correction_window + 1)
+        if correction_start >= correction_end:
+            continue
+        peak_val = np.nanmax(raw_signal[correction_start:correction_end])
 
         baseline_start = max(0, start_idx-(4*backward_window))
-        baseline = np.nanmedian(raw_signal[baseline_start:start_idx]) 
+        baseline_window = raw_signal[baseline_start:start_idx]
+        if baseline_window.size == 0 or np.all(np.isnan(baseline_window)):
+            baseline_window = raw_signal[max(0, peak - backward_window):peak]
+        baseline = np.nanmedian(baseline_window)
 
+        valid_peak_locs.append(peak)
         aprox_amplitudes.append(peak_val - baseline)
 
         # # DEBUG PLOT
@@ -535,8 +562,832 @@ def peak_finder(   # TODO remove rise time logic here its not modular
         # plt.show()
 
     total_time = len(voltage_trace) * dt
-    frequency = len(peak_locs) / total_time if total_time > 0 else 0
-    return peak_locs, aprox_amplitudes, frequency
+    frequency = len(valid_peak_locs) / total_time if total_time > 0 else 0
+    return np.asarray(valid_peak_locs, dtype=int), aprox_amplitudes, frequency
+
+
+def _flatten_trace_time_first(trace):
+    """Flatten a voltage trace with sweeps appended in recording order."""
+    trace = np.asarray(trace, dtype=float)
+    if trace.ndim == 2:
+        return trace.ravel(order='F')
+    return trace.flatten()
+
+
+def _baseline_trace(trace, dt, method='rolling_median', window_s=0.1):
+    """
+    Estimate slow baseline drift.
+
+    baseline_method options:
+        rolling_median: original behavior; local and conservative, but slow.
+        median_filter: scipy median filter; similar intent, usually faster.
+        coarse_median: median per time bin, interpolated; fastest/smoothest.
+        global_median: one median for the whole trace; no drift correction.
+    """
+    trace = np.asarray(trace, dtype=float).copy()
+    if trace.size == 0:
+        return trace
+
+    fill_value = np.nanmedian(trace)
+    if not np.isfinite(fill_value):
+        return np.full(trace.shape, np.nan)
+    trace[np.isnan(trace)] = fill_value
+
+    window = max(1, int(window_s / dt))
+
+    if method == 'rolling_median':
+        return pd.Series(trace).rolling(window, center=True, min_periods=1).median().to_numpy()
+
+    if method == 'median_filter':
+        if window % 2 == 0:
+            window += 1
+        return median_filter(trace, size=window, mode='nearest')
+
+    if method == 'coarse_median':
+        starts = np.arange(0, len(trace), window)
+        centers = []
+        values = []
+        for start in starts:
+            end = min(len(trace), start + window)
+            centers.append((start + end - 1) / 2)
+            values.append(np.nanmedian(trace[start:end]))
+        if len(values) == 1:
+            return np.full(trace.shape, values[0])
+        return np.interp(np.arange(len(trace)), centers, values, left=values[0], right=values[-1])
+
+    if method == 'global_median':
+        return np.full(trace.shape, fill_value)
+
+    raise ValueError(
+        "baseline_method must be one of: rolling_median, median_filter, coarse_median, global_median"
+    )
+
+
+def _measure_event_local_amplitudes(
+    raw_trace,
+    detection_trace,
+    peak_locs,
+    valid_mask,
+    dt,
+    polarity='positive',
+    peak_window_s=0.001,
+    onset_search_window_s=0.080,
+    onset_threshold_mV=None,
+    onset_threshold_fraction=0.2,
+    onset_noise_multiplier=1.0,
+    noise_sd=None,
+    amplitude_threshold=None,
+    onset_stable_window_s=0.001,
+    upshoot_baseline_window_s=0.001,
+):
+    """
+    Measure event amplitudes from raw voltage using the local EPSP upshoot.
+
+    Peak locations come from the processed trace, but upshoot/takeoff is refined
+    on the raw trace. The preferred upshoot is the local pre-rise point before a
+    sustained raw upward deflection. If that is not found, a short local-minimum
+    fallback is used. For stacked EPSPs, the search starts after the previous
+    peak so amplitudes stay incremental.
+    """
+    raw_trace = np.asarray(raw_trace, dtype=float).flatten()
+    detection_trace = np.asarray(detection_trace, dtype=float).flatten()
+    valid_mask = np.asarray(valid_mask, dtype=bool).flatten()
+    peak_locs = np.asarray(peak_locs, dtype=int)
+
+    peak_half_window = max(1, int(peak_window_s / dt))
+    onset_search_samples = max(2, int(onset_search_window_s / dt))
+    onset_stable_samples = max(1, int(onset_stable_window_s / dt))
+    upshoot_half_window = max(0, int(upshoot_baseline_window_s / dt / 2))
+
+    raw_signal = -raw_trace if polarity == 'negative' else raw_trace
+
+    def is_finite_scalar(value):
+        try:
+            return np.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False
+
+    if onset_threshold_mV is None:
+        candidates = []
+        if is_finite_scalar(amplitude_threshold):
+            candidates.append(abs(amplitude_threshold) * onset_threshold_fraction)
+        if is_finite_scalar(noise_sd):
+            candidates.append(abs(noise_sd) * onset_noise_multiplier)
+        onset_threshold_mV = max(candidates) if candidates else 0
+
+    amplitudes = []
+    peak_values = []
+    baselines = []
+    raw_peak_locs = []
+    baseline_windows = []
+    onset_search_windows = []
+    onset_locs = []
+    baseline_status = []
+    baseline_sample_locs = []
+    previous_event_interval_ms = []
+    next_event_interval_ms = []
+
+    def local_upshoot_value(upshoot_loc):
+        start = max(0, int(upshoot_loc) - upshoot_half_window)
+        end = min(len(raw_trace), int(upshoot_loc) + upshoot_half_window + 1)
+        locs = np.arange(start, end)
+        locs = locs[valid_mask[locs] & np.isfinite(raw_trace[locs])]
+        if locs.size == 0:
+            return np.nan, np.array([], dtype=int), (start, end)
+        return np.nanmedian(raw_trace[locs]), locs, (start, end)
+
+    def smooth_raw_segment(segment):
+        segment = np.asarray(segment, dtype=float).copy()
+        finite_segment = np.isfinite(segment)
+        if not np.any(finite_segment):
+            return None
+        segment[~finite_segment] = np.nanmedian(segment[finite_segment])
+        return gaussian_filter1d(segment, max(1, int(0.0005 / dt)))
+
+    def sustained_raw_rise_onset(smoothed_segment, candidate_offsets, peak_offset, event_excursion):
+        if (
+            smoothed_segment is None
+            or candidate_offsets.size == 0
+            or peak_offset <= 1
+            or not np.isfinite(event_excursion)
+            or event_excursion <= 0
+        ):
+            return None
+
+        d_raw = np.diff(smoothed_segment)
+        if d_raw.size == 0:
+            return None
+        finite_d = np.isfinite(d_raw)
+        if not np.any(finite_d):
+            return None
+
+        d_center = np.nanmedian(d_raw[finite_d])
+        d_noise = np.nanmedian(np.abs(d_raw[finite_d] - d_center)) / 0.6745
+        if not np.isfinite(d_noise):
+            d_noise = 0
+
+        rise_window = max(3, int(0.001 / dt))
+        d_mean = np.convolve(d_raw, np.ones(rise_window) / rise_window, mode='same')
+        mean_event_slope = event_excursion / max(1, int(peak_offset))
+        slope_threshold = max(d_noise * 0.25, mean_event_slope * 0.20, event_excursion * 0.0002)
+        search_end_offset = min(max(1, int(peak_offset)), len(d_mean))
+        rising = d_mean[:search_end_offset] > slope_threshold
+
+        min_rise_samples = max(3, int(0.0006 / dt))
+        gap_limit = max(1, int(0.0004 / dt))
+        segments = []
+        in_segment = False
+        segment_start = None
+        last_positive = None
+        positive_count = 0
+        gap_count = 0
+
+        for idx, is_rising in enumerate(rising):
+            if is_rising:
+                if not in_segment:
+                    in_segment = True
+                    segment_start = idx
+                    positive_count = 0
+                last_positive = idx
+                positive_count += 1
+                gap_count = 0
+            elif in_segment:
+                gap_count += 1
+                if gap_count > gap_limit:
+                    if positive_count >= min_rise_samples:
+                        segments.append((segment_start, last_positive))
+                    in_segment = False
+                    segment_start = None
+                    last_positive = None
+                    positive_count = 0
+                    gap_count = 0
+
+        if in_segment and positive_count >= min_rise_samples:
+            segments.append((segment_start, last_positive))
+
+        if not segments:
+            return None
+
+        max_gap_to_peak = max(int(0.005 / dt), min(int(0.025 / dt), int(peak_offset) // 2))
+        usable_segments = [
+            segment for segment in segments
+            if int(peak_offset) - segment[1] <= max_gap_to_peak
+        ]
+        if not usable_segments:
+            return None
+
+        segment_start, _ = usable_segments[-1]
+        pre_window = max(int(0.005 / dt), rise_window)
+        pre_start = max(0, segment_start - pre_window)
+        pre_stop = min(int(peak_offset), segment_start + 1)
+        pre_offsets = candidate_offsets[
+            (candidate_offsets >= pre_start)
+            & (candidate_offsets < pre_stop)
+        ]
+        if pre_offsets.size == 0:
+            return int(segment_start)
+
+        pre_values = smoothed_segment[pre_offsets]
+        return int(pre_offsets[np.nanargmin(pre_values)])
+
+    for event_idx, peak in enumerate(peak_locs):
+        previous_peak = peak_locs[event_idx - 1] if event_idx > 0 else None
+        next_peak = peak_locs[event_idx + 1] if event_idx < len(peak_locs) - 1 else None
+        previous_event_interval_ms.append(
+            ((peak - previous_peak) * dt * 1000) if previous_peak is not None else np.nan
+        )
+        next_event_interval_ms.append(
+            ((next_peak - peak) * dt * 1000) if next_peak is not None else np.nan
+        )
+
+        peak_start = max(0, peak - peak_half_window)
+        peak_end = min(len(raw_trace), peak + peak_half_window + 1)
+        peak_window = raw_trace[peak_start:peak_end]
+        finite_peak_mask = np.isfinite(peak_window)
+        if np.any(finite_peak_mask):
+            finite_peak_values = peak_window[finite_peak_mask]
+            finite_peak_offsets = np.where(finite_peak_mask)[0]
+            if polarity == 'negative':
+                local_idx = int(finite_peak_offsets[np.nanargmin(finite_peak_values)])
+            else:
+                local_idx = int(finite_peak_offsets[np.nanargmax(finite_peak_values)])
+            raw_peak_loc = peak_start + local_idx
+            peak_value = raw_trace[raw_peak_loc]
+        else:
+            raw_peak_loc = peak
+            peak_value = np.nan
+
+        search_start = max(0, raw_peak_loc - onset_search_samples)
+        if previous_peak is not None:
+            search_start = max(search_start, int(previous_peak) + 1)
+        search_end = max(search_start, raw_peak_loc)
+
+        onset_search_windows.append((search_start, search_end))
+
+        search_mask = valid_mask[search_start:search_end] & np.isfinite(raw_signal[search_start:search_end])
+        candidate_locs = np.arange(search_start, search_end)
+        candidate_locs = candidate_locs[search_mask]
+        onset_loc = None
+        status = 'raw_rise_upshoot'
+
+        if candidate_locs.size > 0:
+            raw_segment = smooth_raw_segment(raw_signal[search_start:search_end])
+            candidate_offsets = candidate_locs - search_start
+            candidate_values = raw_segment[candidate_offsets] if raw_segment is not None else np.asarray([])
+            peak_signal_value = (
+                raw_signal[raw_peak_loc]
+                if 0 <= int(raw_peak_loc) < len(raw_signal)
+                else np.nan
+            )
+            local_reference = np.nanpercentile(candidate_values, 20) if candidate_values.size > 0 else np.nan
+            event_excursion = peak_signal_value - local_reference
+            onset_offset = sustained_raw_rise_onset(
+                raw_segment,
+                candidate_offsets,
+                raw_peak_loc - search_start,
+                event_excursion,
+            )
+
+            if onset_offset is not None:
+                onset_loc = int(search_start + onset_offset)
+
+            if onset_loc is None:
+                fallback_window = max(int(0.020 / dt), onset_stable_samples)
+                fallback_start = max(search_start, raw_peak_loc - fallback_window)
+                fallback_locs = candidate_locs[candidate_locs >= fallback_start]
+                if fallback_locs.size == 0:
+                    fallback_locs = candidate_locs
+                fallback_offsets = fallback_locs - search_start
+                fallback_values = raw_segment[fallback_offsets] if raw_segment is not None else raw_signal[fallback_locs]
+                fallback_idx = int(np.nanargmin(fallback_values))
+                onset_loc = int(fallback_locs[fallback_idx])
+                local_min_at_edge = onset_loc == int(candidate_locs[0])
+                status = 'search_edge_upshoot' if local_min_at_edge else 'local_min_upshoot'
+            elif onset_loc == int(candidate_locs[0]):
+                status = 'search_edge_upshoot'
+        else:
+            onset_loc = int(peak)
+            status = 'insufficient_upshoot'
+
+        baseline, baseline_locs, baseline_window = local_upshoot_value(onset_loc)
+        if not np.isfinite(baseline):
+            status = 'insufficient_upshoot'
+
+        baseline_windows.append(baseline_window)
+        onset_locs.append(onset_loc)
+        baseline_sample_locs.append(baseline_locs)
+
+        if np.isfinite(peak_value) and np.isfinite(baseline):
+            if polarity == 'negative':
+                amplitude = baseline - peak_value
+                invalid_peak_upshoot = peak_value >= baseline
+            else:
+                amplitude = peak_value - baseline
+                invalid_peak_upshoot = peak_value <= baseline
+            if invalid_peak_upshoot:
+                amplitude = np.nan
+                status = 'invalid_peak_upshoot'
+        else:
+            amplitude = np.nan
+
+        raw_peak_locs.append(raw_peak_loc)
+        peak_values.append(peak_value)
+        baselines.append(baseline)
+        amplitudes.append(amplitude)
+        baseline_status.append(status)
+
+    return {
+        'amplitudes_mV': np.asarray(amplitudes, dtype=float),
+        'peak_values_mV': np.asarray(peak_values, dtype=float),
+        'baselines_mV': np.asarray(baselines, dtype=float),
+        'upshoot_values_mV': np.asarray(baselines, dtype=float),
+        'raw_peak_locs': np.asarray(raw_peak_locs, dtype=int),
+        'onset_locs': np.asarray(onset_locs, dtype=int),
+        'upshoot_locs': np.asarray(onset_locs, dtype=int),
+        'baseline_windows': baseline_windows,
+        'onset_search_windows': onset_search_windows,
+        'upshoot_windows': baseline_windows,
+        'baseline_sample_locs': baseline_sample_locs,
+        'upshoot_sample_locs': baseline_sample_locs,
+        'baseline_status': baseline_status,
+        'upshoot_status': baseline_status,
+        'onset_threshold_mV': onset_threshold_mV,
+        'previous_event_interval_ms': np.asarray(previous_event_interval_ms, dtype=float),
+        'next_event_interval_ms': np.asarray(next_event_interval_ms, dtype=float),
+    }
+
+
+def EPSP_detector(
+    voltage_trace,
+    sampling_rate=2e4,
+    folder_file=None,
+    amplitude_threshold=None,
+    noise_multiplier=4,
+    min_amplitude_threshold=0.1,
+    max_amplitude_threshold=1.0,
+    baseline_method='rolling_median',
+    baseline_window_s=0.1,
+    mask_aps=True,
+    valid_mask=None,
+    smoothing_kernel=10,
+    prominence_fraction=0.5,
+    rise_time_range=(0.2e-3, 10e-3),
+    distance=None,
+    polarity='positive',
+    backward_window_s=0.02,
+    peak_window_s=0.001,
+    upshoot_baseline_window_s=0.001,
+    onset_search_window_s=0.080,
+    onset_threshold_mV=None,
+    onset_threshold_fraction=0.2,
+    onset_noise_multiplier=1.0,
+    onset_stable_window_s=0.001,
+    debug_local_baseline_plot=False,
+    debug_event_count=12,
+    debug_plot=False,
+    print_warnings=False,
+):
+    """
+    Detect positive synaptic events from an IC voltage trace.
+
+    The detector is protocol-agnostic. It detects on the continuous
+    baseline-corrected trace. AP and valid masks are applied after detection to
+    reject candidate peaks and calculate the valid-time frequency denominator.
+
+    Parameters:
+        voltage_trace:
+            1D trace or 2D time x sweeps voltage array in mV. 2D arrays are
+            flattened in recording order. For APP_IC, call per sweep or pass a
+            valid_mask from off-step command periods.
+        sampling_rate:
+            Sampling rate in Hz.
+        folder_file:
+            Optional label used only in warning/debug prints.
+        amplitude_threshold:
+            Fixed threshold in mV after baseline correction. If provided, this
+            value is used directly and min/max threshold bounds are ignored.
+        noise_multiplier:
+            Used when amplitude_threshold is None. noise_sd is estimated as
+            MAD / 0.6745, a robust noise estimate commonly used because rare
+            events affect it less than standard deviation.
+        min_amplitude_threshold:
+            Lower bound for automatic thresholds. Default: 0.1 mV.
+        max_amplitude_threshold:
+            Upper bound for automatic thresholds. Default: 1.0 mV. Set to None
+            to disable capping. A warning is returned/printed when the automatic
+            threshold is floored or capped.
+        baseline_method:
+            Drift correction method passed to _baseline_trace.
+        baseline_window_s:
+            Window used by baseline_method.
+        mask_aps:
+            If True, AP regions are detected and candidate EPSPs inside those
+            regions are rejected after EPSP detection.
+        valid_mask:
+            Optional boolean mask with the same shape as voltage_trace after
+            flattening. True means usable. False samples are not counted in
+            frequency and candidate EPSP peaks there are rejected after
+            detection. For APP_IC/IF_IC, build this from off-step command
+            periods outside this generic detector.
+        smoothing_kernel:
+            Gaussian smoothing kernel passed to peak_finder for event detection.
+        prominence_fraction:
+            Prominence threshold as a fraction of amplitude_threshold.
+        rise_time_range:
+            Reserved for EPSP kinetic filtering. It is passed through to
+            peak_finder for API stability, but the current peak_finder does not
+            enforce rise-time filtering yet.
+        distance:
+            Optional minimum event spacing in samples, passed to scipy peaks.
+        polarity:
+            'positive' for EPSPs, 'negative' for IPSP-like downward events.
+        backward_window_s:
+            Window used by peak_finder to estimate local pre-event baseline.
+        peak_window_s:
+            Raw peak search window around each accepted detection point.
+        upshoot_baseline_window_s:
+            Small raw-trace window around the detected EPSP upshoot. Amplitude
+            is measured from this local voltage, so stacked EPSPs are measured
+            incrementally from their own takeoff.
+        onset_search_window_s:
+            Backward window used to find EPSP upshoot/takeoff before the peak.
+            If the selected upshoot is at the left edge of this window, the
+            event is labelled search_edge_upshoot as a QC hint.
+        debug_local_baseline_plot:
+            If True, plot zoomed raw traces showing local upshoot windows,
+            upshoot samples, and upshoot status.
+        debug_plot:
+            If True, plot accepted/rejected peaks and raw amplitudes.
+        print_warnings:
+            If True, print threshold/QC warnings while extracting. Warnings are
+            returned in the output dict either way.
+
+    Returns:
+        dict with frequency_Hz, raw local amplitudes_mV, peak_locs, RMP_mV,
+        baseline_drift_mV, amplitude_threshold_mV, noise_sd_mV, valid_time_s,
+        upshoot_values_mV, peak_values_mV, onset/upshoot locations,
+        upshoot status, ap_peak_locs, warnings, and debug intermediate traces.
+    """
+    dt = 1 / sampling_rate
+
+    def empty_result(warning, frequency=np.nan, valid_time=0, ap_peak_locs=None):
+        warnings_out = [warning] if warning else []
+        return {
+            'frequency_Hz': frequency,
+            'amplitudes_mV': np.asarray([], dtype=float),
+            'peak_locs': np.asarray([], dtype=int),
+            'peak_values_mV': np.asarray([], dtype=float),
+            'local_baselines_mV': np.asarray([], dtype=float),
+            'upshoot_values_mV': np.asarray([], dtype=float),
+            'raw_peak_locs': np.asarray([], dtype=int),
+            'onset_locs': np.asarray([], dtype=int),
+            'upshoot_locs': np.asarray([], dtype=int),
+            'baseline_windows': [],
+            'onset_search_windows': [],
+            'upshoot_windows': [],
+            'baseline_sample_locs': [],
+            'upshoot_sample_locs': [],
+            'baseline_status': [],
+            'upshoot_status': [],
+            'onset_threshold_mV': np.nan,
+            'previous_event_interval_ms': np.asarray([], dtype=float),
+            'next_event_interval_ms': np.asarray([], dtype=float),
+            'RMP_mV': np.nan,
+            'baseline_drift_mV': np.nan,
+            'amplitude_threshold_mV': amplitude_threshold,
+            'noise_sd_mV': np.nan,
+            'valid_time_s': valid_time,
+            'ap_peak_locs': (
+                np.asarray(ap_peak_locs, dtype=int)
+                if ap_peak_locs is not None
+                else np.asarray([], dtype=int)
+            ),
+            'warnings': warnings_out,
+            'debug': {},
+        }
+
+    V_raw = _flatten_trace_time_first(voltage_trace)
+    if V_raw.size == 0 or np.all(np.isnan(V_raw)):
+        return empty_result('empty voltage trace')
+
+    finite_mask = np.isfinite(V_raw)
+    if valid_mask is None:
+        valid_samples_mask = np.ones(V_raw.shape, dtype=bool)
+    else:
+        valid_samples_mask = _flatten_trace_time_first(valid_mask).astype(bool)
+        if valid_samples_mask.shape != V_raw.shape:
+            raise ValueError("valid_mask must match voltage_trace after flattening")
+    valid_samples_mask = valid_samples_mask & finite_mask
+
+    if not np.any(valid_samples_mask):
+        return empty_result('no usable EPSP samples')
+
+    ap_peak_locs = np.array([], dtype=int)
+    ap_mask = np.ones(V_raw.shape, dtype=bool)
+    if mask_aps:
+        V_for_ap = V_raw.copy()
+        V_for_ap[~finite_mask] = np.nanmedian(V_raw[finite_mask])
+        _, ap_peak_locs, _, _ = ap_finder(V_for_ap)
+        ap_mask = mask_ap_regions(V_for_ap, ap_peak_locs, dt)
+    accepted_samples_mask = valid_samples_mask & ap_mask
+
+    if not np.any(accepted_samples_mask):
+        return empty_result(
+            'all EPSP samples masked by AP/valid mask',
+            frequency=0,
+            valid_time=0,
+            ap_peak_locs=ap_peak_locs,
+        )
+
+    # Keep the detection trace continuous; masks are applied to candidate peaks below.
+    V_for_detection = V_raw.copy()
+    V_for_detection[~finite_mask] = np.nanmedian(V_raw[finite_mask])
+    V_valid_for_baseline = V_for_detection.copy()
+    drifting_baseline = _baseline_trace(
+        V_valid_for_baseline,
+        dt,
+        method=baseline_method,
+        window_s=baseline_window_s,
+    )
+    baseline_drift = np.nanmax(drifting_baseline) - np.nanmin(drifting_baseline)
+
+    V_analysis_trace = V_for_detection - drifting_baseline
+    V_variability_trace = V_analysis_trace.copy()
+    V_variability_trace[~finite_mask] = np.nan
+
+    global_baseline = np.nanmedian(np.where(accepted_samples_mask, V_raw, np.nan))
+
+    median_val = np.nanmedian(V_variability_trace)
+    mad = np.nanmedian(np.abs(V_variability_trace - median_val))
+    noise_sd = mad / 0.6745
+
+    warnings_list = []
+    if amplitude_threshold is None:
+        amplitude_threshold = noise_multiplier * noise_sd
+        if not np.isfinite(amplitude_threshold):
+            warning = (
+                f"sEPSP threshold set to {min_amplitude_threshold:.2f} mV "
+                "because noise threshold was non-finite"
+            )
+            warnings_list.append(warning)
+            if print_warnings and folder_file is not None:
+                print(f"[WARNING] {warning} | folder_file: {folder_file}")
+            amplitude_threshold = min_amplitude_threshold
+        if amplitude_threshold < min_amplitude_threshold:
+            original_threshold = amplitude_threshold
+            amplitude_threshold = min_amplitude_threshold
+            warning = (
+                f"sEPSP threshold raised to {min_amplitude_threshold:.2f} mV "
+                f"(noise threshold was {original_threshold:.2f} mV)"
+            )
+            warnings_list.append(warning)
+            if print_warnings and folder_file is not None:
+                print(f"[WARNING] {warning} | folder_file: {folder_file}")
+        if (
+            max_amplitude_threshold is not None
+            and amplitude_threshold > max_amplitude_threshold
+        ):
+            original_threshold = amplitude_threshold
+            amplitude_threshold = max_amplitude_threshold
+            warning = (
+                f"sEPSP threshold capped at {max_amplitude_threshold:.2f} mV "
+                f"(noise threshold was {original_threshold:.2f} mV)"
+            )
+            warnings_list.append(warning)
+            if print_warnings and folder_file is not None:
+                print(f"[WARNING] {warning} | folder_file: {folder_file}")
+
+    peak_locs_all, _, _ = peak_finder(
+        V_analysis_trace,
+        raw_trace=V_for_detection,
+        height=amplitude_threshold,
+        smoothing_kernel=smoothing_kernel,
+        prominence=(amplitude_threshold * prominence_fraction, None),
+        rise_time_range=rise_time_range,
+        width=None,
+        dt=dt,
+        distance=distance,
+        polarity=polarity,
+        backward_window_s=backward_window_s,
+    )
+
+    peak_locs_all = np.asarray(peak_locs_all, dtype=int)
+    accepted_peak_mask = accepted_samples_mask[peak_locs_all] if peak_locs_all.size > 0 else np.array([], dtype=bool)
+    epsp_peak_locs = peak_locs_all[accepted_peak_mask]
+    local_amplitude = _measure_event_local_amplitudes(
+        V_raw,
+        V_analysis_trace - median_val,
+        epsp_peak_locs,
+        accepted_samples_mask,
+        dt,
+        polarity=polarity,
+        peak_window_s=peak_window_s,
+        upshoot_baseline_window_s=upshoot_baseline_window_s,
+        onset_search_window_s=onset_search_window_s,
+        onset_threshold_mV=onset_threshold_mV,
+        onset_threshold_fraction=onset_threshold_fraction,
+        onset_noise_multiplier=onset_noise_multiplier,
+        noise_sd=noise_sd,
+        amplitude_threshold=amplitude_threshold,
+        onset_stable_window_s=onset_stable_window_s,
+    )
+    epsp_amplitudes = local_amplitude['amplitudes_mV']
+    baseline_fail_count = int(np.sum(~np.isfinite(local_amplitude['baselines_mV'])))
+    if baseline_fail_count > 0 and epsp_peak_locs.size > 0:
+        warnings_list.append(
+            f"sEPSP local upshoot unavailable for {baseline_fail_count}/{len(epsp_peak_locs)} events"
+        )
+    search_edge_count = int(np.sum(np.asarray(local_amplitude['upshoot_status']) == 'search_edge_upshoot'))
+    if search_edge_count > 0 and epsp_peak_locs.size > 0:
+        warnings_list.append(
+            f"sEPSP upshoot at search edge for {search_edge_count}/{len(epsp_peak_locs)} events; "
+            "check slow or closely stacked events"
+        )
+    invalid_peak_count = int(np.sum(np.asarray(local_amplitude['upshoot_status']) == 'invalid_peak_upshoot'))
+    if invalid_peak_count > 0 and epsp_peak_locs.size > 0:
+        warnings_list.append(
+            f"sEPSP peak not above upshoot for {invalid_peak_count}/{len(epsp_peak_locs)} events"
+        )
+    valid_samples = np.sum(accepted_samples_mask)
+    valid_time = valid_samples * dt
+    epsp_frequency = len(epsp_peak_locs) / valid_time if valid_time > 0 else 0
+
+    if debug_plot:
+        fig, ax = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+        time_s = np.arange(len(V_raw)) * dt
+
+        # Raw trace and raw local amplitude measurements.
+        ax[0].plot(time_s, V_raw, color='lightgray', linewidth=0.5, label='raw')
+        ax[0].plot(time_s, np.where(accepted_samples_mask, V_raw, np.nan), color='black', linewidth=0.6, label='usable raw')
+        ax[0].axhline(global_baseline, color='gray', linestyle='--', linewidth=0.8, label='global baseline')
+        for p in ap_peak_locs:
+            ax[0].axvline(p * dt, color='red', linewidth=0.6, alpha=0.25)
+        rejected_peak_locs = peak_locs_all[~accepted_peak_mask] if peak_locs_all.size > 0 else []
+        if len(rejected_peak_locs) > 0:
+            ax[0].plot(time_s[rejected_peak_locs], V_raw[rejected_peak_locs], 'x', color='orange', markersize=3, label='rejected')
+        raw_peak_locs = local_amplitude['raw_peak_locs']
+        if raw_peak_locs.size > 0:
+            status_colors = {
+                'raw_rise_upshoot': 'green',
+                'local_min_upshoot': 'royalblue',
+                'search_edge_upshoot': 'darkorange',
+                'invalid_peak_upshoot': 'magenta',
+                'insufficient_upshoot': 'crimson',
+            }
+            status_labels = {
+                'raw_rise_upshoot': 'accepted: raw-rise upshoot',
+                'local_min_upshoot': 'accepted: local-min upshoot',
+                'search_edge_upshoot': 'accepted: search-edge upshoot',
+                'invalid_peak_upshoot': 'invalid: peak <= upshoot',
+                'insufficient_upshoot': 'accepted: no upshoot',
+            }
+            statuses = np.asarray(local_amplitude['baseline_status'])
+            for status, color in status_colors.items():
+                status_mask = statuses == status
+                if np.any(status_mask):
+                    ax[0].plot(
+                        time_s[raw_peak_locs[status_mask]],
+                        local_amplitude['peak_values_mV'][status_mask],
+                        'o',
+                        color=color,
+                        markersize=3,
+                        label=status_labels[status],
+                    )
+            ax[0].plot(time_s[local_amplitude['onset_locs']], V_raw[local_amplitude['onset_locs']], '|', color='purple', markersize=8, label='onset estimate')
+            for raw_peak_loc, baseline, peak_value in zip(
+                raw_peak_locs,
+                local_amplitude['baselines_mV'],
+                local_amplitude['peak_values_mV']
+            ):
+                if np.isfinite(baseline) and np.isfinite(peak_value):
+                    ax[0].vlines(raw_peak_loc * dt, baseline, peak_value, color='green', linewidth=2.4, alpha=0.95, zorder=8)
+        ax[0].set_title(
+            f"{folder_file or ''} raw EPSP amplitudes | "
+            f"threshold={amplitude_threshold:.2f} mV | valid_time={valid_time:.2f} s"
+        )
+        ax[0].set_ylabel("Voltage (mV)")
+        ax[0].legend(loc='best')
+
+        # Processed detection space with mask/rejection context.
+        masked_detection_trace = np.where(~accepted_samples_mask, V_analysis_trace, np.nan)
+        ax[1].plot(time_s, V_analysis_trace, color='blue', linewidth=0.6, label='processed trace')
+        ax[1].plot(time_s, masked_detection_trace, color='tomato', linewidth=0.8, alpha=0.7, label='masked sections')
+        ax[1].axhline(amplitude_threshold, color='gray', linestyle='--', linewidth=0.8, label='threshold')
+        ax[1].axhline(0, color='gray', linestyle=':', linewidth=0.6)
+        if peak_locs_all.size > 0:
+            ax[1].plot(time_s[peak_locs_all], V_analysis_trace[peak_locs_all], '.', color='orange', markersize=3, label='candidate peaks')
+        if epsp_peak_locs.size > 0:
+            ax[1].plot(time_s[epsp_peak_locs], V_analysis_trace[epsp_peak_locs], 'go', markersize=3, label='accepted peaks')
+            ax[1].plot(time_s[local_amplitude['onset_locs']], V_analysis_trace[local_amplitude['onset_locs']], '|', color='purple', markersize=8, label='onset estimate')
+        ax[1].set_title("Processed detection trace: peaks only, amplitudes from raw trace")
+        ax[1].set_xlabel("Time (s)")
+        ax[1].set_ylabel("Baseline-corrected mV")
+        ax[1].legend(loc='best')
+        fig.tight_layout()
+        plt.show()
+
+    if debug_local_baseline_plot and epsp_peak_locs.size > 0:
+        n_events = min(int(debug_event_count), len(epsp_peak_locs))
+        fig, ax = plt.subplots(n_events, 1, figsize=(8, max(2, 1.8 * n_events)), sharex=False)
+        if n_events == 1:
+            ax = [ax]
+        zoom_pre = max(int(0.040 / dt), int(min(onset_search_window_s + 0.010, 0.250) / dt))
+        zoom_post = int(0.030 / dt)
+        for idx in range(n_events):
+            p = int(local_amplitude['raw_peak_locs'][idx])
+            z_start = max(0, p - zoom_pre)
+            z_end = min(len(V_raw), p + zoom_post)
+            x_ms = (np.arange(z_start, z_end) - p) * dt * 1000
+            ax[idx].plot(x_ms, V_raw[z_start:z_end], color='black', linewidth=0.8)
+            base_start, base_end = local_amplitude['baseline_windows'][idx]
+            base_start = max(base_start, z_start)
+            base_end = min(base_end, z_end)
+            search_start, search_end = local_amplitude['onset_search_windows'][idx]
+            search_start = max(search_start, z_start)
+            search_end = min(search_end, z_end)
+            if search_end > search_start:
+                ax[idx].axvspan(
+                    (search_start - p) * dt * 1000,
+                    (search_end - p) * dt * 1000,
+                    color='lightsteelblue',
+                    alpha=0.14,
+                    label='upshoot search' if idx == 0 else None,
+                )
+            if base_end > base_start:
+                ax[idx].axvspan((base_start - p) * dt * 1000, (base_end - p) * dt * 1000, color='gray', alpha=0.2)
+            baseline_locs = local_amplitude['baseline_sample_locs'][idx]
+            baseline_locs = baseline_locs[(baseline_locs >= z_start) & (baseline_locs < z_end)]
+            if baseline_locs.size > 0:
+                ax[idx].plot(
+                    (baseline_locs - p) * dt * 1000,
+                    V_raw[baseline_locs],
+                    '.',
+                    color='slategray',
+                    markersize=2,
+                    label='upshoot samples',
+                )
+            baseline = local_amplitude['baselines_mV'][idx]
+            peak_value = local_amplitude['peak_values_mV'][idx]
+            onset_loc = local_amplitude['onset_locs'][idx]
+            if z_start <= onset_loc < z_end:
+                ax[idx].axvline((onset_loc - p) * dt * 1000, color='purple', linestyle=':', linewidth=1)
+            if np.isfinite(baseline):
+                ax[idx].axhline(baseline, color='gray', linestyle='--', linewidth=0.8)
+            if np.isfinite(peak_value):
+                ax[idx].plot(0, peak_value, 'go', markersize=4)
+            if np.isfinite(baseline) and np.isfinite(peak_value):
+                ax[idx].vlines(0, baseline, peak_value, color='green', linewidth=1.8)
+            ax[idx].set_ylabel("mV")
+            ax[idx].set_title(
+                f"event {idx + 1}: amp={local_amplitude['amplitudes_mV'][idx]:.2f} mV | "
+                f"{local_amplitude['baseline_status'][idx]} | "
+                f"prev={local_amplitude['previous_event_interval_ms'][idx]:.1f} ms | "
+                f"next={local_amplitude['next_event_interval_ms'][idx]:.1f} ms"
+            )
+            if idx == 0:
+                ax[idx].legend(loc='best')
+        ax[-1].set_xlabel("Time from raw peak (ms)")
+        plt.tight_layout()
+        plt.show()
+
+    return {
+        'frequency_Hz': epsp_frequency,
+        'amplitudes_mV': epsp_amplitudes,
+        'peak_locs': epsp_peak_locs,
+        'peak_values_mV': local_amplitude['peak_values_mV'],
+        'local_baselines_mV': local_amplitude['baselines_mV'],
+        'upshoot_values_mV': local_amplitude['upshoot_values_mV'],
+        'raw_peak_locs': local_amplitude['raw_peak_locs'],
+        'onset_locs': local_amplitude['onset_locs'],
+        'upshoot_locs': local_amplitude['upshoot_locs'],
+        'baseline_windows': local_amplitude['baseline_windows'],
+        'onset_search_windows': local_amplitude['onset_search_windows'],
+        'upshoot_windows': local_amplitude['upshoot_windows'],
+        'baseline_sample_locs': local_amplitude['baseline_sample_locs'],
+        'upshoot_sample_locs': local_amplitude['upshoot_sample_locs'],
+        'baseline_status': local_amplitude['baseline_status'],
+        'upshoot_status': local_amplitude['upshoot_status'],
+        'onset_threshold_mV': local_amplitude['onset_threshold_mV'],
+        'previous_event_interval_ms': local_amplitude['previous_event_interval_ms'],
+        'next_event_interval_ms': local_amplitude['next_event_interval_ms'],
+        'RMP_mV': global_baseline,
+        'baseline_drift_mV': baseline_drift,
+        'amplitude_threshold_mV': amplitude_threshold,
+        'noise_sd_mV': noise_sd,
+        'valid_time_s': valid_time,
+        'ap_peak_locs': ap_peak_locs,
+        'warnings': warnings_list,
+        'debug': {
+            'V_raw': V_raw,
+            'V_analysis_trace': V_analysis_trace,
+            'V_variability_trace': V_variability_trace,
+            'drifting_baseline': drifting_baseline,
+            'usable_mask': accepted_samples_mask,
+            'valid_mask': valid_samples_mask,
+            'ap_mask': ap_mask,
+            'baseline_method': baseline_method,
+        },
+    }
     
 
 
@@ -765,16 +1616,20 @@ def ap_characteristics_extractor_subroutine_derivative(folder_file, df_V_arr, sw
             continue
 
         #WIDTH
-        if len(AP_locations_list) < 1 :
-            inter_spike_interval = np.min(np.diff(AP_locations_list)) #in values
+        if len(AP_locations_list) >= 2:
+            isi_values = np.diff(AP_locations_list)
+            isi_values = isi_values[isi_values > 0]
+            inter_spike_interval = int(np.min(isi_values)) if len(isi_values) > 0 else int(0.5 * sampling_rate)
         else:
             inter_spike_interval = int(0.5 * sampling_rate) #500ms if only 1 AP in trace
 
         fwhm_ms = calculate_fwhm(folder_file, V_array, peak_location, upshoot_location, sampling_rate, sec_to_ms, ap_width_min, ap_width_max, inter_spike_interval)
-        if fwhm_ms < ap_width_min or fwhm_ms > ap_width_max:
+        if not np.isfinite(fwhm_ms) or fwhm_ms <= 0:
+            fwhm_ms = np.nan
+        elif fwhm_ms < ap_width_min or fwhm_ms > ap_width_max:
             # print(f"Calculated FWHM is {fwhm_ms:.2f}, outside of plausible limits ({ap_width_min} - {ap_width_max} ms).")
             height_to_width_ratio = AP_height/fwhm_ms
-            if not 100 < height_to_width_ratio < 40: #HARD CODE #TODO
+            if not 40 < height_to_width_ratio < 100: #HARD CODE #TODO
                 # print(f"AP height/width ratio is {height_to_width_ratio:.2f}, outside plausable limmits (40 - 100), poor compensation, setting fwhm to nan.")
                 fwhm_ms = np.nan
             # else: 
@@ -1080,13 +1935,14 @@ def calculate_ap_slope_and_max_dvdt(V_array, upshoot_location, peak_location, vo
 
 #     return slope, max_dvdt, max_dvdt_index
 
-def ap_characteristics_extractor_main(folder_file, V_array): 
+def ap_characteristics_extractor_main(folder_file, V_array, sampling_rate=2e4):
     '''
     Extracts action potential (AP) features from multiple voltage sweeps.
 
     Parameters:
         folder_file : str - Identifier for the data file/folder.
         V_array : 2D array - Voltage traces (time x sweeps).
+        sampling_rate : float - Sampling rate in Hz.
 
     Returns:
         peak_voltages_all : list of float — AP peak voltages (mV)
@@ -1126,7 +1982,7 @@ def ap_characteristics_extractor_main(folder_file, V_array):
     
     for sweep_index in sweep_indices: 
 
-        peak_voltages_, peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_rise_dvdt_ , peak_fw_,  peak_max_dvdt_, peak_decay_dvdt_  =  ap_characteristics_extractor_subroutine_derivative(folder_file, V_array, sweep_index, input_backwards_window=10) #HFD was 10 but its too much 
+        peak_voltages_, peak_locs_corr_, upshoot_locs_, v_thresholds_, peak_heights_ ,  peak_latencies_ , peak_rise_dvdt_ , peak_fw_,  peak_max_dvdt_, peak_decay_dvdt_  =  ap_characteristics_extractor_subroutine_derivative(folder_file, V_array, sweep_index, sampling_rate=sampling_rate, input_backwards_window=10) #HFD was 10 but its too much
 
         if peak_locs_corr_  == [] : # if any list is empty 
             # print(f"No APs in sweep number {sweep_index+1}, index {sweep_index}.")
@@ -1222,7 +2078,7 @@ def ap_characteristics_extractor_main(folder_file, V_array):
 
 
 
-def pAD_detection(folder_file, V_array): #old and unused?
+def pAD_detection(folder_file, V_array, sampling_rate=2e4): #old and unused?
     '''
     Main pAD detection algorithm.
     Input: 
@@ -1232,7 +2088,7 @@ def pAD_detection(folder_file, V_array): #old and unused?
     '''
 
     # Extract AP characteristics
-    peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(folder_file, V_array)
+    peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(folder_file, V_array, sampling_rate=sampling_rate)
 
     #old peak_voltages_all, peak_latencies_all, v_thresholds_all, peak_slope_all, peak_dvdt_max_all, peak_locs_corr_all, upshoot_locs_all, peak_heights_all, peak_fw_all, peak_indices_all, sweep_indices_all = ap_characteristics_extractor_main(folder_file, V_array)
     
@@ -1332,53 +2188,223 @@ def plot_APs_off_step(folder_file, V_array, I_array, peak_locs_corr_all, sweep_i
         print(f"No APs detected off the current step in sweep {sweep_to_plot}.")
 
 
-def extract_FI_x_y(folder_file, V_array, I_array, sampeling_rate):
+def _step_indices_from_command_trace(trace, threshold=1.0):
+    """
+    Detect the active command window relative to the command baseline.
+    """
+    if trace is None:
+        return None, np.nan, None
+
+    trace = np.asarray(trace, dtype=float).flatten()
+    if trace.size < 2 or np.all(np.isnan(trace)):
+        return None, np.nan, None
+
+    edge_n = min(max(5, int(0.05 * trace.size)), max(1, trace.size // 2))
+    baseline = np.nanmedian(np.concatenate([trace[:edge_n], trace[-edge_n:]]))
+    delta = trace - baseline
+    max_delta = np.nanmax(np.abs(delta))
+    if not np.isfinite(max_delta) or max_delta < threshold:
+        return None, np.nan, None
+
+    active_threshold = max(threshold, 0.1 * max_delta)
+    active_indices = np.where(np.abs(delta) >= active_threshold)[0]
+    if active_indices.size < 2:
+        return None, np.nan, None
+
+    segments = np.split(active_indices, np.where(np.diff(active_indices) > 1)[0] + 1)
+    step_indices = max(segments, key=len)
+    if step_indices.size < 2:
+        return None, np.nan, None
+
+    rest_mask = np.ones(trace.size, dtype=bool)
+    rest_mask[step_indices] = False
+    rest_indices = np.where(rest_mask)[0]
+    step_value = np.nanmedian(trace[step_indices]) - baseline
+    return step_indices, step_value, rest_indices
+
+
+def _as_2d_array(array):
+    """Return an array as time x sweeps, or None when missing."""
+    if array is None:
+        return None
+    array = np.asarray(array, dtype=float)
+    if array.size == 0:
+        return None
+    if array.ndim == 1:
+        array = array.reshape(-1, 1)
+    return array
+
+
+def has_protocol_steps(array, threshold=1.0):
+    """True when any sweep has a command/protocol deflection from baseline."""
+    array = _as_2d_array(array)
+    if array is None:
+        return False
+    for sweep in range(array.shape[1]):
+        step_indices, _, _ = _step_indices_from_command_trace(array[:, sweep], threshold=threshold)
+        if step_indices is not None:
+            return True
+    return False
+
+
+def _first_command_step_from_array(command_array):
+    command_array = _as_2d_array(command_array)
+    if command_array is None:
+        return None, np.nan, None
+
+    for sweep in range(command_array.shape[1]):
+        step_indices, step_value, rest_indices = _step_indices_from_command_trace(
+            command_array[:, sweep]
+        )
+        if step_indices is not None:
+            return step_indices, step_value, rest_indices
+    return None, np.nan, None
+
+
+def protocol_array_to_match_V(V_array, protocol_array):
+    """
+    Align protocol/command samples and sweeps to a voltage array.
+
+    A single protocol sweep is tiled across voltage sweeps. If both arrays have
+    multiple unequal sweep counts, both are cropped to their shared sweep count.
+    """
+    V_array = _as_2d_array(V_array)
+    protocol_array = _as_2d_array(protocol_array)
+    if protocol_array is None:
+        return V_array, None
+
+    V_array_adj, protocol_array_adj = normalise_array_length(
+        V_array,
+        protocol_array,
+        columns_match=False,
+        verbose=False
+    )
+    V_array_adj = _as_2d_array(V_array_adj)
+    protocol_array_adj = _as_2d_array(protocol_array_adj)
+
+    if protocol_array_adj.shape[1] == 1 and V_array_adj.shape[1] > 1:
+        protocol_array_adj = np.tile(protocol_array_adj, (1, V_array_adj.shape[1]))
+    elif protocol_array_adj.shape[1] != V_array_adj.shape[1]:
+        min_cols = min(V_array_adj.shape[1], protocol_array_adj.shape[1])
+        V_array_adj = V_array_adj[:, :min_cols]
+        protocol_array_adj = protocol_array_adj[:, :min_cols]
+
+    return V_array_adj, protocol_array_adj
+
+
+def command_array_to_match_V(V_array, command_array):
+    """Return command array aligned to voltage array, preserving per-sweep commands."""
+    _, command_array_adj = protocol_array_to_match_V(V_array, command_array)
+    return command_array_adj
+
+
+def _match_command_array_to_v(V_array, command_array):
+    """Backward-compatible alias for command_array_to_match_V."""
+    return command_array_to_match_V(V_array, command_array)
+
+
+def extract_FI_x_y(
+    folder_file,
+    V_array,
+    I_array,
+    sampeling_rate,
+    peak_locs_corr_all=None,
+    sweep_indices_all=None,
+    command_array=None,
+    return_details=False
+):
     '''
-    Extracts data for Frequency-Current (FI) relationship from voltage (V_array) and current (I_array) recordings.
+    Extracts data for Frequency-Current (FI) relationship from voltage recordings.
 
     Input:
         V_array (np.ndarray):  2D array containing voltage recordings for different current steps (sweeps).
-        I_array (np.ndarray): 2D array containing current recordings for different current steps (sweeps).
-        peak_locs_corr_all (list): peak locations for folder_file.
-        sweep_indices_all (list): indices of sweeps corresponding to each peak in peak_locs_corr_all.
+        I_array (np.ndarray): measured current, used only as a fallback protocol source when command_array is absent.
+        peak_locs_corr_all (list, optional): AP peak locations already extracted for folder_file.
+        sweep_indices_all (list, optional): Sweep index for each precomputed AP peak.
+        command_array (np.ndarray, optional): Clamp command used for step timing and size when present.
 
     Returns:
         step_current_values (list): List of injected current values in picoamperes (pA) for each sweep.
         ap_counts (list): List of action potential counts for each sweep.
         V_rest (float): Average resting membrane potential (in millivolts) calculated when no current is injected.
     '''
-    V_array_adj, I_array_adj = normalise_array_length(V_array, I_array, columns_match=True)
+    V_array_adj, protocol_array, step_source = select_protocol_array(
+        V_array,
+        command_array=command_array,
+        I_array=I_array,
+        clean_I_fallback=False
+    )
+    if protocol_array is None:
+        print(f"No step detected in {folder_file}, unable to calculate FI properties.")
+        if return_details:
+            return np.nan, np.nan, np.nan, np.nan, {
+                "used_command_array_for_steps": False,
+                "used_I_array_fallback": False,
+                "step_source": step_source,
+            }
+        return np.nan, np.nan, np.nan, np.nan
+
+    use_precomputed_aps = peak_locs_corr_all is not None and sweep_indices_all is not None
+    peaks_by_sweep = {}
+    if use_precomputed_aps:
+        for peak_loc, sweep_index in zip(peak_locs_corr_all, sweep_indices_all):
+            try:
+                peaks_by_sweep.setdefault(int(sweep_index), []).append(int(peak_loc))
+            except (TypeError, ValueError):
+                continue
 
     I_steps = [] 
     AP_frequencies_Hz = []
     V_rest_values = []
     off_step_peak_locs = [] # off step
 
+    template_step_indices, _, template_rest_indices = _first_command_step_from_array(protocol_array)
 
-    for sweep in range(I_array_adj.shape[1]):
-        I_sweep = I_array_adj[:, sweep]
+    for sweep in range(protocol_array.shape[1]):
+        protocol_sweep = protocol_array[:, sweep]
         V_sweep = V_array_adj[:, sweep]
 
-        peak_voltages_all, peak_latencies_all  , v_thresholds_all  , peak_rise_all  , peak_max_dvdt_all,  peak_locs_corr_all , upshoot_locs_all  , peak_heights_all  , peak_fw_all   , peak_indices_all , sweep_indices_all , peak_decay_all = ap_characteristics_extractor_main(folder_file, V_sweep)        
-
-        # index I_step
-        non_zero_indices = np.where(I_sweep != 0)[0]
-        if len(non_zero_indices) == 0:
-            I_step = 0
-            next_I_sweep = I_array_adj[:, sweep-1]
-            non_zero_indices = np.where(next_I_sweep != 0)[0]
-            V_rest_indices = np.where(next_I_sweep == 0)[0]
-            if len(non_zero_indices) == 0:
-                print(f"No step detected in {folder_file}, unable to calculate FI properties.")
-                return np.nan, np.nan, np.nan, np.nan
+        if use_precomputed_aps:
+            sweep_peak_locs = peaks_by_sweep.get(sweep, [])
         else:
-            I_step = I_sweep[non_zero_indices[0]+1]
-            I_step = int(round(I_step / 10.0)) * 10 # round to nearest 10pA
-            V_rest_indices = np.where(I_sweep == 0)[0]
+            (
+                peak_voltages_all,
+                peak_latencies_all,
+                v_thresholds_all,
+                peak_rise_all,
+                peak_max_dvdt_all,
+                sweep_peak_locs,
+                upshoot_locs_all,
+                peak_heights_all,
+                peak_fw_all,
+                peak_indices_all,
+                sweep_indices_all,
+                peak_decay_all,
+            ) = ap_characteristics_extractor_main(folder_file, V_sweep, sampling_rate=sampeling_rate)
+
+        # index protocol step
+        non_zero_indices, I_step, V_rest_indices = _step_indices_from_command_trace(protocol_sweep)
+        if non_zero_indices is None:
+            if template_step_indices is None:
+                print(f"No step detected in {folder_file}, unable to calculate FI properties.")
+                if return_details:
+                    return np.nan, np.nan, np.nan, np.nan, {
+                        "used_command_array_for_steps": step_source == "command_array",
+                        "used_I_array_fallback": step_source == "I_array_fallback",
+                        "step_source": step_source,
+                    }
+                return np.nan, np.nan, np.nan, np.nan
+            non_zero_indices = template_step_indices
+            V_rest_indices = template_rest_indices
+            I_step = 0
+        I_step = int(round(I_step / 10.0)) * 10 # round to nearest 10pA
         I_steps.append(int(I_step))
 
         # f_Hz
-        ap_on_step = len([peak_loc for peak_loc in peak_locs_corr_all if non_zero_indices[0] <= peak_loc <= non_zero_indices[-1]])        
+        ap_on_step = sum(
+            1 for peak_loc in sweep_peak_locs
+            if non_zero_indices[0] <= peak_loc <= non_zero_indices[-1]
+        )
         setep_in_seconds = len(non_zero_indices)/sampeling_rate
         ap_frequency_Hz = ap_on_step/setep_in_seconds
         AP_frequencies_Hz.append(ap_frequency_Hz)
@@ -1390,7 +2416,7 @@ def extract_FI_x_y(folder_file, V_array, I_array, sampeling_rate):
 
 
         # Check for spikes off the current step
-        ap_off_step = [peak for peak in peak_locs_corr_all if peak < (non_zero_indices[0]) or peak > (non_zero_indices[-1]+10)] # 10ms buffer added after step
+        ap_off_step = [peak for peak in sweep_peak_locs if peak < (non_zero_indices[0]) or peak > (non_zero_indices[-1]+10)] # 10ms buffer added after step
         if ap_off_step:
             # print(f"APs detected off current step at {np.mean(V_sweep[V_rest_indices]):.2f}mV in sweep {sweep+1}. ") #TODO 
             # plot_APs_off_step(folder_file, V_array, I_array, peak_locs_corr_all, sweep_indices_all, sweep_to_plot=sweep)
@@ -1399,6 +2425,12 @@ def extract_FI_x_y(folder_file, V_array, I_array, sampeling_rate):
 
     V_rest = np.nanmean(V_rest_values) if len(V_rest_values) > 0 else np.nan
 
+    if return_details:
+        return I_steps , AP_frequencies_Hz, V_rest , off_step_peak_locs, {
+            "used_command_array_for_steps": step_source == "command_array",
+            "used_I_array_fallback": step_source == "I_array_fallback",
+            "step_source": step_source,
+        }
     return I_steps , AP_frequencies_Hz, V_rest , off_step_peak_locs
 
 
@@ -1467,6 +2499,32 @@ def denoise_steps(I_array_adj):
     return denoised
 
 
+def select_protocol_array(V_array, command_array=None, I_array=None, clean_I_fallback=True):
+    """
+    Return the best available protocol trace aligned to V_array.
+
+    command_array is preferred because it is the intended clamp command. If it
+    is missing, measured I_array can be cleaned and used as a legacy fallback
+    to infer protocol timing/size. Returns (V_array_adj, protocol_array, source).
+    """
+    V_array = _as_2d_array(V_array)
+    V_command, command_array_adj = protocol_array_to_match_V(V_array, command_array)
+    if has_protocol_steps(command_array_adj):
+        return V_command, command_array_adj, "command_array"
+
+    measured_protocol = _as_2d_array(I_array)
+    if measured_protocol is not None:
+        measured_protocol = measured_protocol.copy()
+        if clean_I_fallback:
+            measured_protocol, _ = correct_I_offset_IF(measured_protocol)
+            measured_protocol = denoise_steps(measured_protocol)
+        V_I, I_array_adj = protocol_array_to_match_V(V_array, measured_protocol)
+        if has_protocol_steps(I_array_adj):
+            return V_I, I_array_adj, "I_array_fallback"
+
+    return V_array, None, "missing"
+
+
 # def correct_current_offset_and_denoise(I_array_adj, folder_file, threshold_pA=1.0):
 #     """
 #     Denoises and baseline-corrects I_array_adj.
@@ -1502,7 +2560,7 @@ def denoise_steps(I_array_adj):
 
 
 
-def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 3):
+def FI_slope_and_rheobase(folder_file, x, y, min_consecutive=3, return_details=False, verbose=True):
     """
     Calculate IF slope and rheobase threshold based on the first APs.
     
@@ -1512,8 +2570,31 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 3):
         y (np.ndarray): Firing rate (Hz).
     
     Returns:
-        tuple: (FI_slope, rheobase_threshold, valid_FP=True ) or (np.nan, np.nan, False) if failed.
+        tuple: (FI_slope, rheobase_threshold, valid_FP) by default.
+        If return_details=True, adds a fourth fit-details dictionary.
     """
+
+    fit_details = {
+        "status": None,
+        "method": None,
+        "fit_quality": np.nan,
+        "last_I": np.nan,
+        "first_I": np.nan,
+        "fit_points": np.nan,
+    }
+
+    def finish(slope, rheo, valid, status, method=None, message=None, **updates):
+        details = fit_details.copy()
+        details.update({
+            "status": status,
+            "method": method,
+        })
+        details.update(updates)
+        if message and verbose:
+            print(message)
+        if return_details:
+            return slope, rheo, valid, details
+        return slope, rheo, valid
 
     def valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I, min_fit_quality=0.5, margin_pA=5):
         """
@@ -1541,16 +2622,42 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 3):
         rheo = -intercept / slope if slope != 0 else np.nan
         if not np.isfinite(rheo):
             return False, rheo, fit_quality
-        
+
         return (fit_quality <= min_fit_quality and last_I <= rheo < first_I+margin_pA), rheo, fit_quality
 
-    
-    list_of_non_zero = np.flatnonzero(y) #indexes with APs
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.ndim != 1 or y.ndim != 1 or len(x) != len(y) or len(x) == 0:
+        return finish(
+            np.nan,
+            np.nan,
+            False,
+            "invalid_input",
+            message=f"Invalid FI input for {folder_file}."
+        )
+
+    if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
+        return finish(
+            np.nan,
+            np.nan,
+            False,
+            "non_finite",
+            message=f"Non-finite values detected in {folder_file}. Skipping fit."
+        )
+
+    list_of_non_zero = np.flatnonzero(y > 0) #indexes with APs
     if len(list_of_non_zero) == 0:
-        print(f'NO APs DETECTED: {folder_file} check FP data or AP health.')
-        return np.nan, np.nan, False
+        return finish(
+            np.nan,
+            np.nan,
+            False,
+            "no_APs",
+            message=f'NO APs DETECTED: {folder_file} check FP data or AP health.'
+        )
 
     # Find first sustained APs (ignore single AP outliers)
+    first_idx = None
+    seq_len = 0
     for i in range(len(list_of_non_zero) - min_consecutive + 1):
         if np.all(np.diff(list_of_non_zero[i:i + min_consecutive]) == 1):
             first_idx = list_of_non_zero[i]
@@ -1561,34 +2668,55 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 3):
             seq_len = seq_end - first_idx + 1
             break        
     else:
-        print(f"No consecutive APs detected: {folder_file}")
-        return np.nan, np.nan, False
+        return finish(
+            np.nan,
+            np.nan,
+            False,
+            "no_consecutive_APs",
+            message=f"No consecutive APs detected: {folder_file}"
+        )
 
     if first_idx is None or first_idx == 0:
-        print(f'Cannot determine last I without APs for: {folder_file}')
-        return np.nan, np.nan, False
+        return finish(
+            np.nan,
+            np.nan,
+            False,
+            "missing_last_no_AP_step",
+            message=f'Cannot determine last I without APs for: {folder_file}'
+        )
 
     last_I = x[first_idx - 1] # last current step with NO spikes
     first_I = x[first_idx] # first current step WITH spikes
 
+    last_slope = np.nan
+    last_fit_quality = np.nan
+    last_points = np.nan
 
     for points in range(min(7, seq_len)  , min_consecutive - 1, -1):
         x_fit = x[first_idx-1:first_idx + points]
         y_fit = y[first_idx-1:first_idx + points]
         y_fit = np.round(y_fit, 3)
 
-        if not (np.all(np.isfinite(x_fit)) and np.all(np.isfinite(y_fit))):
-            print(f"Non-finite values detected in {folder_file}. Skipping fit.")
-            return np.nan, np.nan, False
-
         var_y = np.var(y_fit)
         # if var_y == 0 or np.isnan(var_y):
         if var_y < (np.mean(y_fit) * 1e-6) ** 2 or np.isnan(var_y): 
-            print(f"IF_slope incalculable non vairable firing frequency for {folder_file}.")
-            return np.nan, np.nan, False
+            rheo = (last_I + first_I) / 2
+            return finish(
+                np.nan,
+                rheo,
+                True,
+                "fallback_flat_firing",
+                method="bracket_midpoint",
+                message=f"IF_slope incalculable non-variable firing frequency for {folder_file}; using bracket midpoint rheobase.",
+                last_I=last_I,
+                first_I=first_I,
+                fit_points=len(x_fit)
+            )
         
         # OPTION 1
         slope, intercept, r_value, p_value, std_err = linregress(x_fit, y_fit)
+        last_slope = slope
+        last_points = len(x_fit)
 
         # OPTION 2
         # with warnings.catch_warnings():
@@ -1601,19 +2729,51 @@ def FI_slope_and_rheobase(folder_file, x, y, min_consecutive = 3):
         # slope, intercept = np.linalg.lstsq(A, y_fit, rcond=None)[0]
 
         # plot_FI_curve_and_fit(folder_file, x, y, slope, intercept) 
-        is_good_fit, rheo, _ = valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I)
+        is_good_fit, rheo, fit_quality = valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I)
+        last_fit_quality = fit_quality
         
 
         if is_good_fit:
-            return slope, rheo, True
+            return finish(
+                slope,
+                rheo,
+                True,
+                "ran",
+                method="linear_intercept",
+                fit_quality=fit_quality,
+                last_I=last_I,
+                first_I=first_I,
+                fit_points=len(x_fit)
+            )
 
-    # Last chance: valid fit but rheobase is out of bounds (assume threshold between steps)
-    is_still_good, _, fit_quality = valid_fit(slope, intercept, x_fit, y_fit, var_y, last_I, first_I)
-    if is_still_good or last_I > (-intercept / slope):
-        return slope, last_I, True
+    # Fallback: threshold is bracketed even when the early FI curve is not linear enough.
+    bracket_rheo = (last_I + first_I) / 2
+    if np.isfinite(last_slope) and last_slope > 0:
+        return finish(
+            last_slope,
+            bracket_rheo,
+            True,
+            "fallback_bracket",
+            method="bracket_midpoint",
+            message=f"Unable to calculate strict FI fit for {folder_file}; using bracket midpoint rheobase.",
+            fit_quality=last_fit_quality,
+            last_I=last_I,
+            first_I=first_I,
+            fit_points=last_points
+        )
 
-    print(f"Unable to calculate FI slope or rheobase threshold with sufficient quality fit for {folder_file}.")
-    return np.nan, np.nan, False
+    return finish(
+        np.nan,
+        bracket_rheo,
+        True,
+        "fallback_bracket_no_slope",
+        method="bracket_midpoint",
+        message=f"Unable to calculate FI slope for {folder_file}; using bracket midpoint rheobase.",
+        fit_quality=last_fit_quality,
+        last_I=last_I,
+        first_I=first_I,
+        fit_points=last_points
+    )
 
 
 
@@ -1737,89 +2897,122 @@ def APP_splitter(V_array_or_list, drug_in, drug_out):
         return [], [], V_array_or_list  # all wash values if no drug in or out 
 
 
-def mean_RMP_APP_calculator(V_array, drug_in, drug_out, I_array=None):
+def mean_RMP_APP_calculator(V_array, drug_in, drug_out, I_array=None, command_array=None, folder_file=None, print_warnings=False):
     '''
     inputs: V_array (2D array of V_df),
             drug_in  :  integer , sweep number when drug was applied (included in APP)
             drug_out :  integer , sweep number when drug was washed out (included in WASH)
+            command_array : protocol/command trace used to exclude command steps from RMP.
+            I_array : measured current, used only as a fallback protocol source.
 
     return: input_R_PRE, input_R_APP, input_R_WASH
             lists of mean RMP for each sweep in PRE APP or WASH
     
     '''
-    # V_array_cleaned  = spike_remover(V_array) #NOT WORKING JJB210427/t8 # OLD 26_5_25 changed to nan not average
-    V_array_cleaned  = spike_remover_nan(V_array)
-
-    if I_array is None or (I_array == 0).all() :
-        # print(" No I injected or no I data, taking RMP as all.")
-        # list of means of every column
-        mean_RMP_sweep_list  = list(np.nanmean(V_array_cleaned  , axis = 0))
-        
-    else: # I step in I_array
-        # print('I step detected, averaging V when no I injected for each sweep.')
-        I_array_adj, V_array_adj = I_array_to_match_V (V_array, I_array)
-        zero_current_mask = (I_array_adj == 0) #boolian mask where I == 0
-        V_masked = np.where(zero_current_mask, V_array_adj, np.nan) # V where I -- 0
-        mean_RMP_sweep_list = np.nanmean(V_masked, axis=0).tolist()
-        
+    mean_RMP_sweep_list = sweep_mean_RMP_calculator(
+        V_array,
+        command_array=command_array,
+        I_array=I_array,
+        folder_file=folder_file,
+        print_warnings=print_warnings,
+    )
 
     mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH = APP_splitter(mean_RMP_sweep_list, drug_in, drug_out)
     return mean_RMP_PRE, mean_RMP_APP, mean_RMP_WASH
 
-def sweep_mean_RMP_calculator(V_array, I_array=None):
+def sweep_mean_RMP_calculator(V_array, command_array=None, I_array=None, folder_file=None, print_warnings=False):
     '''
     inputs: V_array (2D array of voltage)
-            I_array (2D array of current)
+            command_array (2D array of clamp command, preferred)
+            I_array (2D array of measured current, fallback only)
 
     return: list of mean RMP for each sweep 
     
     '''
-    V_array_cleaned  = spike_remover_nan(V_array)
+    V_array_cleaned = spike_remover_nan(_as_2d_array(V_array))
+    V_array_adj, protocol_array, source = select_protocol_array(
+        V_array_cleaned,
+        command_array=command_array,
+        I_array=I_array,
+        clean_I_fallback=True,
+    )
 
-    if I_array is None or (I_array == 0).all() :
-        # print(" No I injected or no I data, taking RMP as all.")
-        # list of means of every column
-        mean_RMP_sweep_list  = list(np.nanmean(V_array_cleaned  , axis = 0))
-        
-    else: # I step in I_array
-        # print('I step detected, averaging V when no I injected for each sweep.')
-        I_array_adj, V_array_adj = I_array_to_match_V (V_array, I_array)
-        zero_current_mask = (I_array_adj == 0) #boolian mask where I == 0
-        V_masked = np.where(zero_current_mask, V_array_adj, np.nan) # V where I -- 0
-        mean_RMP_sweep_list = np.nanmean(V_masked, axis=0).tolist()
+    if protocol_array is None:
+        if print_warnings and folder_file is not None:
+            print(
+                f"[WARNING] APP RMP whole-sweep fallback | folder_file: {folder_file} | "
+                "no command_array or measured-I protocol steps detected"
+            )
+        return list(np.nanmean(V_array_cleaned, axis=0))
+
+    mean_RMP_sweep_list = []
+    for sweep in range(V_array_adj.shape[1]):
+        V_sweep = V_array_adj[:, sweep]
+        protocol_sweep = protocol_array[:, sweep]
+        _, _, rest_indices = _step_indices_from_command_trace(protocol_sweep)
+        if rest_indices is None or len(rest_indices) == 0:
+            mean_RMP_sweep_list.append(np.nanmean(V_sweep))
+        else:
+            mean_RMP_sweep_list.append(np.nanmean(V_sweep[rest_indices]))
     return mean_RMP_sweep_list
 
 
-def sweep_mean_inputR_calculator(V_array, I_array):
+def sweep_mean_inputR_calculator(V_array, command_array=None, I_array=None, folder_file=None, print_warnings=False):
     '''
     input:      V_array 2D array of voltage
-                I_array 2D array current to match voltage 
+                command_array 2D command trace, preferred for step timing/size
+                I_array 2D measured current, fallback only
 
     returns :   list: mean input R for each sweep = current injected / change in V 
     '''
-    I_sweep = getI_array_sweep(I_array)
+    original_V = _as_2d_array(V_array)
+    V_array_adj, protocol_array, source = select_protocol_array(
+        original_V,
+        command_array=command_array,
+        I_array=I_array,
+        clean_I_fallback=True,
+    )
+    if protocol_array is None:
+        if print_warnings and folder_file is not None:
+            print(
+                f"[WARNING] APP inputR skipped | folder_file: {folder_file} | "
+                "no command_array or measured-I protocol steps detected"
+            )
+        return [np.nan] * original_V.shape[1]
+
     input_R_ohms_V_array = []
     
-    for index, V_sweep in enumerate(V_array.T):  # Transpose V_array to iterate over columns/sweeps
+    for index, V_sweep in enumerate(V_array_adj.T):  # Transpose V_array to iterate over columns/sweeps
         
         if index < 1:  # skip first sweep (or first 2 if you change <1 to <2)
             input_R_ohms_V_array.append(np.nan)
             continue
 
-        V_sweep, I_sweep = normalise_array_length(V_sweep, I_sweep)
         V_cleaned = spike_remover_nan(V_sweep)
 
         V_cleaned = V_cleaned.flatten()
-        I_sweep = I_sweep.flatten()
 
         try:
             # fetch delta_V
-            steady_state, hyper, first_current_point, last_current_point = steady_state_value(V_sweep, I_sweep)
-            rmp = np.nanmean(V_cleaned[I_sweep == 0])
+            protocol_sweep = protocol_array[:, index]
+            step_indices, step_value, rest_indices = _step_indices_from_command_trace(protocol_sweep)
+            if step_indices is None or rest_indices is None:
+                input_R_ohms_V_array.append(np.nan)
+                continue
+
+            steady_state, hyper, first_current_point, last_current_point = steady_state_value(V_sweep, protocol_sweep, step_value)
+            if first_current_point is None or last_current_point is None:
+                input_R_ohms_V_array.append(np.nan)
+                continue
+
+            rmp = np.nanmean(V_cleaned[rest_indices])
             delta_V_mV = abs(steady_state - rmp)
 
             # fetch I injected
-            delta_I_pA = abs(np.unique(I_sweep[I_sweep != 0])[0])
+            delta_I_pA = abs(step_value)
+            if not np.isfinite(delta_I_pA) or delta_I_pA < 1:
+                input_R_ohms_V_array.append(np.nan)
+                continue
             delta_I_A = delta_I_pA * 1e-12  # convert pA to A
             delta_V_V = delta_V_mV * 1e-3  # convert mV to V
 

@@ -18,7 +18,7 @@ color_dict = {
               "F":'pink',
               #stress models
               "CTR": 'lightgrey',
-              "ELS": 'orange',
+              "ELS": 'pink',
               "SD": 'lightslategrey',
               "HCD": 'dodgerblue',
               #drugs
@@ -40,14 +40,21 @@ color_dict = {
                 #AP figures
               "RA":"orange",
               "Somatic":"blue",
-                #APP figure
-              "PRE":"azure",
+              #APP figure
+              "PRE":"#4ED477",
+              "POST": "#4EA7D4",
               "APP": "teal",
               "WASH":"cadetblue", 
               'I_display':'cornflowerblue',
               #behaviour
               'none':"#E3E3E3",
-              'EPM':"#FA6B40" } 
+              'EPM':"#FA6B40",
+              #cell_subtype
+              '2A-': "#FA7840",
+              '2A+':"#FAAC40",
+              '1A-': "#40ACFA",
+              '1A+': "#4640FA"
+              }
 
 # unit_dict = {'max_firing': 'Firing_(Hz)', 
 #             'voltage_threshold':'Voltage_Threshold_(mV)', 
