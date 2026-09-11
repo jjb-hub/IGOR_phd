@@ -1,6 +1,8 @@
 import os
 import warnings
 import re
+import hashlib
+import json
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import Optional
@@ -49,6 +51,7 @@ class Project(Cachable):
         self.output_dir = self._checkFileSystem("output")
         self.figure_output_dir = self._checkFileSystem("figures")
         self.feature_df = self.load_feature_xlsx('features')
+        self.validate_unique_folder_files()
         self.check_project_type()
         self.classify_independant_variables()
             
@@ -59,6 +62,7 @@ class Project(Cachable):
                 unique_types = set(self.feature_df["data_type"].dropna().unique())
                 if "APP_IC" in unique_types:
                     self.project_type = "application"
+                    self.validate_application_time_column()
                 elif unique_types & {"st_VC", "ramp_IC", "IV_VC", "spont_IC", "IF_IC"}:
                     self.project_type = "intrinsic_properties"
                 else:
@@ -66,6 +70,76 @@ class Project(Cachable):
             else:
                 raise ValueError("features.xlsx must contain 'data_type' column.")
         # print(f"Project type set to: {self.project_type}")
+
+    def validate_unique_folder_files(self):
+        """
+        Require one features.xlsx row per raw recording.
+        """
+        if "folder_file" not in self.feature_df.columns:
+            return
+
+        folder_files = self.feature_df["folder_file"]
+        duplicate_rows = self.feature_df[folder_files.notna() & folder_files.duplicated(keep=False)]
+        if duplicate_rows.empty:
+            return
+
+        display_cols = [
+            col for col in [
+                "folder_file",
+                "cell_id",
+                "data_type",
+                "time",
+                "treatment",
+                "R_series",
+                "I_set",
+            ]
+            if col in duplicate_rows.columns
+        ]
+        examples = duplicate_rows[display_cols].head(12).to_dict("records")
+        message = (
+            f"features.xlsx contains duplicate folder_file values in project {self.project}. "
+            f"Each raw recording should have one row. Please check: {examples}"
+        )
+        print(f"[WARNING] {message}")
+        raise ValueError(message)
+
+    def validate_application_time_column(self):
+        """
+        Application feature sheets must explicitly label PRE/POST in ``time``.
+        """
+        if "time" not in self.feature_df.columns:
+            message = (
+                f"Application project {self.project} requires a 'time' column "
+                "in features.xlsx with PRE/POST values."
+            )
+            print(f"[WARNING] {message}")
+            raise ValueError(message)
+
+        time_values = self.feature_df["time"]
+        blank_rows = time_values.isna() | (time_values.astype(str).str.strip() == "")
+        if blank_rows.any():
+            folder_files = self.feature_df.loc[blank_rows, "folder_file"].dropna().head(8).tolist()
+            message = (
+                f"Application project {self.project} has blank 'time' values in features.xlsx. "
+                f"Expected PRE or POST. Example folder_files: {folder_files}"
+            )
+            print(f"[WARNING] {message}")
+            raise ValueError(message)
+
+        labels = time_values.astype(str).str.strip().str.upper()
+        invalid_rows = ~labels.isin(["PRE", "POST"])
+        if invalid_rows.any():
+            examples = (
+                self.feature_df.loc[invalid_rows, ["folder_file", "time"]]
+                .head(8)
+                .to_dict("records")
+            )
+            message = (
+                f"Application project {self.project} has invalid 'time' values in features.xlsx. "
+                f"Expected PRE or POST. Examples: {examples}"
+            )
+            print(f"[WARNING] {message}")
+            raise ValueError(message)
 
     def classify_independant_variables(self):
         """
@@ -185,11 +259,14 @@ class Project(Cachable):
             "data_type",
             "error",
             "traceback",
+            "_feature_signature",
+            "_extractor_version",
             "time",
             "valid",
             "I_set",
             "drug_in",
             "drug_out",
+            "sweep_duration_s",
             "ISI_ms",
         ]
 
@@ -202,37 +279,77 @@ class Project(Cachable):
 
         return list(dict.fromkeys(columns))
 
+    def application_time_label(self, row: pd.Series) -> str:
+        """
+        Return explicit PRE/POST phase from an application feature row.
+
+        Application projects require a ``time`` column in features.xlsx so
+        ``treatment`` can remain the drug/group label.
+        """
+        folder_file = row.get("folder_file", "missing") if isinstance(row, pd.Series) else "missing"
+        if not isinstance(row, pd.Series) or "time" not in row.index:
+            message = (
+                f"Application project {self.project} requires a 'time' column "
+                f"in features.xlsx with PRE/POST values. Missing for folder_file: {folder_file}"
+            )
+            print(f"[WARNING] {message}")
+            raise ValueError(message)
+
+        value = row.get("time", np.nan)
+        if pd.isna(value) or str(value).strip() == "":
+            message = (
+                f"Application project {self.project} has blank 'time' in features.xlsx. "
+                f"Expected PRE or POST for folder_file: {folder_file}"
+            )
+            print(f"[WARNING] {message}")
+            raise ValueError(message)
+
+        label = str(value).strip().upper()
+        if label not in {"PRE", "POST"}:
+            message = (
+                f"Application project {self.project} has invalid time '{value}'. "
+                f"Expected PRE or POST for folder_file: {folder_file}"
+            )
+            print(f"[WARNING] {message}")
+            raise ValueError(message)
+        return label
+
+    def application_is_pre(self, row: pd.Series) -> bool:
+        return self.application_time_label(row) == "PRE"
+
     def add_missing_feature_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Add missing feature metadata columns to a cached data-type dataframe.
+        Refresh feature metadata columns on a cached data-type dataframe.
         """
         if "folder_file" not in df.columns:
             return df
 
-        missing_cols = [
+        metadata_cols = [
             col for col in self.feature_metadata_columns()
-            if col not in df.columns and col in self.feature_df.columns
+            if col != "folder_file" and col in self.feature_df.columns
         ]
 
-        if not missing_cols:
+        if not metadata_cols:
             return df
 
         metadata = (
-            self.feature_df[["folder_file"] + missing_cols]
+            self.feature_df[["folder_file"] + metadata_cols]
             .drop_duplicates(subset=["folder_file"])
         )
+
+        refresh_cols = [col for col in metadata_cols if col in df.columns]
+        df = df.drop(columns=refresh_cols)
         return df.merge(metadata, on="folder_file", how="left")
 
     def add_missing_cell_factors(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Add missing project-specific cell/subject factors to a cached cell_df.
+        Refresh project-specific cell/subject factors on a cached cell_df.
         """
         if "cell_id" not in df.columns:
             return df
 
         factor_cols = self.subject_cell_factor_columns()
-        missing_cols = [col for col in factor_cols if col not in df.columns]
-        if not missing_cols:
+        if not factor_cols:
             return df
 
         def unique_or_nan(series):
@@ -244,12 +361,14 @@ class Project(Cachable):
             return values.tolist()
 
         factor_df = (
-            self.feature_df[["cell_id"] + missing_cols]
+            self.feature_df[["cell_id"] + factor_cols]
             .dropna(subset=["cell_id"])
             .groupby("cell_id", as_index=False)
             .agg(unique_or_nan)
         )
 
+        refresh_cols = [col for col in factor_cols if col in df.columns]
+        df = df.drop(columns=refresh_cols)
         return df.merge(factor_df, on="cell_id", how="left")
 
     def _get_extension(self, folder_file: str) -> str:
@@ -463,10 +582,14 @@ class Project(Cachable):
     
     def load_feature_xlsx(self, filename: str):
         """Loads data from cache or an Excel file."""
-        if self.isCached(filename):
-            return self.getCache(filename)
-        
         filepath = os.path.join(self.input_dir, f"{filename}.xlsx")
+        cache_path = os.path.join(self.cache_dir, f"{self.sanitize_filename(filename)}.pkl")
+
+        if self.isCached(filename):
+            if not os.path.exists(filepath) or os.path.getmtime(cache_path) >= os.path.getmtime(filepath):
+                return self.getCache(filename)
+            print(f"[INFO] {filepath} is newer than cache; reloading {filename}.")
+
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Excel file {filename} not found in {self.input_dir}")
 
@@ -825,30 +948,250 @@ class EphysData (Project):
     data_type: str = None #defined by child class
     filename: str = None # defined by child class
     print_warnings: bool = False
+    extractor_version: int = 1
+    extraction_feature_columns: list = None
+    cache_internal_columns: tuple = ("_feature_signature", "_extractor_version")
 
     def __post_init__(self):
         super().__post_init__()
         self.initial_columns = self.feature_metadata_columns(self.initial_columns)
-        if  self.isCached(self.filename): 
-            self.df = self.getCache(self.filename)
-            if self.filename == "cell_df":
-                self.df = self.add_missing_cell_factors(self.df)
-            else:
-                self.df = self.add_missing_feature_metadata(self.df)
-        else:
-            self.df = self.generate()
+        self.df = self.update()
    
-    def generate(self):
-        ''' generic generator for dfs'''
+    def update(self):
+        """
+        Bring the cached extractor dataframe up to date.
 
-        df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns]   
+        Existing cached rows are reused when their ``folder_file``,
+        feature-signature and extractor-version still match the current
+        features.xlsx state. New or changed rows are extracted and merged back
+        into the dataframe in features.xlsx order.
+        """
+        return self._update_cache(rerun_all=False)
 
-        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
-        # df = df.progress_apply(lambda row: self._debug_extraction(row, self.process), axis=1) # raise errors
-        additional_columns = [col for col in df.columns if col not in self.initial_columns]
-        df = df[self.initial_columns + additional_columns]
+    def regenerate(self):
+        """Rerun all rows for this extractor and overwrite its cache."""
+        return self._update_cache(rerun_all=True)
+
+    def generate(self, force: bool = False, update: bool = True):
+        """
+        Backwards-compatible wrapper.
+
+        Prefer ``update()`` for normal use and ``regenerate()`` when all rows
+        should be rerun.
+        """
+        if force or not update:
+            return self.regenerate()
+        return self.update()
+
+    def _update_cache(self, rerun_all: bool = False):
+        """Internal extractor cache updater."""
+        input_df = self._feature_rows_for_extraction()
+        if rerun_all or not self.isCached(self.filename):
+            df = self._extract_rows(input_df)
+            self.cache(self.filename, df)
+            return df
+
+        cached_df = self.getCache(self.filename)
+        if self._cannot_incrementally_update(cached_df, input_df):
+            df = self._extract_rows(input_df)
+            self.cache(self.filename, df)
+            return df
+
+        cached_df, tracking_backfilled = self._backfill_cache_tracking_columns(cached_df, input_df)
+        rows_to_extract, reason_counts = self._rows_needing_extraction(input_df, cached_df)
+
+        if rows_to_extract.empty:
+            df = self._refresh_cached_rows(cached_df, input_df)
+            df = self._order_extractor_columns(df)
+            if tracking_backfilled or self._features_newer_than_cache():
+                self.cache(self.filename, df)
+            return df
+
+        reason_text = ", ".join(
+            f"{reason}: {count}"
+            for reason, count in reason_counts.items()
+            if count
+        )
+        print(
+            f"[INFO] Updating {self.filename}: extracting "
+            f"{len(rows_to_extract)}/{len(input_df)} rows ({reason_text})."
+        )
+
+        extracted_df = self._extract_rows(rows_to_extract)
+        rerun_files = set(rows_to_extract["folder_file"])
+        refreshed_cache = self._refresh_cached_rows(cached_df, input_df)
+        reused_df = refreshed_cache[~refreshed_cache["folder_file"].isin(rerun_files)]
+        df = pd.concat([reused_df, extracted_df], ignore_index=True, sort=False)
+        df = self._sort_like_features(df, input_df)
+        df = self._order_extractor_columns(df)
         self.cache(self.filename, df)
         return df
+
+    def _feature_rows_for_extraction(self) -> pd.DataFrame:
+        """Build current feature rows for this extractor and add cache metadata."""
+        df = self.feature_df[self.feature_df['data_type'] == self.data_type][self.initial_columns].copy()
+        if df.empty:
+            for col in self.cache_internal_columns:
+                df[col] = pd.Series(dtype="object")
+            return df
+
+        df["_feature_signature"] = df.apply(self._feature_signature, axis=1)
+        df["_extractor_version"] = self.extractor_version
+        return df
+
+    def _extract_rows(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Run extraction for the provided feature rows."""
+        if df.empty:
+            return self._order_extractor_columns(df.copy())
+
+        df = df.progress_apply(lambda row: self._handle_extraction(row, self.process), axis=1) # log errors
+        df["_feature_signature"] = df.apply(self._feature_signature, axis=1)
+        df["_extractor_version"] = self.extractor_version
+        return self._order_extractor_columns(df)
+
+    def _order_extractor_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Keep feature columns first, extracted columns next, cache columns last."""
+        if df.empty:
+            return df
+        internal_columns = [col for col in self.cache_internal_columns if col in df.columns]
+        additional_columns = [col for col in df.columns if col not in self.initial_columns]
+        additional_columns = [col for col in additional_columns if col not in internal_columns]
+        ordered_columns = [
+            col for col in self.initial_columns + additional_columns + internal_columns
+            if col in df.columns
+        ]
+        return df[ordered_columns]
+
+    def _cannot_incrementally_update(self, cached_df: pd.DataFrame, input_df: pd.DataFrame) -> bool:
+        """Return True when the cache shape cannot safely be row-updated."""
+        if "folder_file" not in cached_df.columns or "folder_file" not in input_df.columns:
+            return True
+        if input_df["folder_file"].duplicated().any():
+            examples = input_df[input_df["folder_file"].duplicated(keep=False)].head(8).to_dict("records")
+            raise ValueError(
+                f"Duplicate folder_file values in {self.data_type}. "
+                f"Each raw recording should have one features.xlsx row. Examples: {examples}"
+            )
+        return False
+
+    def _backfill_cache_tracking_columns(
+        self,
+        cached_df: pd.DataFrame,
+        input_df: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, bool]:
+        """Add cache tracking columns to older cached dataframes without rerunning them."""
+        cached_df = cached_df.copy()
+        changed = False
+        signature_map = input_df.set_index("folder_file")["_feature_signature"].to_dict()
+
+        if "_feature_signature" not in cached_df.columns:
+            cached_df["_feature_signature"] = cached_df["folder_file"].map(signature_map)
+            changed = True
+        else:
+            missing_signature = cached_df["_feature_signature"].isna()
+            if missing_signature.any():
+                cached_df.loc[missing_signature, "_feature_signature"] = (
+                    cached_df.loc[missing_signature, "folder_file"].map(signature_map)
+                )
+                changed = True
+
+        if "_extractor_version" not in cached_df.columns:
+            cached_df["_extractor_version"] = self.extractor_version
+            changed = True
+        else:
+            missing_version = cached_df["_extractor_version"].isna()
+            if missing_version.any():
+                cached_df.loc[missing_version, "_extractor_version"] = self.extractor_version
+                changed = True
+
+        return cached_df, changed
+
+    def _rows_needing_extraction(
+        self,
+        input_df: pd.DataFrame,
+        cached_df: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, dict]:
+        """Return current feature rows absent from cache or invalidated by tracking columns."""
+        cached_lookup = (
+            cached_df
+            .drop_duplicates(subset=["folder_file"], keep="last")
+            .set_index("folder_file")
+        )
+
+        missing_cache = ~input_df["folder_file"].isin(cached_lookup.index)
+        cached_signature = input_df["folder_file"].map(cached_lookup["_feature_signature"])
+        cached_version = input_df["folder_file"].map(cached_lookup["_extractor_version"])
+
+        feature_changed = (~missing_cache) & (cached_signature != input_df["_feature_signature"])
+        version_changed = (~missing_cache) & (cached_version.astype(str) != str(self.extractor_version))
+        update_mask = missing_cache | feature_changed | version_changed
+
+        reason_counts = {
+            "new": int(missing_cache.sum()),
+            "feature_changed": int(feature_changed.sum()),
+            "version_changed": int(version_changed.sum()),
+        }
+        return input_df[update_mask].copy(), reason_counts
+
+    def _refresh_cached_rows(self, cached_df: pd.DataFrame, input_df: pd.DataFrame) -> pd.DataFrame:
+        """Refresh feature metadata on cached rows while keeping extracted values."""
+        cached_payload = cached_df.drop_duplicates(subset=["folder_file"], keep="last").copy()
+        drop_cols = [
+            col for col in input_df.columns
+            if col != "folder_file" and col in cached_payload.columns
+        ]
+        cached_payload = cached_payload.drop(columns=drop_cols)
+        refreshed = input_df.merge(cached_payload, on="folder_file", how="left")
+        return self._sort_like_features(refreshed, input_df)
+
+    def _sort_like_features(self, df: pd.DataFrame, input_df: pd.DataFrame) -> pd.DataFrame:
+        """Sort extracted rows in the same order as features.xlsx."""
+        if df.empty or "folder_file" not in df.columns:
+            return df
+        order = {folder_file: idx for idx, folder_file in enumerate(input_df["folder_file"])}
+        df = df.copy()
+        df["_feature_order"] = df["folder_file"].map(order)
+        df = df.sort_values("_feature_order").drop(columns=["_feature_order"])
+        return df.reset_index(drop=True)
+
+    def _features_newer_than_cache(self) -> bool:
+        """Return True when features.xlsx is newer than this extractor cache."""
+        feature_path = os.path.join(self.input_dir, "features.xlsx")
+        cache_path = os.path.join(self.cache_dir, f"{self.sanitize_filename(self.filename)}.pkl")
+        return (
+            os.path.exists(feature_path)
+            and os.path.exists(cache_path)
+            and os.path.getmtime(feature_path) > os.path.getmtime(cache_path)
+        )
+
+    def _feature_signature(self, row: pd.Series) -> str:
+        """Hash the feature values that determine extraction for one row."""
+        payload = {
+            col: self._normalise_signature_value(row.get(col, np.nan))
+            for col in self._signature_columns()
+        }
+        encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def _signature_columns(self) -> list:
+        """Columns from features.xlsx that should invalidate extracted rows."""
+        columns = self.extraction_feature_columns or ["folder_file", "data_type"]
+        return [col for col in columns if col in self.feature_df.columns]
+
+    def _normalise_signature_value(self, value):
+        """Convert pandas/numpy values into stable JSON-friendly objects."""
+        if isinstance(value, (list, tuple, np.ndarray, pd.Series)):
+            return [self._normalise_signature_value(item) for item in list(value)]
+        if isinstance(value, pd.Timestamp):
+            return value.isoformat()
+        if isinstance(value, np.generic):
+            value = value.item()
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return value
     
     def process(self):
         raise NotImplementedError
@@ -1778,6 +2121,7 @@ class APP_IC(EphysData):
     
     filename: str = "APP_IC_df"
     data_type: str = 'APP_IC'
+    extraction_feature_columns: list = field(default_factory=lambda: ["folder_file", "data_type", "drug_in", "drug_out", "I_set"])
     amplitude_threshold: float = None
     noise_multiplier: float = 4
     min_amplitude_threshold: float = 0.1
@@ -1790,6 +2134,16 @@ class APP_IC(EphysData):
     onset_search_window_s: float = 0.080
     debug_local_baseline_plot: bool = False
     debug_plot: bool = False
+    validation_pre_sweep_window: int = 4
+    baseline_variability_threshold: float = 0.30
+    AP_burst_window_s: float = 1
+    AP_height_drift_threshold_mV: float = 20
+    AP_height_collapse_threshold_mV: float = 25
+    RMP_drift_threshold_mV: float = 20
+    terminal_depolarization_threshold_mV: float = -20
+    terminal_depolarization_min_s: float = 60
+    linear_trend_min_r2: float = 0.35
+    trend_edge_fraction: float = 0.20
 
     def __post_init__(self):
         self.initial_columns = ['folder_file', 'cell_id', 'data_type', 'I_set', 'treatment', 'drug_in', 'drug_out', 'cell_type', 'cell_subtype', 'region', 'hemisphere','sex']
@@ -1878,6 +2232,7 @@ class APP_IC(EphysData):
         Processing logic specific to APP data type."""
         V_array, I_array, command_array, stim_array, V_list = self.load_data(row['folder_file'])
         drug_in = 0 if pd.isna(row.get('drug_in', np.nan)) else int(row['drug_in'])
+        row['sweep_duration_s'] = V_array.shape[0] / self.sampling_rate
 
         V_protocol, protocol_array, protocol_source = select_protocol_array(
             V_array,
@@ -1946,7 +2301,8 @@ class APP_IC(EphysData):
 
         try:
             IF_IC_df = self.getCache("IF_IC_df")
-            FP_cell_id_PRE = IF_IC_df[(IF_IC_df['cell_id'] == row['cell_id']) & (IF_IC_df['treatment'] == 'PRE')]
+            pre_mask = IF_IC_df.apply(self.application_is_pre, axis=1)
+            FP_cell_id_PRE = IF_IC_df[(IF_IC_df['cell_id'] == row['cell_id']) & pre_mask]
             threshold_col = (
                 'IF_voltage_threshold_mV'
                 if 'IF_voltage_threshold_mV' in FP_cell_id_PRE.columns
@@ -1961,6 +2317,8 @@ class APP_IC(EphysData):
             )
             if not np.isfinite(cell_threshold):
                 cell_threshold = -45
+        except ValueError:
+            raise
         except Exception:
             cell_threshold = -45 #so when you -20 is 65 for cells without FP
 
@@ -1994,94 +2352,231 @@ class APP_IC(EphysData):
         invalid_reasons = []
 
         def add_invalid_reason(reason):
-            invalid_reasons.append(reason)
+            if reason not in invalid_reasons:
+                invalid_reasons.append(reason)
 
-        def check_variability(values, vairability_threshold=0.30): 
-            """Check if variability of values exceeds the given threshold."""
+        def check_variability(values, variability_threshold):
+            """Return whether values stay within a max-min fractional range."""
             values = pd.to_numeric(pd.Series(values, dtype="object"), errors="coerce").dropna().to_numpy()
             if len(values) <= 1:
-                return True
+                return True, np.nan, len(values)
             min_val = np.min(values)
             max_val = np.max(values)
             if min_val == 0:
-                return max_val == 0
-            # print(f" % var  {abs((max_val - min_val) / min_val)}")
-            return abs((max_val - min_val) / min_val) <= vairability_threshold
+                variability = 0 if max_val == 0 else np.inf
+            else:
+                variability = abs(max_val - min_val) / abs(min_val)
+            return variability <= variability_threshold, variability, len(values)
         
-        def group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=0.5):
+        def group_AP_burst_values(peak_locs_corr_all, sweep_indices_all, event_values_all, burst_window_seconds=0.5):
             """
-            Groups APs into bursts based on the time difference between them.
-            Condenses each burst into the maximum peak voltage and returns a list of these max values.
+            Groups APs into bursts and returns the max value in each burst.
+
+            This prevents APs inside the same burst from looking like a
+            progressive AP-height drop across the recording.
+
             - peak_locs_corr_all: AP peak locations within sweep
             - sweep_indices_all: sweep of each AP
-            - peak_voltages_all: List of AP peak voltages 
+            - event_values_all: AP peak height or other AP-level value
             - burst_window_seconds: The time window (in seconds) to consider APs as part of the same burst. Default is 0.5 seconds.
-            """            
+            """
             burst_window_samples = int(burst_window_seconds * self.sampling_rate)
             bursts = []
             current_burst = []
-            # Iterate over each AP's peak location, voltage, and sweep index
-            for i, (peak_loc, sweep_index) in enumerate(zip(peak_locs_corr_all, sweep_indices_all)):
+            for peak_loc, sweep_index, value in zip(peak_locs_corr_all, sweep_indices_all, event_values_all):
                 curr_time = (sweep_index * V_array.shape[0] + peak_loc) / self.sampling_rate
-                if not current_burst: #first AP
-                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
+                if not current_burst:
+                    current_burst.append((value, curr_time))
                     continue
-                prev_peak_loc, prev_voltage, prev_time = current_burst[-1]
+                _, prev_time = current_burst[-1]
                 time_diff = curr_time - prev_time
                 time_diff_samples = time_diff * self.sampling_rate
                 if time_diff_samples <= burst_window_samples:
-                    current_burst.append((peak_loc, peak_voltages_all[i], curr_time))
+                    current_burst.append((value, curr_time))
                 else:
-                    # Finalize the current burst and start a new one
-                    bursts.append(max(voltage for _, voltage, _ in current_burst))
-                    current_burst = [(peak_loc, peak_voltages_all[i], curr_time)]
+                    finite_values = [
+                        value for value, _ in current_burst
+                        if np.isfinite(pd.to_numeric(value, errors="coerce"))
+                    ]
+                    if finite_values:
+                        bursts.append(max(finite_values))
+                    current_burst = [(value, curr_time)]
             if current_burst:
-                bursts.append(max(voltage for _, voltage, _ in current_burst))
+                finite_values = [
+                    value for value, _ in current_burst
+                    if np.isfinite(pd.to_numeric(value, errors="coerce"))
+                ]
+                if finite_values:
+                    bursts.append(max(finite_values))
             return bursts
-        
-        def unidirectional_trend(values, threshold=20):
-            '''Check for a unidirectional trend that surpasses the threshold, if present returns False'''
+
+        def trend_or_shift(values, threshold, direction="either"):
+            """Flag robust whole-recording trends or early/late shifts."""
             values = pd.to_numeric(pd.Series(values, dtype="object"), errors="coerce").dropna().to_numpy()
-            if len(values) <= 1:
-                return True
-            value_diff = np.diff(values)
-            is_increasing = all(value_diff > 0)   # True if all differences are positive
-            is_decreasing = all(value_diff < 0)   # True if all differences are negative
-            total_change = abs(values[-1] - values[0])
-            if (is_increasing or is_decreasing) and total_change >= threshold:
-                return False  # data is not valid
-            return True  
+            n_values = len(values)
+            if n_values < 3:
+                return True, np.nan, np.nan, np.nan, n_values
+
+            x = np.arange(n_values, dtype=float)
+            slope, intercept = np.polyfit(x, values, 1)
+            fitted = slope * x + intercept
+            fitted_change = fitted[-1] - fitted[0]
+            ss_res = np.sum((values - fitted) ** 2)
+            ss_tot = np.sum((values - np.mean(values)) ** 2)
+            r_squared = np.nan if ss_tot == 0 else 1 - (ss_res / ss_tot)
+
+            edge_n = max(2, int(np.ceil(n_values * self.trend_edge_fraction)))
+            edge_n = max(1, min(edge_n, n_values // 2))
+            early_late_shift = np.nanmedian(values[-edge_n:]) - np.nanmedian(values[:edge_n])
+
+            def passes_threshold(change):
+                if not np.isfinite(change):
+                    return False
+                if direction == "decrease":
+                    return change <= -threshold
+                if direction == "increase":
+                    return change >= threshold
+                return abs(change) >= threshold
+
+            trend_failed = (
+                passes_threshold(fitted_change)
+                and np.isfinite(r_squared)
+                and r_squared >= self.linear_trend_min_r2
+            )
+            shift_failed = passes_threshold(early_late_shift)
+            return not (trend_failed or shift_failed), fitted_change, early_late_shift, r_squared, n_values
+
+        def terminal_collapse(values, threshold):
+            """Flag an early large AP height that does not recover by the end."""
+            values = pd.to_numeric(pd.Series(values, dtype="object"), errors="coerce").dropna().to_numpy()
+            n_values = len(values)
+            if n_values < 3:
+                return True, np.nan, np.nan, np.nan, n_values, np.nan
+
+            edge_n = max(2, int(np.ceil(n_values * self.trend_edge_fraction)))
+            edge_n = max(1, min(edge_n, n_values // 2))
+            early_max = np.nanmax(values[:edge_n])
+            terminal_median = np.nanmedian(values[-edge_n:])
+            collapse = early_max - terminal_median
+            return collapse < threshold, collapse, early_max, terminal_median, n_values, edge_n
+
+        def terminal_true_run(mask):
+            """Return length and start index of a True run ending at the final sweep."""
+            count = 0
+            for value in mask[::-1]:
+                if bool(value):
+                    count += 1
+                else:
+                    break
+            start = len(mask) - count if count else None
+            return count, start
         
         # APP FILE INVALIDATORS 
-        baseline = row['sweep_RMP_mV'][1:drug_in]
-        if check_variability(baseline, vairability_threshold=0.3)  == False: #assigns True if < vairability threshold
-            add_invalid_reason("baseline RMP variability > 30% before drug_in")
+        validation_window = (
+            int(self.validation_pre_sweep_window)
+            if self.validation_pre_sweep_window is not None
+            else None
+        )
+        baseline_start = max(0, drug_in - validation_window) if validation_window is not None else 1
+        baseline = row['sweep_RMP_mV'][baseline_start:drug_in]
+        baseline_valid, baseline_variability, baseline_n = check_variability(
+            baseline,
+            variability_threshold=self.baseline_variability_threshold,
+        )
+        if validation_window is not None and baseline_n < validation_window:
+            add_invalid_reason(
+                f"baseline_window: {baseline_n} finite PRE sweeps before drug_in "
+                f"< required {validation_window}"
+            )
+        if baseline_valid == False: #assigns True if < variability threshold
+            add_invalid_reason(
+                f"baseline_variability: RMP baseline variability "
+                f"{baseline_variability:.3f} > {self.baseline_variability_threshold:.3f} "
+                f"using sweeps {baseline_start}:{drug_in}"
+            )
 
-        if len(peak_voltages_all)>0: # if APs 
-            peak_voltage_values = pd.to_numeric(
-                pd.Series(peak_voltages_all, dtype="object"),
-                errors="coerce"
-            ).dropna()
-            mean_peak_voltage = peak_voltage_values.mean() if len(peak_voltage_values) > 0 else np.nan
-            if np.isfinite(mean_peak_voltage) and mean_peak_voltage < 15: #HARDCODE minimum 15 mV AP peak voltage
-                add_invalid_reason(f"mean AP peak voltage {mean_peak_voltage:.1f} mV < 15 mV")
+        if len(peak_heights_all)>0: # if APs
+            somatic_peak_locs = []
+            somatic_sweeps = []
+            somatic_heights = []
+            for i, (peak_voltage, threshold) in enumerate(zip(peak_voltages_all, v_thresholds_all)):
+                if (
+                    i < len(peak_locs_corr_all)
+                    and i < len(sweep_indices_all)
+                    and i < len(peak_heights_all)
+                    and not RA_condition(peak_voltage, threshold)
+                ):
+                    somatic_peak_locs.append(peak_locs_corr_all[i])
+                    somatic_sweeps.append(sweep_indices_all[i])
+                    somatic_heights.append(peak_heights_all[i])
+            AP_height_burst_max = group_AP_burst_values(
+                somatic_peak_locs,
+                somatic_sweeps,
+                somatic_heights,
+                burst_window_seconds=self.AP_burst_window_s,
+            )
+            ap_height_valid, ap_height_fit_change, ap_height_shift, ap_height_r2, ap_height_n = trend_or_shift(
+                AP_height_burst_max,
+                threshold=self.AP_height_drift_threshold_mV,
+                direction="decrease",
+            )
+            if ap_height_valid == False:
+                add_invalid_reason(
+                    f"AP_height_drift: somatic AP burst height decrease detected "
+                    f"(fit_change {ap_height_fit_change:.1f} mV, "
+                    f"early_late_shift {ap_height_shift:.1f} mV, "
+                    f"r2 {ap_height_r2:.2f}, n {ap_height_n}) "
+                    f">= {self.AP_height_drift_threshold_mV:g} mV"
+                )
+            ap_collapse_valid, ap_collapse, ap_early_max, ap_terminal_median, ap_collapse_n, ap_collapse_edge_n = terminal_collapse(
+                AP_height_burst_max,
+                threshold=self.AP_height_collapse_threshold_mV,
+            )
+            if ap_collapse_valid == False:
+                add_invalid_reason(
+                    f"AP_height_collapse: early max somatic AP burst height "
+                    f"{ap_early_max:.1f} mV - terminal median "
+                    f"{ap_terminal_median:.1f} mV = {ap_collapse:.1f} mV "
+                    f">= {self.AP_height_collapse_threshold_mV:g} mV "
+                    f"(edge_n {ap_collapse_edge_n}, n {ap_collapse_n})"
+                )
 
-            peak_voltage_burst_max = group_AP_bursts(peak_locs_corr_all, sweep_indices_all, peak_voltages_all, burst_window_seconds=1)
-            ap_burst_valid = unidirectional_trend(peak_voltage_burst_max, threshold=10)
-            if ap_burst_valid == False:
-                add_invalid_reason("unidirectional AP burst peak drift >= 10 mV")
-
-        rmp_valid = unidirectional_trend(row['sweep_RMP_mV'], threshold=20) #assigns True if # REFACTOR as not used in plotter
+        pre_rmp = row['sweep_RMP_mV'][:drug_in]
+        rmp_valid, rmp_fit_change, rmp_shift, rmp_r2, rmp_n = trend_or_shift(
+            pre_rmp,
+            threshold=self.RMP_drift_threshold_mV,
+            direction="either",
+        ) #assigns True if # REFACTOR as not used in plotter
         if  rmp_valid == False:
-            add_invalid_reason("unidirectional RMP drift >= 20 mV")
+            add_invalid_reason(
+                f"RMP_drift: PRE RMP trend/shift detected "
+                f"(fit_change {rmp_fit_change:.1f} mV, "
+                f"early_late_shift {rmp_shift:.1f} mV, "
+                f"r2 {rmp_r2:.2f}, n {rmp_n}) "
+                f">= {self.RMP_drift_threshold_mV:g} mV"
+            )
+
+        rmp_values = pd.to_numeric(pd.Series(row['sweep_RMP_mV'], dtype="object"), errors="coerce").to_numpy(dtype=float)
+        depol_mask = np.isfinite(rmp_values) & (rmp_values > self.terminal_depolarization_threshold_mV)
+        terminal_depol_sweeps, terminal_depol_start = terminal_true_run(depol_mask)
+        terminal_depol_s = terminal_depol_sweeps * row['sweep_duration_s']
+        if terminal_depol_s >= self.terminal_depolarization_min_s:
+            add_invalid_reason(
+                f"terminal_depolarization: RMP > {self.terminal_depolarization_threshold_mV:g} mV "
+                f"for terminal {terminal_depol_s:.1f} s "
+                f"(sweeps {terminal_depol_start}:{len(rmp_values)}) "
+                f">= {self.terminal_depolarization_min_s:g} s"
+            )
 
         if invalid_reasons:
             reason_text = "; ".join(dict.fromkeys(invalid_reasons))
             self._print_warning(row, f"APP_IC file marked invalid | reason: {reason_text}")
             row['valid'] = False
+            row['invalid_reason'] = reason_text
             row = self._append_warning(row, f"APP_IC invalid: {reason_text}")
         else:
             row['valid'] = None #could be True
+            row['invalid_reason'] = None
         return row
         
 class Hunter(EphysData):
@@ -2156,25 +2651,85 @@ class Ephys(EphysData):
 
     def __post_init__(self):
         Project.__post_init__(self) # initates project only to get self.project_type
-
-        if not self.isCached(self.filename):
-            self._ensure_project_dataframes()
-            
-        super().__post_init__() # initiales all parent calsses including EphysData which will run generate()
+        self.df = self.update()
         
     
+    def update(self) -> pd.DataFrame:
+        """
+        Bring cell_df up to date using current features.xlsx and extractor caches.
+        """
+        return self._update_cell_df(rerun_all=False)
+
+    def regenerate(self) -> pd.DataFrame:
+        """Rebuild cell_df from the current extractor dataframes."""
+        return self._update_cell_df(rerun_all=True)
+
     def generate(self, force: bool = False) -> pd.DataFrame:
         """
-        Builds cell_df with each row a cell_id, Rs_pct_change, keeps a record of the folder_files used in column f"{data_type}_folder_files".
+        Backwards-compatible wrapper.
+
+        Prefer ``update()`` for normal use and ``regenerate()`` to rebuild
+        cell_df. This does not force raw extractor reruns.
         """
-        if not force and self.isCached(self.filename):
+        if force:
+            return self.regenerate()
+        return self.update()
+
+    def _update_cell_df(self, rerun_all: bool = False) -> pd.DataFrame:
+        """Internal cell_df cache updater."""
+        self._ensure_project_dataframes()
+
+        if (
+            not rerun_all
+            and self.isCached(self.filename)
+            and not self._features_newer_than_cache()
+            and not self._extractor_cache_newer_than_cell_df()
+        ):
             return self.add_missing_cell_factors(self.getCache(self.filename))
 
-        self._ensure_project_dataframes()
         if self.project_type == 'application':
             return self.generate_application_cell_df()
         elif self.project_type == 'intrinsic_properties':
             return self.generate_intrinsic_cell_df()
+
+    def _extractor_cache_newer_than_cell_df(self) -> bool:
+        """Return True when extractor caches have changed since cell_df was built."""
+        cell_cache_path = os.path.join(self.cache_dir, f"{self.sanitize_filename(self.filename)}.pkl")
+        if not os.path.exists(cell_cache_path):
+            return True
+
+        cell_cache_mtime = os.path.getmtime(cell_cache_path)
+        for cache_name in self._extractor_cache_names():
+            cache_path = os.path.join(self.cache_dir, f"{self.sanitize_filename(cache_name)}.pkl")
+            if os.path.exists(cache_path) and os.path.getmtime(cache_path) > cell_cache_mtime:
+                return True
+        return False
+
+    def _extractor_cache_names(self) -> list:
+        """Extractor cache names used by this project type."""
+        feature_data_types = (
+            set(self.feature_df["data_type"].dropna())
+            if "data_type" in self.feature_df.columns
+            else set()
+        )
+        cache_names_by_type = {
+            "st_VC": "st_VC_df",
+            "IV_VC": "IV_VC_df",
+            "ramp_IC": "ramp_IC_df",
+            "IF_IC": "IF_IC_df",
+            "spont_IC": "spont_IC_df",
+            "PPR_VC": "PPR_VC_df",
+            "APP_IC": "APP_IC_df",
+        }
+
+        if self.project_type == "application":
+            data_types = ["IF_IC", "APP_IC"]
+            if "st_VC" in feature_data_types:
+                data_types.append("st_VC")
+        else:
+            data_types = ["st_VC", "IV_VC", "ramp_IC", "IF_IC", "spont_IC", "PPR_VC"]
+
+        return [cache_names_by_type[data_type] for data_type in data_types]
 
     def generate_intrinsic_cell_df(self):
         df = self.feature_df.copy()
@@ -2311,10 +2866,10 @@ class Ephys(EphysData):
         def _extract_APP_attributes(group):
             app_rows = group[group['data_type'] == 'APP_IC']
             if app_rows.empty:
-                non_pre_treatments = group.loc[group['treatment'] != 'PRE', 'treatment'].dropna()
+                treatments = group['treatment'].dropna()
                 return pd.Series({
                     'I_set': np.nan,
-                    'treatment': non_pre_treatments.iloc[0] if not non_pre_treatments.empty else np.nan,
+                    'treatment': treatments.iloc[0] if not treatments.empty else np.nan,
                 })
 
             app_row = app_rows.iloc[0]
@@ -2340,8 +2895,9 @@ class Ephys(EphysData):
             if "R_series" not in cell_fp_df.columns:
                 return pd.Series({'Rs_pct_change': None, self.folder_files_col("IF_IC"): None})
 
-            pre_values = cell_fp_df[cell_fp_df['treatment'] == 'PRE'][['R_series', 'folder_file']].copy()
-            non_pre_values = cell_fp_df[cell_fp_df['treatment'] != 'PRE'][['R_series', 'folder_file']].copy()
+            pre_mask = cell_fp_df.apply(self.application_is_pre, axis=1)
+            pre_values = cell_fp_df[pre_mask][['R_series', 'folder_file']].copy()
+            non_pre_values = cell_fp_df[~pre_mask][['R_series', 'folder_file']].copy()
             pre_values['R_series'] = pd.to_numeric(pre_values['R_series'], errors='coerce')
             non_pre_values['R_series'] = pd.to_numeric(non_pre_values['R_series'], errors='coerce')
             
@@ -2395,8 +2951,8 @@ class Ephys(EphysData):
                 ]
                 IF_IC_feature_cols = [col for col in IF_IC_feature_cols if col in cell_fp_df.columns]
                 
-                pre_df = cell_fp_df[cell_fp_df['treatment'] == 'PRE'].copy()
-                non_pre_df = cell_fp_df[cell_fp_df['treatment'] != 'PRE'].copy()
+                pre_df = cell_fp_df[pre_mask].copy()
+                non_pre_df = cell_fp_df[~pre_mask].copy()
                 
                 # Only keep rows that match the selected best R_series
                 pre_df = pre_df[pre_df['R_series'].isin(best_pre_pair)]
